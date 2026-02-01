@@ -365,6 +365,8 @@ pub fn build(b: *std.Build) void {
     integration_mod.addImport("git_diff", git_diff_mod);
     integration_mod.addImport("git_log", git_log_mod);
     integration_mod.addImport("git_show", git_show_mod);
+    integration_mod.addImport("git_commit", git_commit_mod);
+    integration_mod.addImport("git_branch", git_branch_mod);
     integration_mod.addAnonymousImport("fixture_git_status_dirty", .{
         .root_source_file = b.path("tests/fixtures/git_status_dirty.txt"),
     });
@@ -409,6 +411,104 @@ pub fn build(b: *std.Build) void {
     });
     integration_mod.addAnonymousImport("fixture_git_show_large", .{
         .root_source_file = b.path("tests/fixtures/large/git_show.txt"),
+    });
+    // git_commit fixtures
+    integration_mod.addAnonymousImport("fixture_git_commit_simple", .{
+        .root_source_file = b.path("tests/fixtures/git_commit_simple.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_commit_multifile", .{
+        .root_source_file = b.path("tests/fixtures/git_commit_multifile.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_commit_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_commit.txt"),
+    });
+    // git_branch fixtures
+    integration_mod.addAnonymousImport("fixture_git_branch_list", .{
+        .root_source_file = b.path("tests/fixtures/git_branch_list.txt"),
+    });
+    // git_add fixtures
+    integration_mod.addAnonymousImport("fixture_git_add_error_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_add_error.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_add_error_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_add_error.stderr.txt"),
+    });
+    // git_push fixtures
+    integration_mod.addAnonymousImport("fixture_git_push_simple_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_push_simple.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_push_simple_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_push_simple.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_push_large_stdout", .{
+        .root_source_file = b.path("tests/fixtures/large/git_push.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_push_large_stderr", .{
+        .root_source_file = b.path("tests/fixtures/large/git_push.stderr.txt"),
+    });
+    // git_pull fixtures
+    integration_mod.addAnonymousImport("fixture_git_pull_ff_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_ff.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_pull_ff_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_ff.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_pull_uptodate_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_uptodate.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_pull_uptodate_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_uptodate.stderr.txt"),
+    });
+    // git_fetch fixtures
+    integration_mod.addAnonymousImport("fixture_git_fetch_simple_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_fetch_simple.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_fetch_simple_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_fetch_simple.stderr.txt"),
+    });
+    // git_merge fixtures
+    integration_mod.addAnonymousImport("fixture_git_merge_ff", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_ff.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_merge_commit", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_commit.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_merge_conflict_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_conflict.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_merge_conflict_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_conflict.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_merge_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_merge.txt"),
+    });
+    // git_rebase fixtures
+    integration_mod.addAnonymousImport("fixture_git_rebase_simple", .{
+        .root_source_file = b.path("tests/fixtures/git_rebase_simple.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_rebase_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_rebase.txt"),
+    });
+    // git_checkout fixtures
+    integration_mod.addAnonymousImport("fixture_git_checkout_switch_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_checkout_switch.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_checkout_switch_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_checkout_switch.stderr.txt"),
+    });
+    // git_stash fixtures
+    integration_mod.addAnonymousImport("fixture_git_stash_save", .{
+        .root_source_file = b.path("tests/fixtures/git_stash_save.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_stash_list", .{
+        .root_source_file = b.path("tests/fixtures/git_stash_list.txt"),
+    });
+    // git_blame fixtures
+    integration_mod.addAnonymousImport("fixture_git_blame_simple", .{
+        .root_source_file = b.path("tests/fixtures/git_blame_simple.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_blame_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_blame.txt"),
     });
 
     const integration_tests = b.addTest(.{ .root_module = integration_mod });

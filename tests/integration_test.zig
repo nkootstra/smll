@@ -4,6 +4,8 @@ const git_status = @import("git_status");
 const git_diff = @import("git_diff");
 const git_log = @import("git_log");
 const git_show = @import("git_show");
+const git_commit = @import("git_commit");
+const git_branch = @import("git_branch");
 
 const exe_path: []const u8 = build_options.smll_exe_path;
 
@@ -21,6 +23,46 @@ const status_large_fixture = @embedFile("fixture_git_status_large");
 const diff_large_fixture = @embedFile("fixture_git_diff_large");
 const log_large_fixture = @embedFile("fixture_git_log_large");
 const show_large_fixture = @embedFile("fixture_git_show_large");
+// git_commit fixtures (pipe-matching)
+const commit_simple_fixture = @embedFile("fixture_git_commit_simple");
+const commit_multifile_fixture = @embedFile("fixture_git_commit_multifile");
+const commit_large_fixture = @embedFile("fixture_git_commit_large");
+// git_branch fixtures (pipe-matching)
+const branch_list_fixture = @embedFile("fixture_git_branch_list");
+// git_add fixtures (argv-only)
+const add_error_stdout_fixture = @embedFile("fixture_git_add_error_stdout");
+const add_error_stderr_fixture = @embedFile("fixture_git_add_error_stderr");
+// git_push fixtures (argv-only)
+const push_simple_stdout_fixture = @embedFile("fixture_git_push_simple_stdout");
+const push_simple_stderr_fixture = @embedFile("fixture_git_push_simple_stderr");
+const push_large_stdout_fixture = @embedFile("fixture_git_push_large_stdout");
+const push_large_stderr_fixture = @embedFile("fixture_git_push_large_stderr");
+// git_pull fixtures (argv-only)
+const pull_ff_stdout_fixture = @embedFile("fixture_git_pull_ff_stdout");
+const pull_ff_stderr_fixture = @embedFile("fixture_git_pull_ff_stderr");
+const pull_uptodate_stdout_fixture = @embedFile("fixture_git_pull_uptodate_stdout");
+const pull_uptodate_stderr_fixture = @embedFile("fixture_git_pull_uptodate_stderr");
+// git_fetch fixtures (argv-only)
+const fetch_simple_stdout_fixture = @embedFile("fixture_git_fetch_simple_stdout");
+const fetch_simple_stderr_fixture = @embedFile("fixture_git_fetch_simple_stderr");
+// git_merge fixtures (argv-only)
+const merge_ff_fixture = @embedFile("fixture_git_merge_ff");
+const merge_commit_fixture = @embedFile("fixture_git_merge_commit");
+const merge_conflict_stdout_fixture = @embedFile("fixture_git_merge_conflict_stdout");
+const merge_conflict_stderr_fixture = @embedFile("fixture_git_merge_conflict_stderr");
+const merge_large_fixture = @embedFile("fixture_git_merge_large");
+// git_rebase fixtures (argv-only)
+const rebase_simple_fixture = @embedFile("fixture_git_rebase_simple");
+const rebase_large_fixture = @embedFile("fixture_git_rebase_large");
+// git_checkout fixtures (argv-only)
+const checkout_switch_stdout_fixture = @embedFile("fixture_git_checkout_switch_stdout");
+const checkout_switch_stderr_fixture = @embedFile("fixture_git_checkout_switch_stderr");
+// git_stash fixtures (argv-only)
+const stash_save_fixture = @embedFile("fixture_git_stash_save");
+const stash_list_fixture = @embedFile("fixture_git_stash_list");
+// git_blame fixtures (argv-only)
+const blame_simple_fixture = @embedFile("fixture_git_blame_simple");
+const blame_large_fixture = @embedFile("fixture_git_blame_large");
 
 const RunResult = struct {
     stdout: []u8,
@@ -908,6 +950,219 @@ test "dispatch: non-git outer command bypasses formatter (argv guard)" {
 
     // Passthrough: raw dirty_fixture bytes must come through unchanged.
     try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 9: git_commit byte-equivalence tests (pipe-matching filter).
+// ---------------------------------------------------------------------------
+
+fn expectedCommitOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try git_commit.apply(allocator, input, &.{}, &out.writer);
+    return allocator.dupe(u8, out.written());
+}
+
+test "git_commit simple fixture: smll output == git_commit.apply byte-for-byte" {
+    const allocator = std.testing.allocator;
+    const expected = try expectedCommitOutput(allocator, commit_simple_fixture);
+    defer allocator.free(expected);
+
+    var result = try runSmll(allocator, commit_simple_fixture);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(expected, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_commit multifile fixture: smll output == git_commit.apply byte-for-byte" {
+    const allocator = std.testing.allocator;
+    const expected = try expectedCommitOutput(allocator, commit_multifile_fixture);
+    defer allocator.free(expected);
+
+    var result = try runSmll(allocator, commit_multifile_fixture);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(expected, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_commit large fixture: smll output == git_commit.apply byte-for-byte" {
+    const allocator = std.testing.allocator;
+    const expected = try expectedCommitOutput(allocator, commit_large_fixture);
+    defer allocator.free(expected);
+
+    var result = try runSmll(allocator, commit_large_fixture);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(expected, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 9: git_branch byte-equivalence tests (pipe-matching filter).
+// ---------------------------------------------------------------------------
+
+fn expectedBranchOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try git_branch.apply(allocator, input, &.{}, &out.writer);
+    return allocator.dupe(u8, out.written());
+}
+
+test "git_branch list fixture: smll output == git_branch.apply byte-for-byte" {
+    const allocator = std.testing.allocator;
+    const expected = try expectedBranchOutput(allocator, branch_list_fixture);
+    defer allocator.free(expected);
+
+    var result = try runSmll(allocator, branch_list_fixture);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(expected, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 9: argv-only filter pipe-mode passthrough tests.
+// These filters have matches() == false, so piping their fixture content into
+// smll hits fail-open passthrough — output equals input byte-for-byte.
+// ---------------------------------------------------------------------------
+
+test "git_add small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    // Use stderr fixture (non-empty) as representative content.
+    var result = try runSmll(allocator, add_error_stderr_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, add_error_stderr_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_push small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, push_simple_stdout_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, push_simple_stdout_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_push large fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, push_large_stdout_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, push_large_stdout_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_pull small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, pull_ff_stdout_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, pull_ff_stdout_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_pull uptodate fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, pull_uptodate_stdout_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, pull_uptodate_stdout_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_fetch small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    // fetch stdout is empty; use stderr as representative non-empty content.
+    var result = try runSmll(allocator, fetch_simple_stderr_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, fetch_simple_stderr_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_merge small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, merge_ff_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, merge_ff_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_merge large fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, merge_large_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, merge_large_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_rebase small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, rebase_simple_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, rebase_simple_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_rebase large fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, rebase_large_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, rebase_large_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_checkout small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    // checkout stdout is empty; use stderr as representative non-empty content.
+    var result = try runSmll(allocator, checkout_switch_stderr_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, checkout_switch_stderr_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_stash small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, stash_save_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, stash_save_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_stash list fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, stash_list_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, stash_list_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_blame small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, blame_simple_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, blame_simple_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "git_blame large fixture: pipe-mode passes through unchanged (argv-only filter)" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, blame_large_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, blame_large_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+// ---------------------------------------------------------------------------
+// Unit 9: fail-open regression — non-git outer command passes through unchanged.
+// Use `smll /bin/echo hello` as a deterministic non-git wrapper test.
+// argv[1] = "/bin/echo" != "git" so the argv guard forces passthrough.
+// ---------------------------------------------------------------------------
+
+test "fail-open regression: non-git outer command (echo) passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var result = try runSmllWrapper(allocator, &.{ "/bin/echo", "hello" });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings("hello\n", result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
 }
 
 test "broken pipe mid-stream returns non-zero exit without panic" {
