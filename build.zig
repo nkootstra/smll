@@ -79,10 +79,41 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/git_show_body.txt"),
     });
 
+    const git_add_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_add.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_add_mod.addImport("util", util_mod);
+    git_add_mod.addAnonymousImport("fixture_git_add_error_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_add_error.stdout.txt"),
+    });
+    git_add_mod.addAnonymousImport("fixture_git_add_error_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_add_error.stderr.txt"),
+    });
+
+    const git_commit_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_commit.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_commit_mod.addImport("util", util_mod);
+    git_commit_mod.addAnonymousImport("fixture_git_commit_simple", .{
+        .root_source_file = b.path("tests/fixtures/git_commit_simple.txt"),
+    });
+    git_commit_mod.addAnonymousImport("fixture_git_commit_multifile", .{
+        .root_source_file = b.path("tests/fixtures/git_commit_multifile.txt"),
+    });
+    git_commit_mod.addAnonymousImport("fixture_git_commit_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_commit.txt"),
+    });
+
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
     exe_mod.addImport("git_show", git_show_mod);
+    exe_mod.addImport("git_add", git_add_mod);
+    exe_mod.addImport("git_commit", git_commit_mod);
 
     const exe = b.addExecutable(.{
         .name = "smll",
@@ -105,6 +136,8 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_diff", git_diff_mod);
     release_mod.addImport("git_log", git_log_mod);
     release_mod.addImport("git_show", git_show_mod);
+    release_mod.addImport("git_add", git_add_mod);
+    release_mod.addImport("git_commit", git_commit_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -133,6 +166,12 @@ pub fn build(b: *std.Build) void {
 
     const git_show_tests = b.addTest(.{ .root_module = git_show_mod });
     const run_git_show_tests = b.addRunArtifact(git_show_tests);
+
+    const git_add_tests = b.addTest(.{ .root_module = git_add_mod });
+    const run_git_add_tests = b.addRunArtifact(git_add_tests);
+
+    const git_commit_tests = b.addTest(.{ .root_module = git_commit_mod });
+    const run_git_commit_tests = b.addRunArtifact(git_commit_tests);
 
     const opts = b.addOptions();
     opts.addOptionPath("smll_exe_path", exe.getEmittedBin());
@@ -204,5 +243,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_diff_tests.step);
     test_step.dependOn(&run_git_log_tests.step);
     test_step.dependOn(&run_git_show_tests.step);
+    test_step.dependOn(&run_git_add_tests.step);
+    test_step.dependOn(&run_git_commit_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }

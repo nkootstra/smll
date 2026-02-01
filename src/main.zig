@@ -4,8 +4,10 @@ const git_status = @import("git_status");
 const git_diff = @import("git_diff");
 const git_log = @import("git_log");
 const git_show = @import("git_show");
+const git_add = @import("git_add");
+const git_commit = @import("git_commit");
 
-const Filters = .{ git_status, git_show, git_log, git_diff };
+const Filters = .{ git_status, git_show, git_log, git_diff, git_commit };
 
 test {
     _ = pipeline;
@@ -163,8 +165,22 @@ fn runWrapper(
                 return 1;
             };
         },
-        // Phase 2 formatters (Units 4-7) will replace these passthrough arms.
-        .add, .commit, .push, .pull, .fetch, .merge, .rebase, .stash, .checkout, .branch, .blame, .unknown => {
+        .add => {
+            git_add.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .commit => {
+            git_commit.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        // Phase 2 formatters (Units 5-7) will replace these passthrough arms.
+        .push, .pull, .fetch, .merge, .rebase, .stash, .checkout, .branch, .blame, .unknown => {
             try writer.writeAll(stdout_slice);
             try std.fs.File.stderr().writeAll(stderr_slice);
         },
