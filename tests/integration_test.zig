@@ -171,6 +171,76 @@ test "dirty fixture: smll output is strictly smaller than input" {
     try std.testing.expect(result.stdout.len < dirty_fixture.len);
 }
 
+// v0.4 format assertions for status fixtures.
+test "dirty fixture: v0.4 format — branch sigil, path sigils, no headers" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, dirty_fixture);
+    defer result.deinit(allocator);
+    // Branch line
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
+    // Unstaged modified paths
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "M src/main.zig\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "M src/pipeline.zig\n") != null);
+    // Untracked paths
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "? src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "? tests/fixtures/git_status_dirty.txt\n") != null);
+    // No section headers
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Changes not staged") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Untracked files:") == null);
+    // No hint lines
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "(use \"git") == null);
+}
+
+test "clean fixture: v0.4 format — branch line only" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, clean_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings("# main\n", result.stdout);
+}
+
+test "conflict fixture: v0.4 format — S sigil staged, UU sigil unmerged" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, conflict_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "S src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "UU src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "? tests/fixtures/git_status_conflict.txt\n") != null);
+}
+
+test "dirty fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, dirty_fixture);
+    defer result.deinit(allocator);
+    const target = (dirty_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "conflict fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, conflict_fixture);
+    defer result.deinit(allocator);
+    const target = (conflict_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "pipe-mode idempotence: v0.4 status output piped into smll again is unchanged" {
+    // v0.4 output starts with "# main\n" — does NOT match git_status.matches
+    // ("On branch" prefix required). So smll passes it through unchanged.
+    const allocator = std.testing.allocator;
+
+    // First pass: dirty_fixture → v0.4 output.
+    var first = try runSmll(allocator, dirty_fixture);
+    defer first.deinit(allocator);
+
+    // Second pass: v0.4 output → should be identical (passthrough).
+    var second = try runSmll(allocator, first.stdout);
+    defer second.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+}
+
 fn expectedDiffOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -407,6 +477,29 @@ test "large status fixture: smll output == git_status.apply byte-for-byte" {
 
     try std.testing.expectEqualStrings(expected, result.stdout);
     try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+test "large status fixture: v0.4 format — branch sigil, A sigils for staged new files" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, status_large_fixture);
+    defer result.deinit(allocator);
+    // Branch line
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
+    // Staged new files use A sigil
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "A src/components/comp_01.rs\n") != null);
+    // Unstaged modified uses M sigil
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "M src/mod_01.rs\n") != null);
+    // No section headers
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Changes to be committed:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Changes not staged") == null);
+}
+
+test "large status fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, status_large_fixture);
+    defer result.deinit(allocator);
+    const target = (status_large_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
 }
 
 test "large diff fixture: smll output == git_diff.apply byte-for-byte" {

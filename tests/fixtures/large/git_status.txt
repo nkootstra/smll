@@ -1,4 +1,127 @@
 On branch main
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   src/components/comp_01.rs
+	new file:   src/components/comp_02.rs
+	new file:   src/components/comp_03.rs
+	new file:   src/components/comp_04.rs
+	new file:   src/components/comp_05.rs
+	new file:   src/components/comp_06.rs
+	new file:   src/components/comp_07.rs
+	new file:   src/components/comp_08.rs
+	new file:   src/components/comp_09.rs
+	new file:   src/components/comp_10.rs
+	new file:   src/components/comp_11.rs
+	new file:   src/components/comp_12.rs
+	new file:   src/components/comp_13.rs
+	new file:   src/components/comp_14.rs
+	new file:   src/components/comp_15.rs
+	new file:   src/components/comp_16.rs
+	new file:   src/components/comp_17.rs
+	new file:   src/components/comp_18.rs
+	new file:   src/components/comp_19.rs
+	new file:   src/components/comp_20.rs
+	new file:   src/components/comp_21.rs
+	new file:   src/components/comp_22.rs
+	new file:   src/components/comp_23.rs
+	new file:   src/components/comp_24.rs
+	new file:   src/components/comp_25.rs
+	new file:   src/components/comp_26.rs
+	new file:   src/components/comp_27.rs
+	new file:   src/components/comp_28.rs
+	new file:   src/components/comp_29.rs
+	new file:   src/components/comp_30.rs
+	new file:   src/components/comp_31.rs
+	new file:   src/components/comp_32.rs
+	new file:   src/components/comp_33.rs
+	new file:   src/components/comp_34.rs
+	new file:   src/components/comp_35.rs
+	new file:   src/components/comp_36.rs
+	new file:   src/components/comp_37.rs
+	new file:   src/components/comp_38.rs
+	new file:   src/components/comp_39.rs
+	new file:   src/components/comp_40.rs
+	new file:   src/components/comp_41.rs
+	new file:   src/components/comp_42.rs
+	new file:   src/components/comp_43.rs
+	new file:   src/components/comp_44.rs
+	new file:   src/components/comp_45.rs
+	new file:   src/components/comp_46.rs
+	new file:   src/components/comp_47.rs
+	new file:   src/components/comp_48.rs
+	new file:   src/components/comp_49.rs
+	new file:   src/components/comp_50.rs
+	new file:   src/services/svc_01.rs
+	new file:   src/services/svc_02.rs
+	new file:   src/services/svc_03.rs
+	new file:   src/services/svc_04.rs
+	new file:   src/services/svc_05.rs
+	new file:   src/services/svc_06.rs
+	new file:   src/services/svc_07.rs
+	new file:   src/services/svc_08.rs
+	new file:   src/services/svc_09.rs
+	new file:   src/services/svc_10.rs
+	new file:   src/services/svc_11.rs
+	new file:   src/services/svc_12.rs
+	new file:   src/services/svc_13.rs
+	new file:   src/services/svc_14.rs
+	new file:   src/services/svc_15.rs
+	new file:   src/services/svc_16.rs
+	new file:   src/services/svc_17.rs
+	new file:   src/services/svc_18.rs
+	new file:   src/services/svc_19.rs
+	new file:   src/services/svc_20.rs
+	new file:   src/services/svc_21.rs
+	new file:   src/services/svc_22.rs
+	new file:   src/services/svc_23.rs
+	new file:   src/services/svc_24.rs
+	new file:   src/services/svc_25.rs
+	new file:   src/services/svc_26.rs
+	new file:   src/services/svc_27.rs
+	new file:   src/services/svc_28.rs
+	new file:   src/services/svc_29.rs
+	new file:   src/services/svc_30.rs
+	new file:   src/services/svc_31.rs
+	new file:   src/services/svc_32.rs
+	new file:   src/services/svc_33.rs
+	new file:   src/services/svc_34.rs
+	new file:   src/services/svc_35.rs
+	new file:   src/services/svc_36.rs
+	new file:   src/services/svc_37.rs
+	new file:   src/services/svc_38.rs
+	new file:   src/services/svc_39.rs
+	new file:   src/services/svc_40.rs
+	new file:   src/utils/util_01.rs
+	new file:   src/utils/util_02.rs
+	new file:   src/utils/util_03.rs
+	new file:   src/utils/util_04.rs
+	new file:   src/utils/util_05.rs
+	new file:   src/utils/util_06.rs
+	new file:   src/utils/util_07.rs
+	new file:   src/utils/util_08.rs
+	new file:   src/utils/util_09.rs
+	new file:   src/utils/util_10.rs
+	new file:   src/utils/util_11.rs
+	new file:   src/utils/util_12.rs
+	new file:   src/utils/util_13.rs
+	new file:   src/utils/util_14.rs
+	new file:   src/utils/util_15.rs
+	new file:   src/utils/util_16.rs
+	new file:   src/utils/util_17.rs
+	new file:   src/utils/util_18.rs
+	new file:   src/utils/util_19.rs
+	new file:   src/utils/util_20.rs
+	new file:   src/utils/util_21.rs
+	new file:   src/utils/util_22.rs
+	new file:   src/utils/util_23.rs
+	new file:   src/utils/util_24.rs
+	new file:   src/utils/util_25.rs
+	new file:   src/utils/util_26.rs
+	new file:   src/utils/util_27.rs
+	new file:   src/utils/util_28.rs
+	new file:   src/utils/util_29.rs
+	new file:   src/utils/util_30.rs
+
 Changes not staged for commit:
   (use "git add <file>..." to update what will be committed)
   (use "git restore <file>..." to discard changes in working directory)
@@ -17,605 +140,6 @@ Changes not staged for commit:
 
 Untracked files:
   (use "git add <file>..." to include in what will be committed)
-	configs/staging/slot_001.cfg
-	configs/staging/slot_002.cfg
-	configs/staging/slot_003.cfg
-	configs/staging/slot_004.cfg
-	configs/staging/slot_005.cfg
-	configs/staging/slot_006.cfg
-	configs/staging/slot_007.cfg
-	configs/staging/slot_008.cfg
-	configs/staging/slot_009.cfg
-	configs/staging/slot_010.cfg
-	configs/staging/slot_011.cfg
-	configs/staging/slot_012.cfg
-	configs/staging/slot_013.cfg
-	configs/staging/slot_014.cfg
-	configs/staging/slot_015.cfg
-	configs/staging/slot_016.cfg
-	configs/staging/slot_017.cfg
-	configs/staging/slot_018.cfg
-	configs/staging/slot_019.cfg
-	configs/staging/slot_020.cfg
-	configs/staging/slot_021.cfg
-	configs/staging/slot_022.cfg
-	configs/staging/slot_023.cfg
-	configs/staging/slot_024.cfg
-	configs/staging/slot_025.cfg
-	configs/staging/slot_026.cfg
-	configs/staging/slot_027.cfg
-	configs/staging/slot_028.cfg
-	configs/staging/slot_029.cfg
-	configs/staging/slot_030.cfg
-	configs/staging/slot_031.cfg
-	configs/staging/slot_032.cfg
-	configs/staging/slot_033.cfg
-	configs/staging/slot_034.cfg
-	configs/staging/slot_035.cfg
-	configs/staging/slot_036.cfg
-	configs/staging/slot_037.cfg
-	configs/staging/slot_038.cfg
-	configs/staging/slot_039.cfg
-	configs/staging/slot_040.cfg
-	configs/staging/slot_041.cfg
-	configs/staging/slot_042.cfg
-	configs/staging/slot_043.cfg
-	configs/staging/slot_044.cfg
-	configs/staging/slot_045.cfg
-	configs/staging/slot_046.cfg
-	configs/staging/slot_047.cfg
-	configs/staging/slot_048.cfg
-	configs/staging/slot_049.cfg
-	configs/staging/slot_050.cfg
-	configs/staging/slot_051.cfg
-	configs/staging/slot_052.cfg
-	configs/staging/slot_053.cfg
-	configs/staging/slot_054.cfg
-	configs/staging/slot_055.cfg
-	configs/staging/slot_056.cfg
-	configs/staging/slot_057.cfg
-	configs/staging/slot_058.cfg
-	configs/staging/slot_059.cfg
-	configs/staging/slot_060.cfg
-	configs/staging/slot_061.cfg
-	configs/staging/slot_062.cfg
-	configs/staging/slot_063.cfg
-	configs/staging/slot_064.cfg
-	configs/staging/slot_065.cfg
-	configs/staging/slot_066.cfg
-	configs/staging/slot_067.cfg
-	configs/staging/slot_068.cfg
-	configs/staging/slot_069.cfg
-	configs/staging/slot_070.cfg
-	configs/staging/slot_071.cfg
-	configs/staging/slot_072.cfg
-	configs/staging/slot_073.cfg
-	configs/staging/slot_074.cfg
-	configs/staging/slot_075.cfg
-	configs/staging/slot_076.cfg
-	configs/staging/slot_077.cfg
-	configs/staging/slot_078.cfg
-	configs/staging/slot_079.cfg
-	configs/staging/slot_080.cfg
-	configs/staging/slot_081.cfg
-	configs/staging/slot_082.cfg
-	configs/staging/slot_083.cfg
-	configs/staging/slot_084.cfg
-	configs/staging/slot_085.cfg
-	configs/staging/slot_086.cfg
-	configs/staging/slot_087.cfg
-	configs/staging/slot_088.cfg
-	configs/staging/slot_089.cfg
-	configs/staging/slot_090.cfg
-	configs/staging/slot_091.cfg
-	configs/staging/slot_092.cfg
-	configs/staging/slot_093.cfg
-	configs/staging/slot_094.cfg
-	configs/staging/slot_095.cfg
-	configs/staging/slot_096.cfg
-	configs/staging/slot_097.cfg
-	configs/staging/slot_098.cfg
-	configs/staging/slot_099.cfg
-	configs/staging/slot_100.cfg
-	configs/staging/slot_101.cfg
-	configs/staging/slot_102.cfg
-	configs/staging/slot_103.cfg
-	configs/staging/slot_104.cfg
-	configs/staging/slot_105.cfg
-	configs/staging/slot_106.cfg
-	configs/staging/slot_107.cfg
-	configs/staging/slot_108.cfg
-	configs/staging/slot_109.cfg
-	configs/staging/slot_110.cfg
-	configs/staging/slot_111.cfg
-	configs/staging/slot_112.cfg
-	configs/staging/slot_113.cfg
-	configs/staging/slot_114.cfg
-	configs/staging/slot_115.cfg
-	configs/staging/slot_116.cfg
-	configs/staging/slot_117.cfg
-	configs/staging/slot_118.cfg
-	configs/staging/slot_119.cfg
-	configs/staging/slot_120.cfg
-	configs/staging/slot_121.cfg
-	configs/staging/slot_122.cfg
-	configs/staging/slot_123.cfg
-	configs/staging/slot_124.cfg
-	configs/staging/slot_125.cfg
-	configs/staging/slot_126.cfg
-	configs/staging/slot_127.cfg
-	configs/staging/slot_128.cfg
-	configs/staging/slot_129.cfg
-	configs/staging/slot_130.cfg
-	configs/staging/slot_131.cfg
-	configs/staging/slot_132.cfg
-	configs/staging/slot_133.cfg
-	configs/staging/slot_134.cfg
-	configs/staging/slot_135.cfg
-	configs/staging/slot_136.cfg
-	configs/staging/slot_137.cfg
-	configs/staging/slot_138.cfg
-	configs/staging/slot_139.cfg
-	configs/staging/slot_140.cfg
-	configs/staging/slot_141.cfg
-	configs/staging/slot_142.cfg
-	configs/staging/slot_143.cfg
-	configs/staging/slot_144.cfg
-	configs/staging/slot_145.cfg
-	configs/staging/slot_146.cfg
-	configs/staging/slot_147.cfg
-	configs/staging/slot_148.cfg
-	configs/staging/slot_149.cfg
-	configs/staging/slot_150.cfg
-	configs/staging/slot_151.cfg
-	configs/staging/slot_152.cfg
-	configs/staging/slot_153.cfg
-	configs/staging/slot_154.cfg
-	configs/staging/slot_155.cfg
-	configs/staging/slot_156.cfg
-	configs/staging/slot_157.cfg
-	configs/staging/slot_158.cfg
-	configs/staging/slot_159.cfg
-	configs/staging/slot_160.cfg
-	configs/staging/slot_161.cfg
-	configs/staging/slot_162.cfg
-	configs/staging/slot_163.cfg
-	configs/staging/slot_164.cfg
-	configs/staging/slot_165.cfg
-	configs/staging/slot_166.cfg
-	configs/staging/slot_167.cfg
-	configs/staging/slot_168.cfg
-	configs/staging/slot_169.cfg
-	configs/staging/slot_170.cfg
-	configs/staging/slot_171.cfg
-	configs/staging/slot_172.cfg
-	configs/staging/slot_173.cfg
-	configs/staging/slot_174.cfg
-	configs/staging/slot_175.cfg
-	configs/staging/slot_176.cfg
-	configs/staging/slot_177.cfg
-	configs/staging/slot_178.cfg
-	configs/staging/slot_179.cfg
-	configs/staging/slot_180.cfg
-	configs/staging/slot_181.cfg
-	configs/staging/slot_182.cfg
-	configs/staging/slot_183.cfg
-	configs/staging/slot_184.cfg
-	configs/staging/slot_185.cfg
-	configs/staging/slot_186.cfg
-	configs/staging/slot_187.cfg
-	configs/staging/slot_188.cfg
-	configs/staging/slot_189.cfg
-	configs/staging/slot_190.cfg
-	configs/staging/slot_191.cfg
-	configs/staging/slot_192.cfg
-	configs/staging/slot_193.cfg
-	configs/staging/slot_194.cfg
-	configs/staging/slot_195.cfg
-	configs/staging/slot_196.cfg
-	configs/staging/slot_197.cfg
-	configs/staging/slot_198.cfg
-	configs/staging/slot_199.cfg
-	configs/staging/slot_200.cfg
-	configs/staging/slot_201.cfg
-	configs/staging/slot_202.cfg
-	configs/staging/slot_203.cfg
-	configs/staging/slot_204.cfg
-	configs/staging/slot_205.cfg
-	configs/staging/slot_206.cfg
-	configs/staging/slot_207.cfg
-	configs/staging/slot_208.cfg
-	configs/staging/slot_209.cfg
-	configs/staging/slot_210.cfg
-	configs/staging/slot_211.cfg
-	configs/staging/slot_212.cfg
-	configs/staging/slot_213.cfg
-	configs/staging/slot_214.cfg
-	configs/staging/slot_215.cfg
-	configs/staging/slot_216.cfg
-	configs/staging/slot_217.cfg
-	configs/staging/slot_218.cfg
-	configs/staging/slot_219.cfg
-	configs/staging/slot_220.cfg
-	configs/staging/slot_221.cfg
-	configs/staging/slot_222.cfg
-	configs/staging/slot_223.cfg
-	configs/staging/slot_224.cfg
-	configs/staging/slot_225.cfg
-	configs/staging/slot_226.cfg
-	configs/staging/slot_227.cfg
-	configs/staging/slot_228.cfg
-	configs/staging/slot_229.cfg
-	configs/staging/slot_230.cfg
-	configs/staging/slot_231.cfg
-	configs/staging/slot_232.cfg
-	configs/staging/slot_233.cfg
-	configs/staging/slot_234.cfg
-	configs/staging/slot_235.cfg
-	configs/staging/slot_236.cfg
-	configs/staging/slot_237.cfg
-	configs/staging/slot_238.cfg
-	configs/staging/slot_239.cfg
-	configs/staging/slot_240.cfg
-	configs/staging/slot_241.cfg
-	configs/staging/slot_242.cfg
-	configs/staging/slot_243.cfg
-	configs/staging/slot_244.cfg
-	configs/staging/slot_245.cfg
-	configs/staging/slot_246.cfg
-	configs/staging/slot_247.cfg
-	configs/staging/slot_248.cfg
-	configs/staging/slot_249.cfg
-	configs/staging/slot_250.cfg
-	configs/staging/slot_251.cfg
-	configs/staging/slot_252.cfg
-	configs/staging/slot_253.cfg
-	configs/staging/slot_254.cfg
-	configs/staging/slot_255.cfg
-	configs/staging/slot_256.cfg
-	configs/staging/slot_257.cfg
-	configs/staging/slot_258.cfg
-	configs/staging/slot_259.cfg
-	configs/staging/slot_260.cfg
-	configs/staging/slot_261.cfg
-	configs/staging/slot_262.cfg
-	configs/staging/slot_263.cfg
-	configs/staging/slot_264.cfg
-	configs/staging/slot_265.cfg
-	configs/staging/slot_266.cfg
-	configs/staging/slot_267.cfg
-	configs/staging/slot_268.cfg
-	configs/staging/slot_269.cfg
-	configs/staging/slot_270.cfg
-	configs/staging/slot_271.cfg
-	configs/staging/slot_272.cfg
-	configs/staging/slot_273.cfg
-	configs/staging/slot_274.cfg
-	configs/staging/slot_275.cfg
-	configs/staging/slot_276.cfg
-	configs/staging/slot_277.cfg
-	configs/staging/slot_278.cfg
-	configs/staging/slot_279.cfg
-	configs/staging/slot_280.cfg
-	configs/staging/slot_281.cfg
-	configs/staging/slot_282.cfg
-	configs/staging/slot_283.cfg
-	configs/staging/slot_284.cfg
-	configs/staging/slot_285.cfg
-	configs/staging/slot_286.cfg
-	configs/staging/slot_287.cfg
-	configs/staging/slot_288.cfg
-	configs/staging/slot_289.cfg
-	configs/staging/slot_290.cfg
-	configs/staging/slot_291.cfg
-	configs/staging/slot_292.cfg
-	configs/staging/slot_293.cfg
-	configs/staging/slot_294.cfg
-	configs/staging/slot_295.cfg
-	configs/staging/slot_296.cfg
-	configs/staging/slot_297.cfg
-	configs/staging/slot_298.cfg
-	configs/staging/slot_299.cfg
-	configs/staging/slot_300.cfg
-	scripts/wip/harness_001.sh
-	scripts/wip/harness_002.sh
-	scripts/wip/harness_003.sh
-	scripts/wip/harness_004.sh
-	scripts/wip/harness_005.sh
-	scripts/wip/harness_006.sh
-	scripts/wip/harness_007.sh
-	scripts/wip/harness_008.sh
-	scripts/wip/harness_009.sh
-	scripts/wip/harness_010.sh
-	scripts/wip/harness_011.sh
-	scripts/wip/harness_012.sh
-	scripts/wip/harness_013.sh
-	scripts/wip/harness_014.sh
-	scripts/wip/harness_015.sh
-	scripts/wip/harness_016.sh
-	scripts/wip/harness_017.sh
-	scripts/wip/harness_018.sh
-	scripts/wip/harness_019.sh
-	scripts/wip/harness_020.sh
-	scripts/wip/harness_021.sh
-	scripts/wip/harness_022.sh
-	scripts/wip/harness_023.sh
-	scripts/wip/harness_024.sh
-	scripts/wip/harness_025.sh
-	scripts/wip/harness_026.sh
-	scripts/wip/harness_027.sh
-	scripts/wip/harness_028.sh
-	scripts/wip/harness_029.sh
-	scripts/wip/harness_030.sh
-	scripts/wip/harness_031.sh
-	scripts/wip/harness_032.sh
-	scripts/wip/harness_033.sh
-	scripts/wip/harness_034.sh
-	scripts/wip/harness_035.sh
-	scripts/wip/harness_036.sh
-	scripts/wip/harness_037.sh
-	scripts/wip/harness_038.sh
-	scripts/wip/harness_039.sh
-	scripts/wip/harness_040.sh
-	scripts/wip/harness_041.sh
-	scripts/wip/harness_042.sh
-	scripts/wip/harness_043.sh
-	scripts/wip/harness_044.sh
-	scripts/wip/harness_045.sh
-	scripts/wip/harness_046.sh
-	scripts/wip/harness_047.sh
-	scripts/wip/harness_048.sh
-	scripts/wip/harness_049.sh
-	scripts/wip/harness_050.sh
-	scripts/wip/harness_051.sh
-	scripts/wip/harness_052.sh
-	scripts/wip/harness_053.sh
-	scripts/wip/harness_054.sh
-	scripts/wip/harness_055.sh
-	scripts/wip/harness_056.sh
-	scripts/wip/harness_057.sh
-	scripts/wip/harness_058.sh
-	scripts/wip/harness_059.sh
-	scripts/wip/harness_060.sh
-	scripts/wip/harness_061.sh
-	scripts/wip/harness_062.sh
-	scripts/wip/harness_063.sh
-	scripts/wip/harness_064.sh
-	scripts/wip/harness_065.sh
-	scripts/wip/harness_066.sh
-	scripts/wip/harness_067.sh
-	scripts/wip/harness_068.sh
-	scripts/wip/harness_069.sh
-	scripts/wip/harness_070.sh
-	scripts/wip/harness_071.sh
-	scripts/wip/harness_072.sh
-	scripts/wip/harness_073.sh
-	scripts/wip/harness_074.sh
-	scripts/wip/harness_075.sh
-	scripts/wip/harness_076.sh
-	scripts/wip/harness_077.sh
-	scripts/wip/harness_078.sh
-	scripts/wip/harness_079.sh
-	scripts/wip/harness_080.sh
-	scripts/wip/harness_081.sh
-	scripts/wip/harness_082.sh
-	scripts/wip/harness_083.sh
-	scripts/wip/harness_084.sh
-	scripts/wip/harness_085.sh
-	scripts/wip/harness_086.sh
-	scripts/wip/harness_087.sh
-	scripts/wip/harness_088.sh
-	scripts/wip/harness_089.sh
-	scripts/wip/harness_090.sh
-	scripts/wip/harness_091.sh
-	scripts/wip/harness_092.sh
-	scripts/wip/harness_093.sh
-	scripts/wip/harness_094.sh
-	scripts/wip/harness_095.sh
-	scripts/wip/harness_096.sh
-	scripts/wip/harness_097.sh
-	scripts/wip/harness_098.sh
-	scripts/wip/harness_099.sh
-	scripts/wip/harness_100.sh
-	scripts/wip/harness_101.sh
-	scripts/wip/harness_102.sh
-	scripts/wip/harness_103.sh
-	scripts/wip/harness_104.sh
-	scripts/wip/harness_105.sh
-	scripts/wip/harness_106.sh
-	scripts/wip/harness_107.sh
-	scripts/wip/harness_108.sh
-	scripts/wip/harness_109.sh
-	scripts/wip/harness_110.sh
-	scripts/wip/harness_111.sh
-	scripts/wip/harness_112.sh
-	scripts/wip/harness_113.sh
-	scripts/wip/harness_114.sh
-	scripts/wip/harness_115.sh
-	scripts/wip/harness_116.sh
-	scripts/wip/harness_117.sh
-	scripts/wip/harness_118.sh
-	scripts/wip/harness_119.sh
-	scripts/wip/harness_120.sh
-	scripts/wip/harness_121.sh
-	scripts/wip/harness_122.sh
-	scripts/wip/harness_123.sh
-	scripts/wip/harness_124.sh
-	scripts/wip/harness_125.sh
-	scripts/wip/harness_126.sh
-	scripts/wip/harness_127.sh
-	scripts/wip/harness_128.sh
-	scripts/wip/harness_129.sh
-	scripts/wip/harness_130.sh
-	scripts/wip/harness_131.sh
-	scripts/wip/harness_132.sh
-	scripts/wip/harness_133.sh
-	scripts/wip/harness_134.sh
-	scripts/wip/harness_135.sh
-	scripts/wip/harness_136.sh
-	scripts/wip/harness_137.sh
-	scripts/wip/harness_138.sh
-	scripts/wip/harness_139.sh
-	scripts/wip/harness_140.sh
-	scripts/wip/harness_141.sh
-	scripts/wip/harness_142.sh
-	scripts/wip/harness_143.sh
-	scripts/wip/harness_144.sh
-	scripts/wip/harness_145.sh
-	scripts/wip/harness_146.sh
-	scripts/wip/harness_147.sh
-	scripts/wip/harness_148.sh
-	scripts/wip/harness_149.sh
-	scripts/wip/harness_150.sh
-	scripts/wip/harness_151.sh
-	scripts/wip/harness_152.sh
-	scripts/wip/harness_153.sh
-	scripts/wip/harness_154.sh
-	scripts/wip/harness_155.sh
-	scripts/wip/harness_156.sh
-	scripts/wip/harness_157.sh
-	scripts/wip/harness_158.sh
-	scripts/wip/harness_159.sh
-	scripts/wip/harness_160.sh
-	scripts/wip/harness_161.sh
-	scripts/wip/harness_162.sh
-	scripts/wip/harness_163.sh
-	scripts/wip/harness_164.sh
-	scripts/wip/harness_165.sh
-	scripts/wip/harness_166.sh
-	scripts/wip/harness_167.sh
-	scripts/wip/harness_168.sh
-	scripts/wip/harness_169.sh
-	scripts/wip/harness_170.sh
-	scripts/wip/harness_171.sh
-	scripts/wip/harness_172.sh
-	scripts/wip/harness_173.sh
-	scripts/wip/harness_174.sh
-	scripts/wip/harness_175.sh
-	scripts/wip/harness_176.sh
-	scripts/wip/harness_177.sh
-	scripts/wip/harness_178.sh
-	scripts/wip/harness_179.sh
-	scripts/wip/harness_180.sh
-	scripts/wip/harness_181.sh
-	scripts/wip/harness_182.sh
-	scripts/wip/harness_183.sh
-	scripts/wip/harness_184.sh
-	scripts/wip/harness_185.sh
-	scripts/wip/harness_186.sh
-	scripts/wip/harness_187.sh
-	scripts/wip/harness_188.sh
-	scripts/wip/harness_189.sh
-	scripts/wip/harness_190.sh
-	scripts/wip/harness_191.sh
-	scripts/wip/harness_192.sh
-	scripts/wip/harness_193.sh
-	scripts/wip/harness_194.sh
-	scripts/wip/harness_195.sh
-	scripts/wip/harness_196.sh
-	scripts/wip/harness_197.sh
-	scripts/wip/harness_198.sh
-	scripts/wip/harness_199.sh
-	scripts/wip/harness_200.sh
-	scripts/wip/harness_201.sh
-	scripts/wip/harness_202.sh
-	scripts/wip/harness_203.sh
-	scripts/wip/harness_204.sh
-	scripts/wip/harness_205.sh
-	scripts/wip/harness_206.sh
-	scripts/wip/harness_207.sh
-	scripts/wip/harness_208.sh
-	scripts/wip/harness_209.sh
-	scripts/wip/harness_210.sh
-	scripts/wip/harness_211.sh
-	scripts/wip/harness_212.sh
-	scripts/wip/harness_213.sh
-	scripts/wip/harness_214.sh
-	scripts/wip/harness_215.sh
-	scripts/wip/harness_216.sh
-	scripts/wip/harness_217.sh
-	scripts/wip/harness_218.sh
-	scripts/wip/harness_219.sh
-	scripts/wip/harness_220.sh
-	scripts/wip/harness_221.sh
-	scripts/wip/harness_222.sh
-	scripts/wip/harness_223.sh
-	scripts/wip/harness_224.sh
-	scripts/wip/harness_225.sh
-	scripts/wip/harness_226.sh
-	scripts/wip/harness_227.sh
-	scripts/wip/harness_228.sh
-	scripts/wip/harness_229.sh
-	scripts/wip/harness_230.sh
-	scripts/wip/harness_231.sh
-	scripts/wip/harness_232.sh
-	scripts/wip/harness_233.sh
-	scripts/wip/harness_234.sh
-	scripts/wip/harness_235.sh
-	scripts/wip/harness_236.sh
-	scripts/wip/harness_237.sh
-	scripts/wip/harness_238.sh
-	scripts/wip/harness_239.sh
-	scripts/wip/harness_240.sh
-	scripts/wip/harness_241.sh
-	scripts/wip/harness_242.sh
-	scripts/wip/harness_243.sh
-	scripts/wip/harness_244.sh
-	scripts/wip/harness_245.sh
-	scripts/wip/harness_246.sh
-	scripts/wip/harness_247.sh
-	scripts/wip/harness_248.sh
-	scripts/wip/harness_249.sh
-	scripts/wip/harness_250.sh
-	scripts/wip/harness_251.sh
-	scripts/wip/harness_252.sh
-	scripts/wip/harness_253.sh
-	scripts/wip/harness_254.sh
-	scripts/wip/harness_255.sh
-	scripts/wip/harness_256.sh
-	scripts/wip/harness_257.sh
-	scripts/wip/harness_258.sh
-	scripts/wip/harness_259.sh
-	scripts/wip/harness_260.sh
-	scripts/wip/harness_261.sh
-	scripts/wip/harness_262.sh
-	scripts/wip/harness_263.sh
-	scripts/wip/harness_264.sh
-	scripts/wip/harness_265.sh
-	scripts/wip/harness_266.sh
-	scripts/wip/harness_267.sh
-	scripts/wip/harness_268.sh
-	scripts/wip/harness_269.sh
-	scripts/wip/harness_270.sh
-	scripts/wip/harness_271.sh
-	scripts/wip/harness_272.sh
-	scripts/wip/harness_273.sh
-	scripts/wip/harness_274.sh
-	scripts/wip/harness_275.sh
-	scripts/wip/harness_276.sh
-	scripts/wip/harness_277.sh
-	scripts/wip/harness_278.sh
-	scripts/wip/harness_279.sh
-	scripts/wip/harness_280.sh
-	scripts/wip/harness_281.sh
-	scripts/wip/harness_282.sh
-	scripts/wip/harness_283.sh
-	scripts/wip/harness_284.sh
-	scripts/wip/harness_285.sh
-	scripts/wip/harness_286.sh
-	scripts/wip/harness_287.sh
-	scripts/wip/harness_288.sh
-	scripts/wip/harness_289.sh
-	scripts/wip/harness_290.sh
-	scripts/wip/harness_291.sh
-	scripts/wip/harness_292.sh
-	scripts/wip/harness_293.sh
-	scripts/wip/harness_294.sh
-	scripts/wip/harness_295.sh
-	scripts/wip/harness_296.sh
-	scripts/wip/harness_297.sh
-	scripts/wip/harness_298.sh
-	scripts/wip/harness_299.sh
-	scripts/wip/harness_300.sh
+	configs/
+	scripts/
 
-no changes added to commit (use "git add" and/or "git commit -a")

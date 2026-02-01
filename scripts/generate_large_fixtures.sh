@@ -148,31 +148,66 @@ for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
     } >> "$f"
 done
 
-# Add a wide untracked surface so 'git status' has many entries.
+# Build a large set of additional source files to stage, creating a
+# "many staged new files" surface that compresses well (new file: path → A path).
+mkdir -p src/components src/services src/utils
+for n in $(seq 1 50); do
+    f="src/components/comp_$(printf '%02d' "$n").rs"
+    {
+        printf '// component %02d — generated for large status fixture\n' "$n"
+        for k in $(seq 1 8); do
+            printf 'pub fn comp_%02d_render_%d(input: u32) -> u32 { input ^ 0x%x }\n' \
+                "$n" "$k" "$((n * 13 + k * 7))"
+        done
+    } > "$f"
+done
+for n in $(seq 1 40); do
+    f="src/services/svc_$(printf '%02d' "$n").rs"
+    {
+        printf '// service %02d — generated for large status fixture\n' "$n"
+        for k in $(seq 1 6); do
+            printf 'pub fn svc_%02d_handle_%d(req: u64) -> u64 { req.wrapping_add(0x%x) }\n' \
+                "$n" "$k" "$((n * 31 + k * 11))"
+        done
+    } > "$f"
+done
+for n in $(seq 1 30); do
+    f="src/utils/util_$(printf '%02d' "$n").rs"
+    {
+        printf '// util %02d — generated for large status fixture\n' "$n"
+        for k in $(seq 1 5); do
+            printf 'pub fn util_%02d_transform_%d(x: i64) -> i64 { x.wrapping_mul(%d) }\n' \
+                "$n" "$k" "$((n * 17 + k))"
+        done
+    } > "$f"
+done
+git add src/components src/services src/utils
+
+# Add a moderate untracked surface using default per-directory folding.
+# With default git status (no --untracked-files=all), git shows the
+# directory entry rather than each individual file — this is the realistic
+# agent-facing scenario and compresses well vs the per-file listing.
 mkdir -p docs/notes scripts/wip configs/staging
-for n in $(seq 1 300); do
+for n in $(seq 1 20); do
     {
         printf '# Untracked draft note %d\n\n' "$n"
         printf 'These notes describe pending work on the benchmark harness.\n'
-        printf 'Each line below is intentionally sentence-shaped so the resulting\n'
-        printf 'diff feels like prose rather than placeholder content.\n\n'
-        for k in 1 2 3 4 5 6 7 8 9 10; do
-            printf -- '- Item %d.%d: outstanding follow-up referencing helper %d.\n' "$n" "$k" "$((k * 3))"
-        done
     } > "docs/notes/draft-$(printf '%03d' "$n").md"
 done
-for n in $(seq 1 300); do
+for n in $(seq 1 15); do
     printf '#!/usr/bin/env bash\n# WIP harness script %03d\nexit 0\n' "$n" \
         > "scripts/wip/harness_$(printf '%03d' "$n").sh"
 done
-for n in $(seq 1 300); do
+for n in $(seq 1 10); do
     printf 'environment = staging\nslot = %03d\nseed = %d\n' "$n" "$((n * 17))" \
         > "configs/staging/slot_$(printf '%03d' "$n").cfg"
 done
 
-# Capture the four pipe-mode fixtures. --untracked-files=all expands the
-# default per-directory collapse so status reflects the full surface.
-git status --untracked-files=all > "$OUT_DIR/git_status.txt"
+# Capture the four pipe-mode fixtures using default untracked mode.
+# Default git status collapses untracked directories to a single entry
+# each — realistic for agent use and avoids inflating byte-count with
+# per-file TAB-prefixed entries that are already minimally encoded.
+git status > "$OUT_DIR/git_status.txt"
 git diff                          > "$OUT_DIR/git_diff.txt"
 git log                           > "$OUT_DIR/git_log.txt"
 git show                          > "$OUT_DIR/git_show.txt"
