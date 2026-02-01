@@ -1,0 +1,18 @@
+diff --git a/fruit.txt b/fruit.txt
+index fde8dcd..f9d4f5a 100644
+--- a/fruit.txt
++++ b/fruit.txt
+@@ -1,3 +1,4 @@
+ apple
+ banana
+ cherry
++date
+diff --git a/numbers.txt b/numbers.txt
+index 4cb29ea..ddc897f 100644
+--- a/numbers.txt
++++ b/numbers.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++TWO
+ three

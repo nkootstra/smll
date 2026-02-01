@@ -1,0 +1,417 @@
+commit 24d96d9f7db6227ed8f3621e6e1732a77e2ddcbb
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(harness): land stratified harness expansion
+    
+    This commit introduces thirty stratified-harness helpers in mod_06.
+    Each helper applies a deterministic multiplier-and-bias transform
+    followed by a self-XOR rotation. The combination is intentionally
+    verbose so the resulting 'git show' output exercises a long unified
+    diff with realistic +/- density.
+    
+    The harness is reused by the production pipeline on hot paths where
+    SIMD intrinsics are unavailable. We keep the loop body simple to let
+    the autovectorizer pick it up on platforms that support it.
+    
+    Refs: BENCH-FINAL
+
+commit da623671dda1934503ee70a3da67155d8c9a84fc
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(citrine): introduce citrine grove step pipeline
+    
+    Adds five stepwise helpers to mod_06 that compose the citrine
+    grove transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-30
+
+commit aa07736465bf5db38b635ab7688dc9927a65e993
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(bramble): introduce bramble fern step pipeline
+    
+    Adds five stepwise helpers to mod_05 that compose the bramble
+    fern transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-29
+
+commit 6f4c6a2e7c92e7a53732e9448101d05be5e0205b
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(arcane): introduce arcane eddy step pipeline
+    
+    Adds five stepwise helpers to mod_04 that compose the arcane
+    eddy transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-28
+
+commit d6e9f12812e6373138e3e5e5ee625e93e8961044
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(zenith): introduce zenith drift step pipeline
+    
+    Adds five stepwise helpers to mod_03 that compose the zenith
+    drift transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-27
+
+commit a171d6165f018b5ec6f4dba6c5490517e77a8299
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(yarrow): introduce yarrow crest step pipeline
+    
+    Adds five stepwise helpers to mod_02 that compose the yarrow
+    crest transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-26
+
+commit 6b9919bb0249f09a496c001aef0a96953c30155a
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(xenon): introduce xenon brink step pipeline
+    
+    Adds five stepwise helpers to mod_01 that compose the xenon
+    brink transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-25
+
+commit e507a79ed0fff4575b38a9ec4b8310e8aa7be410
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(wisteria): introduce wisteria arbor step pipeline
+    
+    Adds five stepwise helpers to mod_12 that compose the wisteria
+    arbor transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-24
+
+commit a6240d3d4eb4339168a79967b7879c6f91ad7fe6
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(vivid): introduce vivid zephyr step pipeline
+    
+    Adds five stepwise helpers to mod_11 that compose the vivid
+    zephyr transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-23
+
+commit 87552ae1abace7e55c2ea1c4cf67c0bbdd1676c2
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(umber): introduce umber yonder step pipeline
+    
+    Adds five stepwise helpers to mod_10 that compose the umber
+    yonder transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-22
+
+commit cb802affa3563e2a61412d71289a83b16e755557
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(teal): introduce teal warden step pipeline
+    
+    Adds five stepwise helpers to mod_09 that compose the teal
+    warden transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-21
+
+commit ce07a542d199106709afe7d7f7aa250f5aa0ec31
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(silver): introduce silver vista step pipeline
+    
+    Adds five stepwise helpers to mod_08 that compose the silver
+    vista transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-20
+
+commit bb7514d3a52b1c9ea97c308aba7ab69103b69bf5
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(russet): introduce russet umbra step pipeline
+    
+    Adds five stepwise helpers to mod_07 that compose the russet
+    umbra transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-19
+
+commit ad7c81d8da19d70b86621a9fd1b34aa8d5bd7338
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(quartz): introduce quartz thorn step pipeline
+    
+    Adds five stepwise helpers to mod_06 that compose the quartz
+    thorn transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-18
+
+commit b267a5c34a36b6eea02b84daa6951e1d136f0d31
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(pearl): introduce pearl sigil step pipeline
+    
+    Adds five stepwise helpers to mod_05 that compose the pearl
+    sigil transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-17
+
+commit a06b0f84f95037d68891b37492bef5930e1ae655
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(obsidian): introduce obsidian ridge step pipeline
+    
+    Adds five stepwise helpers to mod_04 that compose the obsidian
+    ridge transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-16
+
+commit cc309f1944b13962d5fa0f87614e67d6d6d5807c
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(nimble): introduce nimble quasar step pipeline
+    
+    Adds five stepwise helpers to mod_03 that compose the nimble
+    quasar transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-15
+
+commit bc3688d467af0fae87e7ecc56dc0a68a26ba84c3
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(mauve): introduce mauve plume step pipeline
+    
+    Adds five stepwise helpers to mod_02 that compose the mauve
+    plume transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-14
+
+commit ceb8f1b974f7753f7b67841c6a0ab61d9fbd130e
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(lush): introduce lush orchard step pipeline
+    
+    Adds five stepwise helpers to mod_01 that compose the lush
+    orchard transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-13
+
+commit e21a29d4c92aae3b9affaed95ace1d07046d3dd4
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(keen): introduce keen nimbus step pipeline
+    
+    Adds five stepwise helpers to mod_12 that compose the keen
+    nimbus transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-12
+
+commit a0e6471a81de6cc2f7ab761a5c851b1a4a576331
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(jade): introduce jade meridian step pipeline
+    
+    Adds five stepwise helpers to mod_11 that compose the jade
+    meridian transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-11
+
+commit bcb02e3e41afcb5be3775772cb43044fd1424e5d
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(indigo): introduce indigo lattice step pipeline
+    
+    Adds five stepwise helpers to mod_10 that compose the indigo
+    lattice transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-10
+
+commit e8a5721e4a85d1ce27523340ded33d4107738efe
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(hazy): introduce hazy knoll step pipeline
+    
+    Adds five stepwise helpers to mod_09 that compose the hazy
+    knoll transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-9
+
+commit bf3c9326b2884653a360213053c0a528b06c9065
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(golden): introduce golden jetty step pipeline
+    
+    Adds five stepwise helpers to mod_08 that compose the golden
+    jetty transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-8
+
+commit f636ec4608496f8141d376ddb930c0c5f2859d81
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(frosty): introduce frosty inlet step pipeline
+    
+    Adds five stepwise helpers to mod_07 that compose the frosty
+    inlet transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-7
+
+commit e6fb7bc847bbc2a83487120ac428b3bc8b8de5a4
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(ember): introduce ember hollow step pipeline
+    
+    Adds five stepwise helpers to mod_06 that compose the ember
+    hollow transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-6
+
+commit bc5d1ba03ac7118943aae6871b261fcc5da1abd0
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(dusky): introduce dusky glade step pipeline
+    
+    Adds five stepwise helpers to mod_05 that compose the dusky
+    glade transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-5
+
+commit 8c426e07f883e1e6e5075d51afad91adafa11fe4
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(crimson): introduce crimson flux step pipeline
+    
+    Adds five stepwise helpers to mod_04 that compose the crimson
+    flux transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-4
+
+commit 755d2e1ae512dc94a46f62d8caf927cc1e44fc17
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(brisk): introduce brisk delta step pipeline
+    
+    Adds five stepwise helpers to mod_03 that compose the brisk
+    delta transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-3
+
+commit 21604f9b37e092379fc2cc75b9dc4f9bf6adb74c
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(azure): introduce azure cipher step pipeline
+    
+    Adds five stepwise helpers to mod_02 that compose the azure
+    cipher transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-2
+
+commit 480314fbe87cc28502cbc120fc48f60e7966481f
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(amber): introduce amber beacon step pipeline
+    
+    Adds five stepwise helpers to mod_01 that compose the amber
+    beacon transform. The pipeline mixes a wrapping multiply with an XOR
+    mask seeded from the commit ordinal, mirroring the shape of the real
+    transform we plan to land in production.
+    
+    Refs: BENCH-1
+
+commit fc7d6a0e337629c7ef63946dcbd3f619d79b0f91
+Author: Alice Anderson <alice@example.com>
+Date:   Thu Jan 1 00:00:00 2026 +0000
+
+    feat(seed): bootstrap source tree
+    
+    Twelve generated modules used as the baseline for benchmark fixtures.
+    Each module exposes 40 helper functions with deterministic arithmetic.
+    Fixture stability requires this commit be the first in the repo.

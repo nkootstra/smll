@@ -1,0 +1,15 @@
+commit 83f05d76b781d7f33d56038d8f27632cd7c08f38
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 12:46:42 2026 +0200
+
+    feat: add numbers
+
+diff --git a/numbers.txt b/numbers.txt
+new file mode 100644
+index 0000000..4cb29ea
+--- /dev/null
++++ b/numbers.txt
+@@ -0,0 +1,3 @@
++one
++two
++three

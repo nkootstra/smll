@@ -1,0 +1,24 @@
+diff --git a/color.txt b/color.txt
+index a9d1386..ff67b54 100644
+--- a/color.txt
++++ b/color.txt
+@@ -1 +1,3 @@
+ red
++green
++blue
+diff --git a/fruit.txt b/fruit.txt
+index 4c479de..637a09b 100644
+--- a/fruit.txt
++++ b/fruit.txt
+@@ -1 +1 @@
+-apple
++banana
+diff --git a/numbers.txt b/numbers.txt
+index 4cb29ea..ddc897f 100644
+--- a/numbers.txt
++++ b/numbers.txt
+@@ -1,3 +1,3 @@
+ one
+-two
++TWO
+ three

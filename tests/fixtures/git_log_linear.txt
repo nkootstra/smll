@@ -1,0 +1,20 @@
+commit f0ad49edaad09b3977b23cc38c5552c76734c2de
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:49 2026 +0200
+
+    fix: third line
+
+commit f666a84891c26ad1d478744b121b2f3c223141af
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:49 2026 +0200
+
+    feat: extend a.txt
+
+    This body explains why we added a second line.
+    It spans multiple lines and contains punctuation.
+
+commit 95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:49 2026 +0200
+
+    feat: add a.txt with one line

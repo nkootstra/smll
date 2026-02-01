@@ -1,0 +1,20 @@
+commit 83f05d76b781d7f33d56038d8f27632cd7c08f38
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 12:46:42 2026 +0200
+
+    feat: add numbers
+
+commit 39f1ab247cb019d8795e73553b8c6cc4ae495a06
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 12:46:42 2026 +0200
+
+    feat: extend fruit list
+    
+    Body explains why cherry was added.
+    Second body line for realism.
+
+commit 82c7234d24a7c7541d9202afff70f3d0e09889ca
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 12:46:42 2026 +0200
+
+    feat: add fruit list

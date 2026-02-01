@@ -1,0 +1,24 @@
+commit 012aa3580791877ce197e046746399251db08eef
+Merge: 50c52b3 cb42c80
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:56 2026 +0200
+
+    Merge branch 'feature'
+
+commit 50c52b3f1a4ed2093e27166830b38038dc4eaca5
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:53 2026 +0200
+
+    feat(main): diverge on main
+
+commit cb42c809aa3746b1d0c79d9bb5bf13dd9f232f17
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:53 2026 +0200
+
+    feat(feature): add feature line
+
+commit f0ad49edaad09b3977b23cc38c5552c76734c2de
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:49 2026 +0200
+
+    fix: third line

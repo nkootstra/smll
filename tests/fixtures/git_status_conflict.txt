@@ -1,0 +1,16 @@
+On branch main
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+
+Changes to be committed:
+	modified:   src/pipeline.zig
+
+Unmerged paths:
+  (use "git add <file>..." to mark resolution)
+	both modified:   src/filters/git_status.zig
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	tests/fixtures/git_status_conflict.txt
+

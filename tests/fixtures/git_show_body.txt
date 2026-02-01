@@ -1,0 +1,16 @@
+commit f666a84891c26ad1d478744b121b2f3c223141af
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:49 2026 +0200
+
+    feat: extend a.txt
+
+    This body explains why we added a second line.
+    It spans multiple lines and contains punctuation.
+
+diff --git a/a.txt b/a.txt
+index a29bdeb..c0d0fb4 100644
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1,2 @@
+ line1
++line2
