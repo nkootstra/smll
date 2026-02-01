@@ -13,6 +13,8 @@ const git_merge = @import("git_merge");
 const git_rebase = @import("git_rebase");
 const git_checkout = @import("git_checkout");
 const git_branch = @import("git_branch");
+const git_stash = @import("git_stash");
+const git_blame = @import("git_blame");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
@@ -239,8 +241,21 @@ fn runWrapper(
                 return 1;
             };
         },
-        // Phase 2 formatters (Units 7) will replace these passthrough arms.
-        .stash, .blame, .unknown => {
+        .stash => {
+            git_stash.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .blame => {
+            git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .unknown => {
             try writer.writeAll(stdout_slice);
             try std.fs.File.stderr().writeAll(stderr_slice);
         },

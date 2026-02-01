@@ -216,6 +216,32 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/git_branch_list.txt"),
     });
 
+    const git_stash_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_stash.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_stash_mod.addImport("util", util_mod);
+    git_stash_mod.addAnonymousImport("fixture_git_stash_save", .{
+        .root_source_file = b.path("tests/fixtures/git_stash_save.txt"),
+    });
+    git_stash_mod.addAnonymousImport("fixture_git_stash_list", .{
+        .root_source_file = b.path("tests/fixtures/git_stash_list.txt"),
+    });
+
+    const git_blame_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_blame.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_blame_mod.addImport("util", util_mod);
+    git_blame_mod.addAnonymousImport("fixture_git_blame_simple", .{
+        .root_source_file = b.path("tests/fixtures/git_blame_simple.txt"),
+    });
+    git_blame_mod.addAnonymousImport("fixture_git_blame_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_blame.txt"),
+    });
+
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
@@ -229,6 +255,8 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("git_rebase", git_rebase_mod);
     exe_mod.addImport("git_checkout", git_checkout_mod);
     exe_mod.addImport("git_branch", git_branch_mod);
+    exe_mod.addImport("git_stash", git_stash_mod);
+    exe_mod.addImport("git_blame", git_blame_mod);
 
     const exe = b.addExecutable(.{
         .name = "smll",
@@ -260,6 +288,8 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_rebase", git_rebase_mod);
     release_mod.addImport("git_checkout", git_checkout_mod);
     release_mod.addImport("git_branch", git_branch_mod);
+    release_mod.addImport("git_stash", git_stash_mod);
+    release_mod.addImport("git_blame", git_blame_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -315,6 +345,12 @@ pub fn build(b: *std.Build) void {
 
     const git_branch_tests = b.addTest(.{ .root_module = git_branch_mod });
     const run_git_branch_tests = b.addRunArtifact(git_branch_tests);
+
+    const git_stash_tests = b.addTest(.{ .root_module = git_stash_mod });
+    const run_git_stash_tests = b.addRunArtifact(git_stash_tests);
+
+    const git_blame_tests = b.addTest(.{ .root_module = git_blame_mod });
+    const run_git_blame_tests = b.addRunArtifact(git_blame_tests);
 
     const opts = b.addOptions();
     opts.addOptionPath("smll_exe_path", exe.getEmittedBin());
@@ -395,5 +431,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_rebase_tests.step);
     test_step.dependOn(&run_git_checkout_tests.step);
     test_step.dependOn(&run_git_branch_tests.step);
+    test_step.dependOn(&run_git_stash_tests.step);
+    test_step.dependOn(&run_git_blame_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }
