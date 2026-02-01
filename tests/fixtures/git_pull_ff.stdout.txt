@@ -1,0 +1,5 @@
+Updating 43fe7da..2cee6f5
+Fast-forward
+ d.txt | 1 +
+ 1 file changed, 1 insertion(+)
+ create mode 100644 d.txt

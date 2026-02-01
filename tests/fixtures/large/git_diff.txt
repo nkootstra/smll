@@ -1,360 +1,102 @@
 diff --git a/src/mod_01.rs b/src/mod_01.rs
-index 3b0ef64..1a34c65 100644
+index 6d8694d..7908169 100644
 --- a/src/mod_01.rs
 +++ b/src/mod_01.rs
-@@ -322,3 +322,25 @@ fn xenon_brink_step_5(seed: u64) -> u64 {
-     mixed ^ 0x191e
- }
+@@ -325,3 +325,8 @@ fn xenon_brink_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_01
+ pub const MOD_01_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_01
-+fn dirty_tuning_01_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
++// uncommitted scratch: tuning note for mod_01
++fn dirty_tuning_01(value: i64) -> i64 {
++    value.wrapping_add(17).rotate_right(3)
 +}
-+
-+fn dirty_tuning_01_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_01_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_01_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_01_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_02.rs b/src/mod_02.rs
-index fc2489c..d345122 100644
+index c8db06d..a2d26bf 100644
 --- a/src/mod_02.rs
 +++ b/src/mod_02.rs
-@@ -325,3 +325,25 @@ fn yarrow_crest_step_5(seed: u64) -> u64 {
-     mixed ^ 0x1a1f
- }
+@@ -328,3 +328,8 @@ fn yarrow_crest_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_02
+ pub const MOD_02_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_02
-+fn dirty_tuning_02_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
++// uncommitted scratch: tuning note for mod_02
++fn dirty_tuning_02(value: i64) -> i64 {
++    value.wrapping_add(34).rotate_right(3)
 +}
-+
-+fn dirty_tuning_02_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_02_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_02_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_02_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_03.rs b/src/mod_03.rs
-index 8832277..6bc37d0 100644
+index ae1025a..3641342 100644
 --- a/src/mod_03.rs
 +++ b/src/mod_03.rs
-@@ -322,3 +322,25 @@ fn zenith_drift_step_5(seed: u64) -> u64 {
-     mixed ^ 0x1b20
- }
+@@ -325,3 +325,8 @@ fn zenith_drift_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_03
+ pub const MOD_03_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_03
-+fn dirty_tuning_03_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
-+}
-+
-+fn dirty_tuning_03_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_03_3(value: i64) -> i64 {
++// uncommitted scratch: tuning note for mod_03
++fn dirty_tuning_03(value: i64) -> i64 {
 +    value.wrapping_add(51).rotate_right(3)
 +}
-+
-+fn dirty_tuning_03_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_03_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_04.rs b/src/mod_04.rs
-index b611c96..3622e92 100644
+index b4e55b0..26287f6 100644
 --- a/src/mod_04.rs
 +++ b/src/mod_04.rs
-@@ -325,3 +325,25 @@ fn arcane_eddy_step_5(seed: u64) -> u64 {
-     mixed ^ 0x1c21
- }
+@@ -328,3 +328,8 @@ fn arcane_eddy_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_04
+ pub const MOD_04_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_04
-+fn dirty_tuning_04_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
++// uncommitted scratch: tuning note for mod_04
++fn dirty_tuning_04(value: i64) -> i64 {
++    value.wrapping_add(68).rotate_right(3)
 +}
-+
-+fn dirty_tuning_04_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_04_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_04_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_04_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_05.rs b/src/mod_05.rs
-index 02304c8..c00b232 100644
+index eacf53b..471a570 100644
 --- a/src/mod_05.rs
 +++ b/src/mod_05.rs
-@@ -322,3 +322,25 @@ fn bramble_fern_step_5(seed: u64) -> u64 {
-     mixed ^ 0x1d22
- }
+@@ -325,3 +325,8 @@ fn bramble_fern_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_05
+ pub const MOD_05_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_05
-+fn dirty_tuning_05_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
++// uncommitted scratch: tuning note for mod_05
++fn dirty_tuning_05(value: i64) -> i64 {
++    value.wrapping_add(85).rotate_right(3)
 +}
-+
-+fn dirty_tuning_05_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_05_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_05_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_05_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_06.rs b/src/mod_06.rs
-index 37e39cb..dab25ea 100644
+index 53a7ee3..89b2f42 100644
 --- a/src/mod_06.rs
 +++ b/src/mod_06.rs
-@@ -597,3 +597,25 @@ pub fn stratified_harness_30(input: &[u64]) -> Vec<u64> {
-         .collect()
- }
+@@ -328,3 +328,8 @@ fn citrine_grove_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_06
+ pub const MOD_06_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_06
-+fn dirty_tuning_06_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
++// uncommitted scratch: tuning note for mod_06
++fn dirty_tuning_06(value: i64) -> i64 {
++    value.wrapping_add(102).rotate_right(3)
 +}
-+
-+fn dirty_tuning_06_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_06_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_06_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_06_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_07.rs b/src/mod_07.rs
-index 46d9cb7..e2e08aa 100644
+index eaee346..15d94bc 100644
 --- a/src/mod_07.rs
 +++ b/src/mod_07.rs
-@@ -298,3 +298,25 @@ fn russet_umbra_step_5(seed: u64) -> u64 {
+@@ -301,3 +301,8 @@ const COMMIT_30_TAG: &str = "citrine/grove";
  
- // commit-30 cross-ref to citrine grove
- const COMMIT_30_TAG: &str = "citrine/grove";
+ // finale-commit: version bump for mod_07
+ pub const MOD_07_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_07
-+fn dirty_tuning_07_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
++// uncommitted scratch: tuning note for mod_07
++fn dirty_tuning_07(value: i64) -> i64 {
++    value.wrapping_add(119).rotate_right(3)
 +}
-+
-+fn dirty_tuning_07_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_07_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_07_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_07_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
 diff --git a/src/mod_08.rs b/src/mod_08.rs
-index 1d6b78a..e424f4e 100644
+index 3bc19c3..2c5efde 100644
 --- a/src/mod_08.rs
 +++ b/src/mod_08.rs
-@@ -295,3 +295,25 @@ fn silver_vista_step_5(seed: u64) -> u64 {
-     mixed ^ 0x1419
- }
+@@ -298,3 +298,6 @@ fn silver_vista_step_5(seed: u64) -> u64 {
  
+ // finale-commit: version bump for mod_08
+ pub const MOD_08_FINALE_VERSION: u32 = 2;
 +
-+// uncommitted scratch: tuning notes for mod_08
-+fn dirty_tuning_08_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
-+}
-+
-+fn dirty_tuning_08_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_08_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_08_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_08_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
-diff --git a/src/mod_09.rs b/src/mod_09.rs
-index be5658a..dfcdb1a 100644
---- a/src/mod_09.rs
-+++ b/src/mod_09.rs
-@@ -298,3 +298,25 @@ fn teal_warden_step_5(seed: u64) -> u64 {
-     mixed ^ 0x151a
- }
- 
-+
-+// uncommitted scratch: tuning notes for mod_09
-+fn dirty_tuning_09_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
-+}
-+
-+fn dirty_tuning_09_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_09_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_09_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_09_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
-diff --git a/src/mod_10.rs b/src/mod_10.rs
-index f312442..bc8c2c1 100644
---- a/src/mod_10.rs
-+++ b/src/mod_10.rs
-@@ -295,3 +295,25 @@ fn umber_yonder_step_5(seed: u64) -> u64 {
-     mixed ^ 0x161b
- }
- 
-+
-+// uncommitted scratch: tuning notes for mod_10
-+fn dirty_tuning_10_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
-+}
-+
-+fn dirty_tuning_10_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_10_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_10_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_10_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
-diff --git a/src/mod_11.rs b/src/mod_11.rs
-index e800ed9..577e8b3 100644
---- a/src/mod_11.rs
-+++ b/src/mod_11.rs
-@@ -298,3 +298,25 @@ fn vivid_zephyr_step_5(seed: u64) -> u64 {
-     mixed ^ 0x171c
- }
- 
-+
-+// uncommitted scratch: tuning notes for mod_11
-+fn dirty_tuning_11_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
-+}
-+
-+fn dirty_tuning_11_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_11_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_11_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_11_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
-diff --git a/src/mod_12.rs b/src/mod_12.rs
-index f391645..21489d2 100644
---- a/src/mod_12.rs
-+++ b/src/mod_12.rs
-@@ -295,3 +295,25 @@ fn wisteria_arbor_step_5(seed: u64) -> u64 {
-     mixed ^ 0x181d
- }
- 
-+
-+// uncommitted scratch: tuning notes for mod_12
-+fn dirty_tuning_12_1(value: i64) -> i64 {
-+    value.wrapping_add(17).rotate_right(1)
-+}
-+
-+fn dirty_tuning_12_2(value: i64) -> i64 {
-+    value.wrapping_add(34).rotate_right(2)
-+}
-+
-+fn dirty_tuning_12_3(value: i64) -> i64 {
-+    value.wrapping_add(51).rotate_right(3)
-+}
-+
-+fn dirty_tuning_12_4(value: i64) -> i64 {
-+    value.wrapping_add(68).rotate_right(4)
-+}
-+
-+fn dirty_tuning_12_5(value: i64) -> i64 {
-+    value.wrapping_add(85).rotate_right(5)
-+}
-+
++// uncommitted scratch: tuning note for mod_08
++fn dirty_tuning_08(value: i64) -> i64 {

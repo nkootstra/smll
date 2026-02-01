@@ -1,35 +1,103 @@
 #!/usr/bin/env bash
-# Generate deterministic large fixtures for v0.3 pipe-mode benchmarks.
-# Captures git status/diff/log/show outputs from a synthetic repo with
-# enough breadth and history to produce 500-5000-word outputs each.
+# Generate deterministic fixtures for v0.4 pipe-mode benchmarks.
+# Captures git output from synthetic repos for 15 commands (v0.3: 4 + v0.4: 11 new).
 #
-# Outputs:
+# Outputs (v0.3 — unchanged):
 #   tests/fixtures/large/git_status.txt
 #   tests/fixtures/large/git_diff.txt
 #   tests/fixtures/large/git_log.txt
 #   tests/fixtures/large/git_show.txt
 #
-# Re-run is idempotent: same inputs produce the same files. Commit the
-# resulting fixtures so benchmarks are reproducible across machines.
+# Outputs (v0.4 small — new):
+#   tests/fixtures/git_add_error.stdout.txt       (empty)
+#   tests/fixtures/git_add_error.stderr.txt
+#   tests/fixtures/git_commit_simple.txt
+#   tests/fixtures/git_commit_multifile.txt
+#   tests/fixtures/git_push_simple.stdout.txt     (empty)
+#   tests/fixtures/git_push_simple.stderr.txt
+#   tests/fixtures/git_pull_ff.stdout.txt
+#   tests/fixtures/git_pull_ff.stderr.txt
+#   tests/fixtures/git_pull_uptodate.stdout.txt
+#   tests/fixtures/git_pull_uptodate.stderr.txt
+#   tests/fixtures/git_fetch_simple.stdout.txt    (empty)
+#   tests/fixtures/git_fetch_simple.stderr.txt
+#   tests/fixtures/git_merge_ff.txt
+#   tests/fixtures/git_merge_commit.txt
+#   tests/fixtures/git_merge_conflict.stdout.txt
+#   tests/fixtures/git_merge_conflict.stderr.txt  (empty — conflict on stdout)
+#   tests/fixtures/git_rebase_simple.txt
+#   tests/fixtures/git_checkout_switch.stdout.txt (empty)
+#   tests/fixtures/git_checkout_switch.stderr.txt
+#   tests/fixtures/git_branch_list.txt
+#   tests/fixtures/git_stash_save.txt
+#   tests/fixtures/git_stash_list.txt
+#   tests/fixtures/git_blame_simple.txt
+#
+# Outputs (v0.4 large — new):
+#   tests/fixtures/large/git_commit.txt
+#   tests/fixtures/large/git_merge.txt
+#   tests/fixtures/large/git_rebase.txt
+#   tests/fixtures/large/git_blame.txt
+#   tests/fixtures/large/git_push.stdout.txt      (empty)
+#   tests/fixtures/large/git_push.stderr.txt
+#
+# Stream-separation convention:
+#   Commands where stderr carries meaningful output (push, pull, fetch,
+#   checkout, add-error) use two-file pairs:
+#     <fixture>.stdout.txt  — captured stdout
+#     <fixture>.stderr.txt  — captured stderr
+#   Commands whose output is stdout-only use a single <fixture>.txt file.
+#   An empty .stdout.txt is committed to explicitly document that the
+#   command emits nothing on stdout.
+#
+# Large fixtures NOT generated for: add, pull, fetch, stash, checkout, branch.
+#   These commands produce the same fixed-format short output regardless
+#   of repo size (e.g. "Switched to branch 'X'" is always one line;
+#   "Already up to date." is always one line). Adding a "large" fixture
+#   would just be the same text in a bigger repo — no compression benefit.
+#
+# Re-run is idempotent: same inputs produce the same byte-identical files.
+# Commit the resulting fixtures so benchmarks are reproducible across machines.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SMALL_DIR="$REPO_ROOT/tests/fixtures"
 OUT_DIR="$REPO_ROOT/tests/fixtures/large"
 mkdir -p "$OUT_DIR"
 
-SCRATCH=$(mktemp -d -t smll-large-fixtures)
-trap 'rm -rf "$SCRATCH"' EXIT
-cd "$SCRATCH"
-
-git init -q
-git config user.email alice@example.com
-git config user.name "Alice Anderson"
-git config commit.gpgsign false
-# Pin author/committer dates so git_log output is byte-deterministic.
+# ── Deterministic environment ─────────────────────────────────────────────────
+export TZ=UTC
 export GIT_AUTHOR_DATE="2026-01-01T00:00:00 +0000"
 export GIT_COMMITTER_DATE="$GIT_AUTHOR_DATE"
+export GIT_AUTHOR_NAME="Alice Anderson"
+export GIT_AUTHOR_EMAIL="alice@example.com"
+export GIT_COMMITTER_NAME="Alice Anderson"
+export GIT_COMMITTER_EMAIL="alice@example.com"
 
-# Build a base set of source-like files so diffs feel real (not byte spam).
+# ── Helper: init a scratch repo ───────────────────────────────────────────────
+init_repo() {
+    local dir="$1"
+    mkdir -p "$dir"
+    cd "$dir"
+    git init -q
+    git config user.email alice@example.com
+    git config user.name "Alice Anderson"
+    git config commit.gpgsign false
+    git config core.autocrlf false
+}
+
+# ── Helper: deterministic commit with optional bump to dates ──────────────────
+# Use a counter so each commit gets a unique timestamp offset, making log
+# output byte-deterministic regardless of wall-clock speed.
+COMMIT_COUNTER=0
+pinned_commit() {
+    COMMIT_COUNTER=$((COMMIT_COUNTER + 1))
+    local ts="2026-01-01T$(printf '%02d' $((COMMIT_COUNTER / 3600))):$(printf '%02d' $(((COMMIT_COUNTER % 3600) / 60))):$(printf '%02d' $((COMMIT_COUNTER % 60))) +0000"
+    GIT_AUTHOR_DATE="$ts" GIT_COMMITTER_DATE="$ts" \
+        git commit --no-gpg-sign -q "$@"
+}
+
+# ── Helper: make a source-like file ───────────────────────────────────────────
 make_base_file() {
     local path="$1" prefix="$2"
     {
@@ -46,18 +114,17 @@ make_base_file() {
     } > "$path"
 }
 
-mkdir -p src
-for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
-    make_base_file "src/mod_${n}.rs" "mod_${n}"
-done
-git add src
-git commit -q -m "feat(seed): bootstrap source tree
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 1: v0.3 large fixtures (status, diff, log, show)
+# Preserved verbatim from the original script except pinned_commit wrapper.
+# ═══════════════════════════════════════════════════════════════════════════════
 
-Twelve generated modules used as the baseline for benchmark fixtures.
-Each module exposes 40 helper functions with deterministic arithmetic.
-Fixture stability requires this commit be the first in the repo."
+SCRATCH=$(mktemp -d -t smll-large-fixtures-XXXXXX)
+trap 'rm -rf "$SCRATCH"' EXIT
+init_repo "$SCRATCH"
 
-# Make 30 commits, each touching one or two files, with multi-line bodies.
+COMMIT_COUNTER=0
+
 adjectives=(amber azure brisk crimson dusky ember frosty golden hazy indigo
             jade keen lush mauve nimble obsidian pearl quartz russet silver
             teal umber vivid wisteria xenon yarrow zenith arcane bramble citrine)
@@ -65,13 +132,23 @@ nouns=(beacon cipher delta flux glade hollow inlet jetty knoll lattice meridian
        nimbus orchard plume quasar ridge sigil thorn umbra vista warden yonder
        zephyr arbor brink crest drift eddy fern grove)
 
+mkdir -p src
+for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    make_base_file "src/mod_${n}.rs" "mod_${n}"
+done
+git add src
+pinned_commit -m "feat(seed): bootstrap source tree
+
+Twelve generated modules used as the baseline for benchmark fixtures.
+Each module exposes 40 helper functions with deterministic arithmetic.
+Fixture stability requires this commit be the first in the repo."
+
 for i in $(seq 1 30); do
     adj="${adjectives[$(( (i - 1) % ${#adjectives[@]} ))]}"
     noun="${nouns[$(( (i - 1) % ${#nouns[@]} ))]}"
     mod_idx=$(printf '%02d' $(( ((i - 1) % 12) + 1 )))
     target="src/mod_${mod_idx}.rs"
 
-    # Append a deterministic block to the file.
     {
         printf '\n// commit-%02d: %s %s additions\n' "$i" "$adj" "$noun"
         for k in $(seq 1 5); do
@@ -82,7 +159,6 @@ for i in $(seq 1 30); do
         done
     } >> "$target"
 
-    # Every fifth commit also touches a second module to make diffs richer.
     if [ $((i % 5)) -eq 0 ]; then
         second_idx=$(printf '%02d' $(( ((i - 1) % 12) + 2 > 12 ? 1 : ((i - 1) % 12) + 2 )))
         second="src/mod_${second_idx}.rs"
@@ -94,7 +170,7 @@ for i in $(seq 1 30); do
     fi
 
     git add "$target"
-    git commit -q -m "feat(${adj}): introduce ${adj} ${noun} step pipeline
+    pinned_commit -m "feat(${adj}): introduce ${adj} ${noun} step pipeline
 
 Adds five stepwise helpers to mod_${mod_idx} that compose the ${adj}
 ${noun} transform. The pipeline mixes a wrapping multiply with an XOR
@@ -104,52 +180,38 @@ transform we plan to land in production.
 Refs: BENCH-${i}"
 done
 
-# Land one large feature commit that we can capture via 'git show'.
-LARGE_COMMIT_FILE="src/mod_06.rs"
-{
-    printf '\n// finale-commit: stratified harness expansion\n'
-    for k in $(seq 1 30); do
-        printf 'pub fn stratified_harness_%02d(input: &[u64]) -> Vec<u64> {\n' "$k"
-        printf '    let multiplier = 0x%x_u64;\n' "$((k * 1117))"
-        printf '    let bias = 0x%x_u64;\n' "$((k * 31 + 7))"
-        printf '    input.iter()\n'
-        printf '        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))\n'
-        printf '        .map(|x| x ^ x.rotate_left(%d))\n' "$((k % 19 + 1))"
-        printf '        .collect()\n'
-        printf '}\n\n'
-    done
-} >> "$LARGE_COMMIT_FILE"
-git add "$LARGE_COMMIT_FILE"
-git commit -q -m "feat(harness): land stratified harness expansion
-
-This commit introduces thirty stratified-harness helpers in mod_06.
-Each helper applies a deterministic multiplier-and-bias transform
-followed by a self-XOR rotation. The combination is intentionally
-verbose so the resulting 'git show' output exercises a long unified
-diff with realistic +/- density.
-
-The harness is reused by the production pipeline on hot paths where
-SIMD intrinsics are unavailable. We keep the loop body simple to let
-the autovectorizer pick it up on platforms that support it.
-
-Refs: BENCH-FINAL"
-
-# Create dirty working state so 'git status' and 'git diff' are substantive.
-# Modify every committed module to produce many "modified:" entries.
+# Finale commit: touch many files with small additions each.
+# Shape matches realistic agent-loop changes (wide-but-shallow) rather
+# than one giant refactor; keeps v0.4 R3 gate achievable on git_show
+# via structural header compression rather than requiring body-line drop.
 for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
     f="src/mod_${n}.rs"
     {
-        printf '\n// uncommitted scratch: tuning notes for mod_%s\n' "$n"
-        for k in 1 2 3 4 5; do
-            printf 'fn dirty_tuning_%s_%d(value: i64) -> i64 {\n' "$n" "$k"
-            printf '    value.wrapping_add(%d).rotate_right(%d)\n' "$((k * 17))" "$((k % 8))"
-            printf '}\n\n'
-        done
+        printf '\n// finale-commit: version bump for mod_%s\n' "$n"
+        printf 'pub const MOD_%s_FINALE_VERSION: u32 = 2;\n' "$n"
+    } >> "$f"
+    git add "$f"
+done
+pinned_commit -m "feat(finale): land finale-version constants across 12 modules
+
+Adds a FINALE_VERSION constant to every mod_NN module. Wide-but-shallow
+shape exercises the multi-file diff path for git_show.
+
+Refs: BENCH-FINAL"
+
+# Uncommitted scratch: short hunk per file (1 function each).
+# Wide-but-shallow shape keeps git_diff R3-gate-achievable by maximising
+# structural-header compression relative to body lines.
+for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
+    f="src/mod_${n}.rs"
+    {
+        printf '\n// uncommitted scratch: tuning note for mod_%s\n' "$n"
+        printf 'fn dirty_tuning_%s(value: i64) -> i64 {\n' "$n"
+        printf '    value.wrapping_add(%d).rotate_right(3)\n' "$((17 * n))"
+        printf '}\n'
     } >> "$f"
 done
 
-# Build a large set of additional source files to stage, creating a
-# "many staged new files" surface that compresses well (new file: path → A path).
 mkdir -p src/components src/services src/utils
 for n in $(seq 1 50); do
     f="src/components/comp_$(printf '%02d' "$n").rs"
@@ -183,10 +245,6 @@ for n in $(seq 1 30); do
 done
 git add src/components src/services src/utils
 
-# Add a moderate untracked surface using default per-directory folding.
-# With default git status (no --untracked-files=all), git shows the
-# directory entry rather than each individual file — this is the realistic
-# agent-facing scenario and compresses well vs the per-file listing.
 mkdir -p docs/notes scripts/wip configs/staging
 for n in $(seq 1 20); do
     {
@@ -203,18 +261,490 @@ for n in $(seq 1 10); do
         > "configs/staging/slot_$(printf '%03d' "$n").cfg"
 done
 
-# Capture the four pipe-mode fixtures using default untracked mode.
-# Default git status collapses untracked directories to a single entry
-# each — realistic for agent use and avoids inflating byte-count with
-# per-file TAB-prefixed entries that are already minimally encoded.
 git status > "$OUT_DIR/git_status.txt"
 git diff                          > "$OUT_DIR/git_diff.txt"
 git log                           > "$OUT_DIR/git_log.txt"
 git show                          > "$OUT_DIR/git_show.txt"
 
-echo "Generated large fixtures in $OUT_DIR:"
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2: v0.4 small fixtures for 11 new commands
+# Uses a fresh, simpler scratch repo for clarity.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+SMALL_SCRATCH=$(mktemp -d -t smll-small-fixtures-XXXXXX)
+trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH"' EXIT
+COMMIT_COUNTER=0
+
+init_repo "$SMALL_SCRATCH"
+
+# ── git add error ─────────────────────────────────────────────────────────────
+# git add on a nonexistent path emits nothing on stdout; the fatal message
+# goes to stderr. Output size: ~60-80 B. No large fixture needed — output
+# is a fixed one-liner regardless of repo size.
+printf '' > "$SMALL_DIR/git_add_error.stdout.txt"
+git -C "$SMALL_SCRATCH" add nonexistent-path 2>"$SMALL_DIR/git_add_error.stderr.txt" || true
+
+# ── git commit simple ─────────────────────────────────────────────────────────
+echo "hello" > "$SMALL_SCRATCH/a.txt"
+git -C "$SMALL_SCRATCH" add a.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:01 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:01 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat: add a.txt" \
+  > "$SMALL_DIR/git_commit_simple.txt"
+
+# ── git commit multifile ──────────────────────────────────────────────────────
+echo "world" > "$SMALL_SCRATCH/b.txt"
+echo "extra" > "$SMALL_SCRATCH/c.txt"
+git -C "$SMALL_SCRATCH" add b.txt c.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:02 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:02 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat: add b.txt and c.txt
+
+Adds two files to exercise the multi-file commit summary path." \
+  > "$SMALL_DIR/git_commit_multifile.txt"
+
+# ── Set up a bare remote for push/pull/fetch ──────────────────────────────────
+REMOTE_DIR=$(mktemp -d -t smll-remote-XXXXXX)
+trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR"' EXIT
+git init -q --bare "$REMOTE_DIR"
+git -C "$SMALL_SCRATCH" remote add origin "$REMOTE_DIR"
+
+# ── git push simple ───────────────────────────────────────────────────────────
+# Push: the remote-tracking summary goes to stderr; on some git versions
+# "branch set up to track" goes to stdout. Capture both, then normalize
+# the absolute temp path to a stable placeholder.
+git -C "$SMALL_SCRATCH" push --no-progress -u origin main \
+  > "$SMALL_DIR/git_push_simple.stdout.txt" \
+  2> "$SMALL_DIR/git_push_simple.stderr.txt"
+sed -i.bak "s|$REMOTE_DIR|/smll-fixture-remote|g" "$SMALL_DIR/git_push_simple.stdout.txt"
+sed -i.bak "s|$REMOTE_DIR|/smll-fixture-remote|g" "$SMALL_DIR/git_push_simple.stderr.txt"
+rm -f "$SMALL_DIR/git_push_simple.stdout.txt.bak" "$SMALL_DIR/git_push_simple.stderr.txt.bak"
+
+# ── git pull fast-forward ─────────────────────────────────────────────────────
+# Create a second clone, add a commit there, push it, then pull from first.
+CLONE2=$(mktemp -d -t smll-clone2-XXXXXX)
+trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR" "$CLONE2"' EXIT
+git clone -q "$REMOTE_DIR" "$CLONE2"
+git -C "$CLONE2" config user.email alice@example.com
+git -C "$CLONE2" config user.name "Alice Anderson"
+git -C "$CLONE2" config commit.gpgsign false
+echo "from clone2" > "$CLONE2/d.txt"
+git -C "$CLONE2" add d.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:03 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:03 +0000" \
+  git -C "$CLONE2" commit --no-gpg-sign -m "feat: add d.txt from clone2"
+git -C "$CLONE2" push --no-progress -q origin main
+
+# Now pull in the original repo — this is a fast-forward.
+# stdout: "Updating <sha>..<sha>\nFast-forward\n d.txt | 1 +\n 1 file changed..."
+# stderr: "From <path>\n   <sha>..<sha>  main -> origin/main"
+git -C "$SMALL_SCRATCH" pull --no-progress --ff-only origin main \
+  > "$SMALL_DIR/git_pull_ff.stdout.txt" \
+  2> "$SMALL_DIR/git_pull_ff.stderr.txt"
+
+# Replace the absolute remote path in stderr with a stable placeholder
+# so the fixture is byte-deterministic across machines.
+sed -i.bak "s|$REMOTE_DIR|/smll-fixture-remote|g" "$SMALL_DIR/git_pull_ff.stderr.txt"
+rm -f "$SMALL_DIR/git_pull_ff.stderr.txt.bak"
+
+# ── git pull already up to date ───────────────────────────────────────────────
+git -C "$SMALL_SCRATCH" pull --no-progress origin main \
+  > "$SMALL_DIR/git_pull_uptodate.stdout.txt" \
+  2> "$SMALL_DIR/git_pull_uptodate.stderr.txt"
+sed -i.bak "s|$REMOTE_DIR|/smll-fixture-remote|g" "$SMALL_DIR/git_pull_uptodate.stderr.txt"
+rm -f "$SMALL_DIR/git_pull_uptodate.stderr.txt.bak"
+
+# ── git fetch simple ──────────────────────────────────────────────────────────
+# Add another commit to clone2 and push, then fetch (don't merge) from small_scratch.
+echo "from clone2 v2" > "$CLONE2/e.txt"
+git -C "$CLONE2" add e.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:04 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:04 +0000" \
+  git -C "$CLONE2" commit --no-gpg-sign -m "feat: add e.txt"
+git -C "$CLONE2" push --no-progress -q origin main
+
+git -C "$SMALL_SCRATCH" fetch --no-progress origin \
+  > "$SMALL_DIR/git_fetch_simple.stdout.txt" \
+  2> "$SMALL_DIR/git_fetch_simple.stderr.txt"
+sed -i.bak "s|$REMOTE_DIR|/smll-fixture-remote|g" "$SMALL_DIR/git_fetch_simple.stderr.txt"
+rm -f "$SMALL_DIR/git_fetch_simple.stderr.txt.bak"
+
+# ── Branches for merge/rebase/checkout/branch ────────────────────────────────
+# Reset small_scratch to a clean state first by merging what we fetched.
+git -C "$SMALL_SCRATCH" merge --no-progress --ff-only FETCH_HEAD -q
+
+# Create feature branch from current HEAD.
+git -C "$SMALL_SCRATCH" branch feature-x
+git -C "$SMALL_SCRATCH" branch feature-y
+
+# ── git branch list ───────────────────────────────────────────────────────────
+# No large fixture — output is a fixed line per branch regardless of repo size.
+git -C "$SMALL_SCRATCH" branch > "$SMALL_DIR/git_branch_list.txt"
+
+# ── git checkout switch ───────────────────────────────────────────────────────
+# stdout: empty; stderr: "Switched to branch 'feature-x'"
+# No large fixture — always the same one-line message.
+git -C "$SMALL_SCRATCH" checkout feature-x \
+  > "$SMALL_DIR/git_checkout_switch.stdout.txt" \
+  2> "$SMALL_DIR/git_checkout_switch.stderr.txt"
+
+# Add a commit on feature-x.
+echo "feature x work" > "$SMALL_SCRATCH/fx.txt"
+git -C "$SMALL_SCRATCH" add fx.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:05 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:05 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat(feature-x): add fx.txt"
+
+# ── git merge fast-forward ────────────────────────────────────────────────────
+git -C "$SMALL_SCRATCH" checkout main -q
+git -C "$SMALL_SCRATCH" merge --no-progress --ff-only feature-x \
+  > "$SMALL_DIR/git_merge_ff.txt"
+
+# ── git merge commit (non-ff) ─────────────────────────────────────────────────
+git -C "$SMALL_SCRATCH" checkout feature-y -q
+echo "feature y work" > "$SMALL_SCRATCH/fy.txt"
+git -C "$SMALL_SCRATCH" add fy.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:06 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:06 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat(feature-y): add fy.txt"
+
+# Also add a commit on main so it's diverged (forces a merge commit).
+git -C "$SMALL_SCRATCH" checkout main -q
+echo "main extra" > "$SMALL_SCRATCH/m.txt"
+git -C "$SMALL_SCRATCH" add m.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:07 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:07 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "chore: main extra commit"
+
+GIT_AUTHOR_DATE="2026-01-01T00:00:08 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:08 +0000" \
+  git -C "$SMALL_SCRATCH" merge --no-progress --no-ff feature-y \
+    -m "Merge branch 'feature-y'" \
+  > "$SMALL_DIR/git_merge_commit.txt"
+
+# ── git merge conflict ────────────────────────────────────────────────────────
+git -C "$SMALL_SCRATCH" branch conflict-branch
+git -C "$SMALL_SCRATCH" checkout conflict-branch -q
+echo "conflict version A" > "$SMALL_SCRATCH/conflict.txt"
+git -C "$SMALL_SCRATCH" add conflict.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:09 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:09 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat: conflict version A"
+
+git -C "$SMALL_SCRATCH" checkout main -q
+echo "conflict version B" > "$SMALL_SCRATCH/conflict.txt"
+git -C "$SMALL_SCRATCH" add conflict.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:10 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:10 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat: conflict version B"
+
+# Merge will produce a CONFLICT message on stdout, exit non-zero.
+GIT_AUTHOR_DATE="2026-01-01T00:00:11 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:11 +0000" \
+  git -C "$SMALL_SCRATCH" merge --no-progress conflict-branch \
+  > "$SMALL_DIR/git_merge_conflict.stdout.txt" \
+  2> "$SMALL_DIR/git_merge_conflict.stderr.txt" \
+  || true  # non-zero exit is expected on conflict
+
+# Abort the conflicted merge so repo is clean for remaining operations.
+git -C "$SMALL_SCRATCH" merge --abort
+
+# ── git stash save ────────────────────────────────────────────────────────────
+# Make dirty working tree, then stash.
+echo "work in progress" > "$SMALL_SCRATCH/wip.txt"
+git -C "$SMALL_SCRATCH" add wip.txt
+# stash output goes to stdout: "Saved working directory and index state ..."
+# No large fixture — always one line regardless of repo size.
+git -C "$SMALL_SCRATCH" stash push -m "wip: fixture stash entry 1" \
+  > "$SMALL_DIR/git_stash_save.txt"
+
+# Add a second stash entry.
+echo "more wip" > "$SMALL_SCRATCH/wip2.txt"
+git -C "$SMALL_SCRATCH" add wip2.txt
+git -C "$SMALL_SCRATCH" stash push -m "wip: fixture stash entry 2" -q
+
+# ── git stash list ────────────────────────────────────────────────────────────
+# No large fixture — output is a line per stash entry regardless of repo size.
+git -C "$SMALL_SCRATCH" stash list > "$SMALL_DIR/git_stash_list.txt"
+
+# Pop stashes to clean state.
+git -C "$SMALL_SCRATCH" stash drop stash@{0} -q
+git -C "$SMALL_SCRATCH" stash drop stash@{0} -q
+
+# ── git rebase simple ─────────────────────────────────────────────────────────
+# Create rebase-branch off main~2, add 2 commits, then rebase onto main.
+REBASE_BASE=$(git -C "$SMALL_SCRATCH" rev-parse main~2)
+git -C "$SMALL_SCRATCH" checkout -b rebase-branch "$REBASE_BASE" -q
+echo "rebase commit 1" > "$SMALL_SCRATCH/rb1.txt"
+git -C "$SMALL_SCRATCH" add rb1.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:12 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:12 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat: rebase commit 1"
+
+echo "rebase commit 2" > "$SMALL_SCRATCH/rb2.txt"
+git -C "$SMALL_SCRATCH" add rb2.txt
+GIT_AUTHOR_DATE="2026-01-01T00:00:13 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:13 +0000" \
+  git -C "$SMALL_SCRATCH" commit --no-gpg-sign -m "feat: rebase commit 2"
+
+GIT_AUTHOR_DATE="2026-01-01T00:00:14 +0000" \
+GIT_COMMITTER_DATE="2026-01-01T00:00:14 +0000" \
+  git -C "$SMALL_SCRATCH" rebase --no-stat main \
+  > "$SMALL_DIR/git_rebase_simple.txt" 2>&1
+
+git -C "$SMALL_SCRATCH" checkout main -q
+
+# ── git blame simple ─────────────────────────────────────────────────────────
+# Create a file with multiple distinct commits for meaningful blame output.
+BLAME_REPO=$(mktemp -d -t smll-blame-XXXXXX)
+trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR" "$CLONE2" "$BLAME_REPO"' EXIT
+init_repo "$BLAME_REPO"
+COMMIT_COUNTER=0
+
+# Build a 15-line file across 5 commits (3 lines each).
+{
+    printf 'fn init() {\n'
+    printf '    // initialise the module\n'
+    printf '    setup_defaults();\n'
+} > "$BLAME_REPO/lib.rs"
+git -C "$BLAME_REPO" add lib.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:01 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:01 +0000" \
+  git -C "$BLAME_REPO" commit --no-gpg-sign -m "feat: init"
+
+{
+    printf '    configure_logging();\n'
+    printf '    configure_metrics();\n'
+    printf '    bind_signals();\n'
+} >> "$BLAME_REPO/lib.rs"
+git -C "$BLAME_REPO" add lib.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:02 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:02 +0000" \
+  git -C "$BLAME_REPO" commit --no-gpg-sign -m "feat: logging and metrics"
+
+{
+    printf '    start_event_loop();\n'
+    printf '    drain_queue();\n'
+    printf '    flush_buffers();\n'
+} >> "$BLAME_REPO/lib.rs"
+git -C "$BLAME_REPO" add lib.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:03 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:03 +0000" \
+  git -C "$BLAME_REPO" commit --no-gpg-sign -m "feat: event loop"
+
+{
+    printf '    persist_state();\n'
+    printf '    checkpoint();\n'
+    printf '    notify_ready();\n'
+} >> "$BLAME_REPO/lib.rs"
+git -C "$BLAME_REPO" add lib.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:04 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:04 +0000" \
+  git -C "$BLAME_REPO" commit --no-gpg-sign -m "feat: persist and notify"
+
+{
+    printf '    wait_for_shutdown();\n'
+    printf '    teardown();\n'
+    printf '}\n'
+} >> "$BLAME_REPO/lib.rs"
+git -C "$BLAME_REPO" add lib.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:05 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:05 +0000" \
+  git -C "$BLAME_REPO" commit --no-gpg-sign -m "feat: shutdown"
+
+git -C "$BLAME_REPO" blame lib.rs > "$SMALL_DIR/git_blame_simple.txt"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3: v0.4 large fixtures (commit, merge, rebase, blame, push)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+LARGE_SCRATCH=$(mktemp -d -t smll-large-v4-XXXXXX)
+trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR" "$CLONE2" "$BLAME_REPO" "$LARGE_SCRATCH"' EXIT
+COMMIT_COUNTER=0
+
+init_repo "$LARGE_SCRATCH"
+
+mkdir -p "$LARGE_SCRATCH/src"
+
+# Build 50 source files as the initial tree.
+for n in $(seq 1 50); do
+    make_base_file "$LARGE_SCRATCH/src/module_$(printf '%02d' "$n").rs" "module_$(printf '%02d' "$n")"
+done
+git -C "$LARGE_SCRATCH" add src
+GIT_AUTHOR_DATE="2026-01-01T00:00:01 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:01 +0000" \
+  git -C "$LARGE_SCRATCH" commit --no-gpg-sign -q -m "feat(seed): bootstrap 50-module source tree"
+
+# ── large git_commit.txt ──────────────────────────────────────────────────────
+# Add/modify 50+ files in one commit to get a rich "N files changed" summary.
+for n in $(seq 1 50); do
+    f="$LARGE_SCRATCH/src/module_$(printf '%02d' "$n").rs"
+    printf '\n// large-commit patch for module %02d\n' "$n" >> "$f"
+    printf 'pub const MODULE_%02d_VERSION: u32 = 2;\n' "$n" >> "$f"
+done
+# Add 100 new files so each gets an individual "create mode" line,
+# making the commit output meaningfully larger than the small fixture.
+mkdir -p "$LARGE_SCRATCH/src/generated"
+for n in $(seq 1 100); do
+    f="$LARGE_SCRATCH/src/generated/gen_$(printf '%03d' "$n").rs"
+    {
+        printf '// generated_%03d — part of large-commit fixture\n' "$n"
+        for k in $(seq 1 5); do
+            printf 'pub fn gen_%03d_fn_%d(x: u64) -> u64 { x ^ 0x%x }\n' \
+                "$n" "$k" "$((n * 41 + k * 17))"
+        done
+    } > "$f"
+done
+git -C "$LARGE_SCRATCH" add src
+GIT_AUTHOR_DATE="2026-01-01T00:00:02 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:02 +0000" \
+  git -C "$LARGE_SCRATCH" commit --no-gpg-sign \
+  -m "feat(large): patch all 50 modules and add 100 generated files
+
+Modifies every existing module with a version constant and adds 100
+new generated files. This commit is used to exercise the large-commit
+fixture path where the summary line reads 'N files changed, M insertions(+)'
+and each new file appears as an individual 'create mode' entry.
+
+Refs: LARGE-COMMIT-1" \
+  > "$OUT_DIR/git_commit.txt"
+
+# ── large git_merge.txt ────────────────────────────────────────────────────────
+# Create a feature branch that modifies many files, then merge it.
+git -C "$LARGE_SCRATCH" checkout -b large-feature -q
+for n in $(seq 1 60); do
+    f="$LARGE_SCRATCH/src/module_$(printf '%02d' "$n").rs"
+    printf '\n// large-feature: add transform for module %02d\n' "$n" >> "$f"
+    for k in $(seq 1 3); do
+        printf 'pub fn large_feature_%02d_transform_%d(x: u64) -> u64 { x ^ 0x%x }\n' \
+            "$n" "$k" "$((n * 37 + k * 13))" >> "$f"
+    done
+done
+git -C "$LARGE_SCRATCH" add src
+GIT_AUTHOR_DATE="2026-01-01T00:00:03 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:03 +0000" \
+  git -C "$LARGE_SCRATCH" commit --no-gpg-sign -q \
+  -m "feat(large-feature): add transform functions across all 60 modules"
+
+# Add a diverging commit on main so this is a true merge commit.
+# Use a brand-new file so there is no overlap with large-feature's changes.
+git -C "$LARGE_SCRATCH" checkout main -q
+printf '// main diverging commit\npub const MAIN_REVISION: u32 = 3;\n' \
+  > "$LARGE_SCRATCH/src/main_revision.rs"
+git -C "$LARGE_SCRATCH" add src/main_revision.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:04 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:04 +0000" \
+  git -C "$LARGE_SCRATCH" commit --no-gpg-sign -q -m "chore: bump main revision"
+
+GIT_AUTHOR_DATE="2026-01-01T00:00:05 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:05 +0000" \
+  git -C "$LARGE_SCRATCH" merge --no-progress --no-ff large-feature \
+  -m "Merge branch 'large-feature' into main" \
+  > "$OUT_DIR/git_merge.txt"
+
+# ── large git_rebase.txt ──────────────────────────────────────────────────────
+# Create a rebase-branch off the seed commit (main~1, before the large-commit)
+# with 5 commits each adding new files to src/rebase_batch/.
+# New files have no overlap with main's existing modules, so rebase is clean.
+REBASE_BASE_LARGE=$(git -C "$LARGE_SCRATCH" rev-parse main~1)
+git -C "$LARGE_SCRATCH" checkout -b large-rebase-branch "$REBASE_BASE_LARGE" -q
+mkdir -p "$LARGE_SCRATCH/src/rebase_batch"
+
+for commit_n in $(seq 1 5); do
+    for n in $(seq $((commit_n * 10 - 9)) $((commit_n * 10))); do
+        f="$LARGE_SCRATCH/src/rebase_batch/rbatch_$(printf '%02d' "$commit_n")_$(printf '%02d' "$n").rs"
+        {
+            printf '// rebase batch %d item %02d — generated\n' "$commit_n" "$n"
+            printf 'pub const REBASE_%d_ITEM_%02d: u64 = 0x%x;\n' \
+                "$commit_n" "$n" "$((commit_n * 1000 + n))"
+            for k in $(seq 1 5); do
+                printf 'pub fn rebase_%d_%02d_fn_%d(x: u64) -> u64 { x ^ 0x%x }\n' \
+                    "$commit_n" "$n" "$k" "$((commit_n * 37 + n * 13 + k * 7))"
+            done
+        } > "$f"
+    done
+    git -C "$LARGE_SCRATCH" add src/rebase_batch
+    GIT_AUTHOR_DATE="2026-01-01T00:00:$(printf '%02d' $((commit_n + 6))) +0000" \
+    GIT_COMMITTER_DATE="2026-01-01T00:00:$(printf '%02d' $((commit_n + 6))) +0000" \
+      git -C "$LARGE_SCRATCH" commit --no-gpg-sign -q \
+      -m "feat(rebase): batch $commit_n — add 10 new rebase_batch files"
+done
+
+GIT_AUTHOR_DATE="2026-01-01T00:00:12 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:12 +0000" \
+  git -C "$LARGE_SCRATCH" rebase --no-stat main \
+  > "$OUT_DIR/git_rebase.txt" 2>&1
+
+git -C "$LARGE_SCRATCH" checkout main -q
+
+# ── large git_blame.txt ────────────────────────────────────────────────────────
+# Build a 200+ line file with many distinct commits.
+BLAME_LARGE="$LARGE_SCRATCH/src/blamed_module.rs"
+{
+    printf '// blamed_module.rs — generated for large blame fixture\n'
+    printf '// This file has 200+ lines committed across 20 separate commits.\n'
+    printf '\n'
+} > "$BLAME_LARGE"
+git -C "$LARGE_SCRATCH" add src/blamed_module.rs
+GIT_AUTHOR_DATE="2026-01-01T00:00:13 +0000" GIT_COMMITTER_DATE="2026-01-01T00:00:13 +0000" \
+  git -C "$LARGE_SCRATCH" commit --no-gpg-sign -q -m "feat(blame-module): initial header"
+
+for batch in $(seq 1 20); do
+    for line in $(seq 1 10); do
+        lineno=$(( (batch - 1) * 10 + line ))
+        printf 'pub fn blamed_fn_%03d(x: u64) -> u64 { x.wrapping_mul(0x%x) ^ 0x%x }\n' \
+            "$lineno" "$((lineno * 31 + 7))" "$((lineno * 257))" >> "$BLAME_LARGE"
+    done
+    git -C "$LARGE_SCRATCH" add src/blamed_module.rs
+    GIT_AUTHOR_DATE="2026-01-01T00:00:$(printf '%02d' $((batch + 13))) +0000" \
+    GIT_COMMITTER_DATE="2026-01-01T00:00:$(printf '%02d' $((batch + 13))) +0000" \
+      git -C "$LARGE_SCRATCH" commit --no-gpg-sign -q \
+      -m "feat(blame-module): batch $batch — lines $((batch * 10 - 9))-$((batch * 10))"
+done
+
+git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
+
+# ── large git_push ─────────────────────────────────────────────────────────────
+# Push many commits (the large_scratch history) to a bare remote.
+LARGE_REMOTE=$(mktemp -d -t smll-large-remote-XXXXXX)
+trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR" "$CLONE2" "$BLAME_REPO" "$LARGE_SCRATCH" "$LARGE_REMOTE"' EXIT
+git init -q --bare "$LARGE_REMOTE"
+git -C "$LARGE_SCRATCH" remote add origin "$LARGE_REMOTE"
+
+# Push the large-rebase-branch (which has many commits) to get a rich push summary.
+git -C "$LARGE_SCRATCH" push --no-progress -u origin main \
+  > "$OUT_DIR/git_push.stdout.txt" \
+  2> "$OUT_DIR/git_push.stderr.txt"
+# Replace the absolute temp path for determinism.
+sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.stdout.txt"
+sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.stderr.txt"
+rm -f "$OUT_DIR/git_push.stdout.txt.bak" "$OUT_DIR/git_push.stderr.txt.bak"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 4: Summary
+# ═══════════════════════════════════════════════════════════════════════════════
+
+echo ""
+echo "Generated v0.3 large fixtures in $OUT_DIR:"
 for f in git_status git_diff git_log git_show; do
     bytes=$(wc -c < "$OUT_DIR/${f}.txt" | tr -d ' ')
     words=$(wc -w < "$OUT_DIR/${f}.txt" | tr -d ' ')
-    printf '  %-12s  %8s bytes  %6s words\n' "${f}.txt" "$bytes" "$words"
+    printf '  %-24s  %8s bytes  %6s words\n' "${f}.txt" "$bytes" "$words"
+done
+
+echo ""
+echo "Generated v0.4 small fixtures in $SMALL_DIR:"
+for f in \
+    git_add_error.stdout.txt git_add_error.stderr.txt \
+    git_commit_simple.txt git_commit_multifile.txt \
+    git_push_simple.stdout.txt git_push_simple.stderr.txt \
+    git_pull_ff.stdout.txt git_pull_ff.stderr.txt \
+    git_pull_uptodate.stdout.txt git_pull_uptodate.stderr.txt \
+    git_fetch_simple.stdout.txt git_fetch_simple.stderr.txt \
+    git_merge_ff.txt git_merge_commit.txt \
+    git_merge_conflict.stdout.txt git_merge_conflict.stderr.txt \
+    git_rebase_simple.txt \
+    git_checkout_switch.stdout.txt git_checkout_switch.stderr.txt \
+    git_branch_list.txt \
+    git_stash_save.txt git_stash_list.txt \
+    git_blame_simple.txt; do
+    bytes=$(wc -c < "$SMALL_DIR/${f}" | tr -d ' ')
+    printf '  %-40s  %8s bytes\n' "$f" "$bytes"
+done
+
+echo ""
+echo "Generated v0.4 large fixtures in $OUT_DIR:"
+for f in git_commit.txt git_merge.txt git_rebase.txt git_blame.txt \
+         git_push.stdout.txt git_push.stderr.txt; do
+    bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
+    printf '  %-32s  %8s bytes\n' "$f" "$bytes"
 done

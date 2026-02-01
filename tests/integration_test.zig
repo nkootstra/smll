@@ -539,6 +539,205 @@ test "large show fixture: smll output == git_show.apply byte-for-byte" {
 }
 
 // ---------------------------------------------------------------------------
+// v0.4 format assertions for diff fixtures.
+// ---------------------------------------------------------------------------
+
+test "diff simple fixture: v0.4 format — d sigil, @ sigil, no diff --git" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, diff_simple_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d simple.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@ -1 +1,3\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "+line two") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "diff --git") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "index ") == null);
+}
+
+test "diff rename+modify fixture: v0.4 format — d rename sigil, @ sigil" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, diff_rename_modify_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d old.txt -> new.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@ -1,3 +1,4\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "rename from") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "similarity index") == null);
+}
+
+// ---------------------------------------------------------------------------
+// v0.4 format assertions for log fixtures.
+// ---------------------------------------------------------------------------
+
+test "log linear fixture: v0.4 format — c sigil, : sigil, no commit/Author/Date labels" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, log_linear_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, ": fix: third line\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "commit ") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Author:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Date:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@example.com") == null);
+}
+
+test "log merge fixture: v0.4 format — p sigil for merge parents" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, log_merge_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "p 50c52b3 cb42c80\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Merge:") == null);
+}
+
+// ---------------------------------------------------------------------------
+// v0.4 format assertions for show fixtures.
+// ---------------------------------------------------------------------------
+
+test "show simple fixture: v0.4 format — c sigil + d sigil, no diff --git or Author/Date" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, show_simple_fixture);
+    defer result.deinit(allocator);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, ": feat: add a.txt with one line\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d a.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@ -0,0 +1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "+line1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "diff --git") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Author:") == null);
+}
+
+// ---------------------------------------------------------------------------
+// R3 gate: diff/log/show fixtures ≤ 80% of raw bytes.
+// ---------------------------------------------------------------------------
+
+test "diff simple fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, diff_simple_fixture);
+    defer result.deinit(allocator);
+    const target = (diff_simple_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "diff multi fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, diff_multi_fixture);
+    defer result.deinit(allocator);
+    const target = (diff_multi_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "diff rename+modify fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, diff_rename_modify_fixture);
+    defer result.deinit(allocator);
+    const target = (diff_rename_modify_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "log linear fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, log_linear_fixture);
+    defer result.deinit(allocator);
+    const target = (log_linear_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "log merge fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, log_merge_fixture);
+    defer result.deinit(allocator);
+    const target = (log_merge_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "show simple fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, show_simple_fixture);
+    defer result.deinit(allocator);
+    const target = (show_simple_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "show body fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, show_body_fixture);
+    defer result.deinit(allocator);
+    const target = (show_body_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "large diff fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, diff_large_fixture);
+    defer result.deinit(allocator);
+    const target = (diff_large_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "large log fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, log_large_fixture);
+    defer result.deinit(allocator);
+    const target = (log_large_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+test "large show fixture: R3 gate — smll ≤ 80% of raw bytes" {
+    const allocator = std.testing.allocator;
+    var result = try runSmll(allocator, show_large_fixture);
+    defer result.deinit(allocator);
+    const target = (show_large_fixture.len * 80) / 100;
+    try std.testing.expect(result.stdout.len <= target);
+}
+
+// ---------------------------------------------------------------------------
+// Pipe-mode idempotence: v0.4 diff/log/show output piped again is unchanged.
+// ---------------------------------------------------------------------------
+
+test "pipe-mode idempotence: v0.4 diff output piped into smll is unchanged" {
+    // v0.4 diff output starts with "d <path>" — does NOT match git_diff.matches
+    // ("diff --git a/" required). So smll passes it through unchanged.
+    const allocator = std.testing.allocator;
+
+    var first = try runSmll(allocator, diff_simple_fixture);
+    defer first.deinit(allocator);
+
+    var second = try runSmll(allocator, first.stdout);
+    defer second.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+}
+
+test "pipe-mode idempotence: v0.4 log output piped into smll is unchanged" {
+    // v0.4 log output starts with "c <sha7> ..." — does NOT match git_log.matches
+    // ("commit " + 40 hex chars required). So smll passes it through unchanged.
+    const allocator = std.testing.allocator;
+
+    var first = try runSmll(allocator, log_linear_fixture);
+    defer first.deinit(allocator);
+
+    var second = try runSmll(allocator, first.stdout);
+    defer second.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+}
+
+test "pipe-mode idempotence: v0.4 show output piped into smll is unchanged" {
+    // v0.4 show output starts with "c <sha7> ..." — does NOT match git_show.matches.
+    const allocator = std.testing.allocator;
+
+    var first = try runSmll(allocator, show_simple_fixture);
+    defer first.deinit(allocator);
+
+    var second = try runSmll(allocator, first.stdout);
+    defer second.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+}
+
+// ---------------------------------------------------------------------------
 // Helper: run smll with a custom PATH prefix (for fake-git tests).
 // Creates a modified copy of the current environment with PATH = binDir:$PATH.
 // ---------------------------------------------------------------------------

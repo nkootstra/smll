@@ -1,0 +1,1 @@
+fatal: pathspec 'nonexistent-path' did not match any files

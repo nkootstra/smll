@@ -1,0 +1,15 @@
+^17d6c4f (Alice Anderson 2026-01-01 00:00:01 +0000  1) fn init() {
+^17d6c4f (Alice Anderson 2026-01-01 00:00:01 +0000  2)     // initialise the module
+^17d6c4f (Alice Anderson 2026-01-01 00:00:01 +0000  3)     setup_defaults();
+6ac6cdd7 (Alice Anderson 2026-01-01 00:00:02 +0000  4)     configure_logging();
+6ac6cdd7 (Alice Anderson 2026-01-01 00:00:02 +0000  5)     configure_metrics();
+6ac6cdd7 (Alice Anderson 2026-01-01 00:00:02 +0000  6)     bind_signals();
+9e6e8fec (Alice Anderson 2026-01-01 00:00:03 +0000  7)     start_event_loop();
+9e6e8fec (Alice Anderson 2026-01-01 00:00:03 +0000  8)     drain_queue();
+9e6e8fec (Alice Anderson 2026-01-01 00:00:03 +0000  9)     flush_buffers();
+f34c3be0 (Alice Anderson 2026-01-01 00:00:04 +0000 10)     persist_state();
+f34c3be0 (Alice Anderson 2026-01-01 00:00:04 +0000 11)     checkpoint();
+f34c3be0 (Alice Anderson 2026-01-01 00:00:04 +0000 12)     notify_ready();
+526c207f (Alice Anderson 2026-01-01 00:00:05 +0000 13)     wait_for_shutdown();
+526c207f (Alice Anderson 2026-01-01 00:00:05 +0000 14)     teardown();
+526c207f (Alice Anderson 2026-01-01 00:00:05 +0000 15) }

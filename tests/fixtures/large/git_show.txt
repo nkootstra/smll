@@ -1,298 +1,143 @@
-commit 24d96d9f7db6227ed8f3621e6e1732a77e2ddcbb
+commit b4a27ac7c9f1c363f405f0c01f7d19d91f8d383d
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:32 2026 +0000
 
-    feat(harness): land stratified harness expansion
+    feat(finale): land finale-version constants across 12 modules
     
-    This commit introduces thirty stratified-harness helpers in mod_06.
-    Each helper applies a deterministic multiplier-and-bias transform
-    followed by a self-XOR rotation. The combination is intentionally
-    verbose so the resulting 'git show' output exercises a long unified
-    diff with realistic +/- density.
-    
-    The harness is reused by the production pipeline on hot paths where
-    SIMD intrinsics are unavailable. We keep the loop body simple to let
-    the autovectorizer pick it up on platforms that support it.
+    Adds a FINALE_VERSION constant to every mod_NN module. Wide-but-shallow
+    shape exercises the multi-file diff path for git_show.
     
     Refs: BENCH-FINAL
 
+diff --git a/src/mod_01.rs b/src/mod_01.rs
+index 3b0ef64..6d8694d 100644
+--- a/src/mod_01.rs
++++ b/src/mod_01.rs
+@@ -322,3 +322,6 @@ fn xenon_brink_step_5(seed: u64) -> u64 {
+     mixed ^ 0x191e
+ }
+ 
++
++// finale-commit: version bump for mod_01
++pub const MOD_01_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_02.rs b/src/mod_02.rs
+index fc2489c..c8db06d 100644
+--- a/src/mod_02.rs
++++ b/src/mod_02.rs
+@@ -325,3 +325,6 @@ fn yarrow_crest_step_5(seed: u64) -> u64 {
+     mixed ^ 0x1a1f
+ }
+ 
++
++// finale-commit: version bump for mod_02
++pub const MOD_02_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_03.rs b/src/mod_03.rs
+index 8832277..ae1025a 100644
+--- a/src/mod_03.rs
++++ b/src/mod_03.rs
+@@ -322,3 +322,6 @@ fn zenith_drift_step_5(seed: u64) -> u64 {
+     mixed ^ 0x1b20
+ }
+ 
++
++// finale-commit: version bump for mod_03
++pub const MOD_03_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_04.rs b/src/mod_04.rs
+index b611c96..b4e55b0 100644
+--- a/src/mod_04.rs
++++ b/src/mod_04.rs
+@@ -325,3 +325,6 @@ fn arcane_eddy_step_5(seed: u64) -> u64 {
+     mixed ^ 0x1c21
+ }
+ 
++
++// finale-commit: version bump for mod_04
++pub const MOD_04_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_05.rs b/src/mod_05.rs
+index 02304c8..eacf53b 100644
+--- a/src/mod_05.rs
++++ b/src/mod_05.rs
+@@ -322,3 +322,6 @@ fn bramble_fern_step_5(seed: u64) -> u64 {
+     mixed ^ 0x1d22
+ }
+ 
++
++// finale-commit: version bump for mod_05
++pub const MOD_05_FINALE_VERSION: u32 = 2;
 diff --git a/src/mod_06.rs b/src/mod_06.rs
-index 1565405..37e39cb 100644
+index 1565405..53a7ee3 100644
 --- a/src/mod_06.rs
 +++ b/src/mod_06.rs
-@@ -325,3 +325,275 @@ fn citrine_grove_step_5(seed: u64) -> u64 {
+@@ -325,3 +325,6 @@ fn citrine_grove_step_5(seed: u64) -> u64 {
      mixed ^ 0x1e23
  }
  
 +
-+// finale-commit: stratified harness expansion
-+pub fn stratified_harness_01(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x45d_u64;
-+    let bias = 0x26_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(2))
-+        .collect()
-+}
++// finale-commit: version bump for mod_06
++pub const MOD_06_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_07.rs b/src/mod_07.rs
+index 46d9cb7..eaee346 100644
+--- a/src/mod_07.rs
++++ b/src/mod_07.rs
+@@ -298,3 +298,6 @@ fn russet_umbra_step_5(seed: u64) -> u64 {
+ 
+ // commit-30 cross-ref to citrine grove
+ const COMMIT_30_TAG: &str = "citrine/grove";
 +
-+pub fn stratified_harness_02(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x8ba_u64;
-+    let bias = 0x45_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(3))
-+        .collect()
-+}
++// finale-commit: version bump for mod_07
++pub const MOD_07_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_08.rs b/src/mod_08.rs
+index 1d6b78a..3bc19c3 100644
+--- a/src/mod_08.rs
++++ b/src/mod_08.rs
+@@ -295,3 +295,6 @@ fn silver_vista_step_5(seed: u64) -> u64 {
+     mixed ^ 0x1419
+ }
+ 
 +
-+pub fn stratified_harness_03(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0xd17_u64;
-+    let bias = 0x64_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(4))
-+        .collect()
-+}
++// finale-commit: version bump for mod_08
++pub const MOD_08_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_09.rs b/src/mod_09.rs
+index be5658a..725d7a4 100644
+--- a/src/mod_09.rs
++++ b/src/mod_09.rs
+@@ -298,3 +298,6 @@ fn teal_warden_step_5(seed: u64) -> u64 {
+     mixed ^ 0x151a
+ }
+ 
 +
-+pub fn stratified_harness_04(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x1174_u64;
-+    let bias = 0x83_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(5))
-+        .collect()
-+}
++// finale-commit: version bump for mod_09
++pub const MOD_09_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_10.rs b/src/mod_10.rs
+index f312442..51e5e6a 100644
+--- a/src/mod_10.rs
++++ b/src/mod_10.rs
+@@ -295,3 +295,6 @@ fn umber_yonder_step_5(seed: u64) -> u64 {
+     mixed ^ 0x161b
+ }
+ 
 +
-+pub fn stratified_harness_05(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x15d1_u64;
-+    let bias = 0xa2_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(6))
-+        .collect()
-+}
++// finale-commit: version bump for mod_10
++pub const MOD_10_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_11.rs b/src/mod_11.rs
+index e800ed9..8ea52a9 100644
+--- a/src/mod_11.rs
++++ b/src/mod_11.rs
+@@ -298,3 +298,6 @@ fn vivid_zephyr_step_5(seed: u64) -> u64 {
+     mixed ^ 0x171c
+ }
+ 
 +
-+pub fn stratified_harness_06(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x1a2e_u64;
-+    let bias = 0xc1_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(7))
-+        .collect()
-+}
++// finale-commit: version bump for mod_11
++pub const MOD_11_FINALE_VERSION: u32 = 2;
+diff --git a/src/mod_12.rs b/src/mod_12.rs
+index f391645..5f4f669 100644
+--- a/src/mod_12.rs
++++ b/src/mod_12.rs
+@@ -295,3 +295,6 @@ fn wisteria_arbor_step_5(seed: u64) -> u64 {
+     mixed ^ 0x181d
+ }
+ 
 +
-+pub fn stratified_harness_07(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x1e8b_u64;
-+    let bias = 0xe0_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(8))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_08(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x22e8_u64;
-+    let bias = 0xff_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(9))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_09(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x2745_u64;
-+    let bias = 0x11e_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(10))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_10(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x2ba2_u64;
-+    let bias = 0x13d_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(11))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_11(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x2fff_u64;
-+    let bias = 0x15c_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(12))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_12(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x345c_u64;
-+    let bias = 0x17b_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(13))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_13(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x38b9_u64;
-+    let bias = 0x19a_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(14))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_14(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x3d16_u64;
-+    let bias = 0x1b9_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(15))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_15(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x4173_u64;
-+    let bias = 0x1d8_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(16))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_16(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x45d0_u64;
-+    let bias = 0x1f7_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(17))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_17(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x4a2d_u64;
-+    let bias = 0x216_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(18))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_18(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x4e8a_u64;
-+    let bias = 0x235_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(19))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_19(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x52e7_u64;
-+    let bias = 0x254_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(1))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_20(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x5744_u64;
-+    let bias = 0x273_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(2))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_21(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x5ba1_u64;
-+    let bias = 0x292_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(3))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_22(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x5ffe_u64;
-+    let bias = 0x2b1_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(4))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_23(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x645b_u64;
-+    let bias = 0x2d0_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(5))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_24(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x68b8_u64;
-+    let bias = 0x2ef_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(6))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_25(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x6d15_u64;
-+    let bias = 0x30e_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(7))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_26(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x7172_u64;
-+    let bias = 0x32d_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(8))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_27(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x75cf_u64;
-+    let bias = 0x34c_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(9))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_28(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x7a2c_u64;
-+    let bias = 0x36b_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(10))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_29(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x7e89_u64;
-+    let bias = 0x38a_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(11))
-+        .collect()
-+}
-+
-+pub fn stratified_harness_30(input: &[u64]) -> Vec<u64> {
-+    let multiplier = 0x82e6_u64;
-+    let bias = 0x3a9_u64;
-+    input.iter()
-+        .map(|x| x.wrapping_mul(multiplier).wrapping_add(bias))
-+        .map(|x| x ^ x.rotate_left(12))
-+        .collect()
-+}
-+
++// finale-commit: version bump for mod_12
++pub const MOD_12_FINALE_VERSION: u32 = 2;

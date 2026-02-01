@@ -1,0 +1,3 @@
+From /smll-fixture-remote
+ * branch            main       -> FETCH_HEAD
+   43fe7da..2cee6f5  main       -> origin/main

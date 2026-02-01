@@ -2,6 +2,33 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
+// v0.4 grammar for `git diff`:
+//
+//   d <path>            — file header when a/<path> == b/<path> (common case)
+//   d <old> -> <new>    — file header when paths differ (rename/copy)
+//   @ -x,y +a,b ctx    — hunk header (strips outer @@ markers, preserves numbers)
+//   +<content>          — added line (verbatim)
+//   -<content>          — removed line (verbatim)
+//    <content>          — context line (verbatim, leading space preserved)
+//
+// Dropped:
+//   diff --git ...      (replaced by d sigil)
+//   index ...           (SHA noise, unhelpful)
+//   similarity index    (redundant with d sigil)
+//   dissimilarity index (redundant with d sigil)
+//   rename from ...     (captured in d <old> -> <new>)
+//   rename to ...       (captured in d <old> -> <new>)
+//   copy from ...       (captured in d <old> -> <new>)
+//   copy to ...         (captured in d <old> -> <new>)
+//   --- a/...           (path in d line, --- noise)
+//   +++ b/...           (path in d line, +++ noise)
+//
+// Preserved:
+//   new file mode ...   (semantic — tells reader this is a newly added file)
+//   deleted file mode   (semantic — tells reader this file was deleted)
+//   Every +/- line, context line, hunk header numbers (lossless R2)
+//   Every path verbatim
+
 pub fn matches(input: []const u8) bool {
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |line| {
@@ -14,47 +41,105 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
-    const input = stdout;
+    try applyInner(stdout, writer);
+}
 
-    const had_trailing_newline = input.len > 0 and input[input.len - 1] == '\n';
-    const content = if (had_trailing_newline) input[0 .. input.len - 1] else input;
+
+/// Apply the v0.4 diff grammar with proper sigil transformations.
+/// This is the real implementation that handles diff --git → d, @@ → @.
+fn applyInner(stdout: []const u8, writer: *Writer) !void {
+    const had_trailing_newline = stdout.len > 0 and stdout[stdout.len - 1] == '\n';
+    const content = if (had_trailing_newline) stdout[0 .. stdout.len - 1] else stdout;
 
     var lines = std.mem.splitScalar(u8, content, '\n');
-    var in_hunk = false;
-    var first = true;
+    var first_out = true;
+
     while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "diff --git ")) {
-            in_hunk = false;
-        } else if (std.mem.startsWith(u8, line, "@@")) {
-            in_hunk = true;
+        // diff --git a/<old> b/<new> — emit d sigil
+        if (std.mem.startsWith(u8, line, "diff --git a/")) {
+            // Parse paths from "diff --git a/<path_a> b/<path_b>"
+            const rest = line["diff --git a/".len..];
+            // Find " b/" separator — search from end since path may contain spaces
+            // The format is: a/<path_a> b/<path_b>
+            // We look for the last occurrence of " b/" to split
+            const b_marker = " b/";
+            const b_pos = std.mem.lastIndexOf(u8, rest, b_marker);
+            if (b_pos) |bp| {
+                const path_a = rest[0..bp];
+                const path_b = rest[bp + b_marker.len ..];
+                if (std.mem.eql(u8, path_a, path_b)) {
+                    // Common case: same path
+                    if (!first_out) try writer.writeByte('\n');
+                    try writer.writeAll("d ");
+                    try writer.writeAll(path_a);
+                    first_out = false;
+                } else {
+                    // Rename/copy: paths differ — store for later emission
+                    // (we need rename from/to to confirm, but actually the diff --git
+                    // line itself has both paths, so we can emit directly)
+                    if (!first_out) try writer.writeByte('\n');
+                    try writer.writeAll("d ");
+                    try writer.writeAll(path_a);
+                    try writer.writeAll(" -> ");
+                    try writer.writeAll(path_b);
+                    first_out = false;
+                }
+            } else {
+                // Fallback: emit the whole rest
+                if (!first_out) try writer.writeByte('\n');
+                try writer.writeAll("d ");
+                try writer.writeAll(rest);
+                first_out = false;
+            }
+            continue;
         }
 
-        if (!in_hunk and isDroppedHeaderLine(line)) continue;
+        // @@ -x,y +a,b @@ ctx → @ -x,y +a,b ctx
+        if (std.mem.startsWith(u8, line, "@@ ")) {
+            // Find closing @@
+            const after_open = line[3..]; // skip "@@ "
+            const close = std.mem.indexOf(u8, after_open, " @@");
+            if (close) |cp| {
+                const coords = after_open[0..cp];
+                const ctx = after_open[cp + " @@".len ..];
+                if (!first_out) try writer.writeByte('\n');
+                try writer.writeAll("@ ");
+                try writer.writeAll(coords);
+                if (ctx.len > 0) {
+                    try writer.writeAll(ctx); // ctx already starts with space if non-empty
+                }
+                first_out = false;
+            } else {
+                // Malformed hunk header — emit trimmed
+                if (!first_out) try writer.writeByte('\n');
+                try writer.writeAll("@ ");
+                try writer.writeAll(line[3..]);
+                first_out = false;
+            }
+            continue;
+        }
 
-        if (!first) try writer.writeByte('\n');
+        // Drop index, similarity, dissimilarity, ---, +++, rename from/to, copy from/to
+        if (std.mem.startsWith(u8, line, "index ")) continue;
+        if (std.mem.startsWith(u8, line, "similarity index ")) continue;
+        if (std.mem.startsWith(u8, line, "dissimilarity index ")) continue;
+        if (std.mem.startsWith(u8, line, "--- a/")) continue;
+        if (std.mem.startsWith(u8, line, "--- /dev/null")) continue;
+        if (std.mem.startsWith(u8, line, "+++ b/")) continue;
+        if (std.mem.startsWith(u8, line, "+++ /dev/null")) continue;
+        if (std.mem.startsWith(u8, line, "rename from ")) continue;
+        if (std.mem.startsWith(u8, line, "rename to ")) continue;
+        if (std.mem.startsWith(u8, line, "copy from ")) continue;
+        if (std.mem.startsWith(u8, line, "copy to ")) continue;
+
+        // Everything else passes through verbatim:
+        // new file mode, deleted file mode, +/- lines, context lines
+        if (!first_out) try writer.writeByte('\n');
         try writer.writeAll(line);
-        first = false;
+        first_out = false;
     }
-    if (had_trailing_newline) try writer.writeByte('\n');
-}
 
-fn isDroppedHeaderLine(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "index ") or
-        std.mem.startsWith(u8, line, "similarity index ") or
-        std.mem.startsWith(u8, line, "dissimilarity index ") or
-        std.mem.startsWith(u8, line, "--- ") or
-        std.mem.startsWith(u8, line, "+++ ");
-}
-
-fn wordCount(s: []const u8) usize {
-    var count: usize = 0;
-    var in_word = false;
-    for (s) |c| {
-        const is_space = c == ' ' or c == '\t' or c == '\n' or c == '\r';
-        if (!is_space and !in_word) count += 1;
-        in_word = !is_space;
-    }
-    return count;
+    if (had_trailing_newline and !first_out) try writer.writeByte('\n');
 }
 
 const simple_fixture = @embedFile("fixture_git_diff_simple");
@@ -96,6 +181,15 @@ test "matches: leading blank lines are skipped" {
     try std.testing.expect(matches("\n\ndiff --git a/x b/x\n"));
 }
 
+test "apply: emits d sigil for file header on simple" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, simple_fixture);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "d simple.txt\n") != null);
+    // diff --git line gone
+    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
+}
+
 test "apply: drops index line on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
@@ -111,18 +205,13 @@ test "apply: drops --- a/ and +++ b/ twin on simple" {
     try std.testing.expect(std.mem.indexOf(u8, out, "+++ b/") == null);
 }
 
-test "apply: preserves diff --git header on simple" {
+test "apply: emits @ sigil for hunk header on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git a/simple.txt b/simple.txt") != null);
-}
-
-test "apply: preserves hunk header on simple" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, simple_fixture);
-    defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@@ -1 +1,3 @@") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@ -1 +1,3\n") != null);
+    // Old @@ form is gone
+    try std.testing.expect(std.mem.indexOf(u8, out, "@@ -1 +1,3 @@") == null);
 }
 
 test "apply: preserves every + line on simple" {
@@ -133,13 +222,22 @@ test "apply: preserves every + line on simple" {
     try std.testing.expect(std.mem.indexOf(u8, out, "+line three") != null);
 }
 
-test "apply: preserves every file header on multi" {
+test "apply: preserves context line on simple" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, simple_fixture);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, " line one") != null);
+}
+
+test "apply: emits d sigils for every file on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git a/color.txt b/color.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git a/fruit.txt b/fruit.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git a/numbers.txt b/numbers.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "d color.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "d fruit.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "d numbers.txt\n") != null);
+    // No diff --git lines
+    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
 }
 
 test "apply: drops every index line on multi" {
@@ -170,45 +268,37 @@ test "apply: preserves context lines on multi" {
     try std.testing.expect(std.mem.indexOf(u8, out, " three") != null);
 }
 
-test "apply: drops similarity index on rename" {
+test "apply: emits d rename sigil on rename fixture" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_fixture);
     defer allocator.free(out);
+    // Paths differ: fruit.txt -> produce.txt
+    try std.testing.expect(std.mem.indexOf(u8, out, "d fruit.txt -> produce.txt\n") != null);
+    // No diff --git, no similarity index, no rename from/to
+    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
     try std.testing.expect(std.mem.indexOf(u8, out, "similarity index ") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "rename from") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "rename to") == null);
 }
 
-test "apply: preserves rename from/to lines on rename" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, rename_fixture);
-    defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename from fruit.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename to produce.txt") != null);
-}
-
-test "apply: preserves diff --git header on rename" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, rename_fixture);
-    defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git a/fruit.txt b/produce.txt") != null);
-}
-
-test "apply: drops similarity, index, and twin on rename+modify" {
+test "apply: emits d rename sigil on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "d old.txt -> new.txt\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "similarity index ") == null);
     try std.testing.expect(std.mem.indexOf(u8, out, "index ") == null);
     try std.testing.expect(std.mem.indexOf(u8, out, "--- a/") == null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+++ b/") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "rename from") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "rename to") == null);
 }
 
-test "apply: preserves rename from/to and hunk on rename+modify" {
+test "apply: emits @ hunk header on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename from old.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename to new.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@@ -1,3 +1,4 @@") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@ -1,3 +1,4\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+date") != null);
 }
 
@@ -226,18 +316,50 @@ test "apply: hunk-internal line starting with --- is preserved (state tracking)"
     try std.testing.expect(std.mem.indexOf(u8, out, "---- content") != null);
 }
 
-test "apply: directional compression on simple" {
+test "apply: directional compression on simple (byte count)" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(wordCount(out) < wordCount(simple_fixture));
+    try std.testing.expect(out.len < simple_fixture.len);
 }
 
-test "apply: directional compression on multi" {
+test "apply: directional compression on multi (byte count)" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(wordCount(out) < wordCount(multi_fixture));
+    try std.testing.expect(out.len < multi_fixture.len);
+}
+
+test "apply: R3 gate — simple fixture ≤ 80% of raw" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, simple_fixture);
+    defer allocator.free(out);
+    const target = (simple_fixture.len * 80) / 100;
+    try std.testing.expect(out.len <= target);
+}
+
+test "apply: R3 gate — multi fixture ≤ 80% of raw" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, multi_fixture);
+    defer allocator.free(out);
+    const target = (multi_fixture.len * 80) / 100;
+    try std.testing.expect(out.len <= target);
+}
+
+test "apply: R3 gate — rename fixture ≤ 80% of raw" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, rename_fixture);
+    defer allocator.free(out);
+    const target = (rename_fixture.len * 80) / 100;
+    try std.testing.expect(out.len <= target);
+}
+
+test "apply: R3 gate — rename+modify fixture ≤ 80% of raw" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, rename_modify_fixture);
+    defer allocator.free(out);
+    const target = (rename_modify_fixture.len * 80) / 100;
+    try std.testing.expect(out.len <= target);
 }
 
 test "apply: preserves trailing newline when input has one" {
@@ -245,4 +367,17 @@ test "apply: preserves trailing newline when input has one" {
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
+}
+
+test "pipe-mode idempotence: v0.4 diff output piped again is unchanged" {
+    // v0.4 diff output starts with "d <path>" — does NOT match matches()
+    // (which requires "diff --git a/" prefix). So smll passes it through.
+    const allocator = std.testing.allocator;
+    const first = try applyToString(allocator, simple_fixture);
+    defer allocator.free(first);
+    // Second pass: v0.4 output should NOT match matches()
+    try std.testing.expect(!matches(first));
+    // The point is: v0.4 output starts with "d path", not "diff --git a/",
+    // so matches() returns false → in pipe/stdin mode, smll passes through unchanged.
+    try std.testing.expect(!matches(first));
 }

@@ -1,24 +1,17 @@
-commit 24d96d9f7db6227ed8f3621e6e1732a77e2ddcbb
+commit b4a27ac7c9f1c363f405f0c01f7d19d91f8d383d
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:32 2026 +0000
 
-    feat(harness): land stratified harness expansion
+    feat(finale): land finale-version constants across 12 modules
     
-    This commit introduces thirty stratified-harness helpers in mod_06.
-    Each helper applies a deterministic multiplier-and-bias transform
-    followed by a self-XOR rotation. The combination is intentionally
-    verbose so the resulting 'git show' output exercises a long unified
-    diff with realistic +/- density.
-    
-    The harness is reused by the production pipeline on hot paths where
-    SIMD intrinsics are unavailable. We keep the loop body simple to let
-    the autovectorizer pick it up on platforms that support it.
+    Adds a FINALE_VERSION constant to every mod_NN module. Wide-but-shallow
+    shape exercises the multi-file diff path for git_show.
     
     Refs: BENCH-FINAL
 
-commit da623671dda1934503ee70a3da67155d8c9a84fc
+commit 0f00bbaf543f2065f9678cd72ae82fa6b56eb32e
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:31 2026 +0000
 
     feat(citrine): introduce citrine grove step pipeline
     
@@ -29,9 +22,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-30
 
-commit aa07736465bf5db38b635ab7688dc9927a65e993
+commit 312ef3a1328c24a8b34bee0ebae74d0dcd6d6515
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:30 2026 +0000
 
     feat(bramble): introduce bramble fern step pipeline
     
@@ -42,9 +35,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-29
 
-commit 6f4c6a2e7c92e7a53732e9448101d05be5e0205b
+commit aeee2d7939e70386b8143e486f43a28247ce5589
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:29 2026 +0000
 
     feat(arcane): introduce arcane eddy step pipeline
     
@@ -55,9 +48,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-28
 
-commit d6e9f12812e6373138e3e5e5ee625e93e8961044
+commit 966540727169b0d6cc74f08ac961f537d51440f9
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:28 2026 +0000
 
     feat(zenith): introduce zenith drift step pipeline
     
@@ -68,9 +61,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-27
 
-commit a171d6165f018b5ec6f4dba6c5490517e77a8299
+commit d9403f24b68bba22a07383aed93dc92619613da2
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:27 2026 +0000
 
     feat(yarrow): introduce yarrow crest step pipeline
     
@@ -81,9 +74,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-26
 
-commit 6b9919bb0249f09a496c001aef0a96953c30155a
+commit 2614669932c7c86ad401ce134f484cde8b6918d6
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:26 2026 +0000
 
     feat(xenon): introduce xenon brink step pipeline
     
@@ -94,9 +87,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-25
 
-commit e507a79ed0fff4575b38a9ec4b8310e8aa7be410
+commit 77dd504fa7179cc76ca5bf1eda54fcda77329b58
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:25 2026 +0000
 
     feat(wisteria): introduce wisteria arbor step pipeline
     
@@ -107,9 +100,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-24
 
-commit a6240d3d4eb4339168a79967b7879c6f91ad7fe6
+commit a89e4a63d0299a24e606663d1ee94c0050259064
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:24 2026 +0000
 
     feat(vivid): introduce vivid zephyr step pipeline
     
@@ -120,9 +113,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-23
 
-commit 87552ae1abace7e55c2ea1c4cf67c0bbdd1676c2
+commit e61ce7b5d0dd03c45b510dfed66fe602e6b285a1
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:23 2026 +0000
 
     feat(umber): introduce umber yonder step pipeline
     
@@ -133,9 +126,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-22
 
-commit cb802affa3563e2a61412d71289a83b16e755557
+commit 11472a045fab9b0fb3b29a8b402077c14af911a4
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:22 2026 +0000
 
     feat(teal): introduce teal warden step pipeline
     
@@ -146,9 +139,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-21
 
-commit ce07a542d199106709afe7d7f7aa250f5aa0ec31
+commit 43063cd7d75df65cb6b5b4eb218b8be1cd4ff54d
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:21 2026 +0000
 
     feat(silver): introduce silver vista step pipeline
     
@@ -159,9 +152,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-20
 
-commit bb7514d3a52b1c9ea97c308aba7ab69103b69bf5
+commit 616b2a436aae24fea1cf0f363c0b95d5e3e4681c
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:20 2026 +0000
 
     feat(russet): introduce russet umbra step pipeline
     
@@ -172,9 +165,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-19
 
-commit ad7c81d8da19d70b86621a9fd1b34aa8d5bd7338
+commit 4ee2ce19a288256f0fac4e7c7349bed3a5145537
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:19 2026 +0000
 
     feat(quartz): introduce quartz thorn step pipeline
     
@@ -185,9 +178,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-18
 
-commit b267a5c34a36b6eea02b84daa6951e1d136f0d31
+commit cce8cb1ab83ff7d400fda908b107cd8d6f27355b
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:18 2026 +0000
 
     feat(pearl): introduce pearl sigil step pipeline
     
@@ -198,9 +191,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-17
 
-commit a06b0f84f95037d68891b37492bef5930e1ae655
+commit da3ec3a5ca77b7cb9705618daeb29aaa2e8ac979
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:17 2026 +0000
 
     feat(obsidian): introduce obsidian ridge step pipeline
     
@@ -211,9 +204,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-16
 
-commit cc309f1944b13962d5fa0f87614e67d6d6d5807c
+commit 5da158fc7b711888137f7461078ddad861bb6ad3
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:16 2026 +0000
 
     feat(nimble): introduce nimble quasar step pipeline
     
@@ -224,9 +217,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-15
 
-commit bc3688d467af0fae87e7ecc56dc0a68a26ba84c3
+commit 8ed3b2202d0039fd4a26dc5bb17d94f84f45b862
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:15 2026 +0000
 
     feat(mauve): introduce mauve plume step pipeline
     
@@ -237,9 +230,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-14
 
-commit ceb8f1b974f7753f7b67841c6a0ab61d9fbd130e
+commit 9aa1e29388fb80600a0ea71a356d545c6452bb78
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:14 2026 +0000
 
     feat(lush): introduce lush orchard step pipeline
     
@@ -250,9 +243,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-13
 
-commit e21a29d4c92aae3b9affaed95ace1d07046d3dd4
+commit 4c57f384c226de11864e05508ac1bb3753faa8f4
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:13 2026 +0000
 
     feat(keen): introduce keen nimbus step pipeline
     
@@ -263,9 +256,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-12
 
-commit a0e6471a81de6cc2f7ab761a5c851b1a4a576331
+commit 90df8e339817306a8b47689fb41dc206b5a810fa
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:12 2026 +0000
 
     feat(jade): introduce jade meridian step pipeline
     
@@ -276,9 +269,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-11
 
-commit bcb02e3e41afcb5be3775772cb43044fd1424e5d
+commit afd9e0b5e54b0b5f6cb52b62bed593d7d2c6b185
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:11 2026 +0000
 
     feat(indigo): introduce indigo lattice step pipeline
     
@@ -289,9 +282,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-10
 
-commit e8a5721e4a85d1ce27523340ded33d4107738efe
+commit afe6ce3b874c677a51a9364696f5e780043b36dc
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:10 2026 +0000
 
     feat(hazy): introduce hazy knoll step pipeline
     
@@ -302,9 +295,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-9
 
-commit bf3c9326b2884653a360213053c0a528b06c9065
+commit 8b010fb88db7a654d5380eb64cf2d58e5245d01e
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:09 2026 +0000
 
     feat(golden): introduce golden jetty step pipeline
     
@@ -315,9 +308,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-8
 
-commit f636ec4608496f8141d376ddb930c0c5f2859d81
+commit 33a8d5b30c2cfe1cbeb39b77a49a93c3bf167815
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:08 2026 +0000
 
     feat(frosty): introduce frosty inlet step pipeline
     
@@ -328,9 +321,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-7
 
-commit e6fb7bc847bbc2a83487120ac428b3bc8b8de5a4
+commit c8f3bf830798b51c5d0ad635d6dbace78be62d52
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:07 2026 +0000
 
     feat(ember): introduce ember hollow step pipeline
     
@@ -341,9 +334,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-6
 
-commit bc5d1ba03ac7118943aae6871b261fcc5da1abd0
+commit da7e8dd537a4ef6e0d861d767618577d0cae193b
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:06 2026 +0000
 
     feat(dusky): introduce dusky glade step pipeline
     
@@ -354,9 +347,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-5
 
-commit 8c426e07f883e1e6e5075d51afad91adafa11fe4
+commit 41ee72b496d55cb69b4a747829686d895aaf36cf
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:05 2026 +0000
 
     feat(crimson): introduce crimson flux step pipeline
     
@@ -367,9 +360,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-4
 
-commit 755d2e1ae512dc94a46f62d8caf927cc1e44fc17
+commit 76c0d871ca335dc97d6abcded95a2fbe0f9f69e9
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:04 2026 +0000
 
     feat(brisk): introduce brisk delta step pipeline
     
@@ -380,9 +373,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-3
 
-commit 21604f9b37e092379fc2cc75b9dc4f9bf6adb74c
+commit ee3793fbe39a4ac9dac35c4e932336a31bc6ccb2
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:03 2026 +0000
 
     feat(azure): introduce azure cipher step pipeline
     
@@ -393,9 +386,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-2
 
-commit 480314fbe87cc28502cbc120fc48f60e7966481f
+commit fe98afb25c72b8e7bc7ccbc83ba6a38bdfbdfbb3
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:02 2026 +0000
 
     feat(amber): introduce amber beacon step pipeline
     
@@ -406,9 +399,9 @@ Date:   Thu Jan 1 00:00:00 2026 +0000
     
     Refs: BENCH-1
 
-commit fc7d6a0e337629c7ef63946dcbd3f619d79b0f91
+commit af544d8240d61edb834a8ce94f2962074787af7a
 Author: Alice Anderson <alice@example.com>
-Date:   Thu Jan 1 00:00:00 2026 +0000
+Date:   Thu Jan 1 00:00:01 2026 +0000
 
     feat(seed): bootstrap source tree
     

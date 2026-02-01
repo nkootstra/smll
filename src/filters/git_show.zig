@@ -4,6 +4,23 @@ const Writer = std.Io.Writer;
 const git_log = @import("git_log");
 const git_diff = @import("git_diff");
 
+// v0.4 grammar for `git show`:
+//
+// Delegates to git_log + git_diff with a single blank line separator.
+//
+// Output structure:
+//   c <sha7> <date> <author>   — commit header (from git_log)
+//   [p <sha7>...]              — parents if merge (from git_log)
+//   : <subject>                — subject line (from git_log)
+//   [: <body>...]              — body lines (from git_log)
+//                              — blank line separator
+//   d <path>                   — diff file header (from git_diff)
+//   @ -x,y +a,b                — hunk header (from git_diff)
+//   +/-/  <content>            — diff body lines (from git_diff)
+//
+// The sigil namespaces are disjoint: log lines start with c/p/:,
+// diff lines start with d/@/+/-/space. No explicit section marker needed.
+
 pub fn matches(input: []const u8) bool {
     if (!git_log.matches(input)) return false;
     return findDiffStart(input) != null;
@@ -18,7 +35,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
     const header_end = stripTrailingBlankLines(input[0..diff_start]);
     try git_log.apply(allocator, input[0..header_end], &.{}, writer);
-    try writer.writeAll("\n\n");
+    try writer.writeAll("\n");
     try git_diff.apply(allocator, input[diff_start..], &.{}, writer);
 }
 
@@ -84,27 +101,28 @@ test "matches: empty input returns false" {
     try std.testing.expect(!matches(""));
 }
 
-test "apply: compacts SHA on simple show" {
+test "apply: emits c sigil with sha7 on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "commit 95cbeda\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37") == null);
 }
 
-test "apply: strips email domain on simple show" {
+test "apply: no Author/Date labels on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Author: Alice Anderson <alice>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "Author:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "Date:") == null);
     try std.testing.expect(std.mem.indexOf(u8, out, "@example.com") == null);
 }
 
-test "apply: compacts date on simple show" {
+test "apply: emits : sigil for subject on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Date:   2026-04-18") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, ": feat: add a.txt with one line\n") != null);
 }
 
 test "apply: drops index line in diff section on simple show" {
@@ -114,11 +132,12 @@ test "apply: drops index line in diff section on simple show" {
     try std.testing.expect(std.mem.indexOf(u8, out, "index ") == null);
 }
 
-test "apply: preserves diff --git header on simple show" {
+test "apply: emits d sigil for diff file header on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git a/a.txt b/a.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "d a.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
 }
 
 test "apply: preserves new file mode on simple show" {
@@ -128,44 +147,60 @@ test "apply: preserves new file mode on simple show" {
     try std.testing.expect(std.mem.indexOf(u8, out, "new file mode 100644") != null);
 }
 
-test "apply: preserves added lines on simple show" {
+test "apply: emits @ hunk sigil on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@ -0,0 +1\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+line1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@@ -0,0 +1 @@") != null);
 }
 
-test "apply: preserves multi-line body on body show" {
+test "apply: emits : sigil for body and preserves content on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "    feat: extend a.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "    This body explains why we added a second line.") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "    It spans multiple lines and contains punctuation.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, ": feat: extend a.txt\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, ": This body explains why we added a second line.\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, ": It spans multiple lines and contains punctuation.\n") != null);
 }
 
-test "apply: preserves hunk and + lines on body show" {
+test "apply: emits @ hunk and + lines on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@@ -1 +1,2 @@") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@ -1 +1,2\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, " line1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+line2") != null);
 }
 
-test "apply: directional compression on simple show" {
+test "apply: directional compression on simple show (byte count)" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len < simple_fixture.len);
 }
 
-test "apply: directional compression on body show" {
+test "apply: directional compression on body show (byte count)" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len < body_fixture.len);
+}
+
+test "apply: R3 gate — simple show fixture ≤ 80% of raw" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, simple_fixture);
+    defer allocator.free(out);
+    const target = (simple_fixture.len * 80) / 100;
+    try std.testing.expect(out.len <= target);
+}
+
+test "apply: R3 gate — body show fixture ≤ 80% of raw" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, body_fixture);
+    defer allocator.free(out);
+    const target = (body_fixture.len * 80) / 100;
+    try std.testing.expect(out.len <= target);
 }
 
 test "apply: preserves trailing newline when input has one" {
@@ -173,4 +208,30 @@ test "apply: preserves trailing newline when input has one" {
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
+}
+
+test "apply: show priority over log (output differs from log-only on same input)" {
+    const allocator = std.testing.allocator;
+    var log_out = std.Io.Writer.Allocating.init(allocator);
+    defer log_out.deinit();
+    try git_log.apply(allocator, simple_fixture, &.{}, &log_out.writer);
+    const log_str = try allocator.dupe(u8, log_out.written());
+    defer allocator.free(log_str);
+
+    const show_str = try applyToString(allocator, simple_fixture);
+    defer allocator.free(show_str);
+
+    // show output has diff section; log-only does not
+    try std.testing.expect(!std.mem.eql(u8, log_str, show_str));
+    try std.testing.expect(std.mem.indexOf(u8, show_str, "d a.txt") != null);
+}
+
+test "pipe-mode idempotence: v0.4 show output piped again is unchanged" {
+    // v0.4 show output starts with "c <sha7>..." — does NOT match matches()
+    // (matches requires both git_log.matches AND diff presence in raw input).
+    const allocator = std.testing.allocator;
+    const first = try applyToString(allocator, simple_fixture);
+    defer allocator.free(first);
+    // v0.4 output does not match (starts with "c", not "commit <40-char-sha>")
+    try std.testing.expect(!matches(first));
 }
