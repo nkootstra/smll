@@ -194,6 +194,28 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/large/git_rebase.txt"),
     });
 
+    const git_checkout_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_checkout.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_checkout_mod.addImport("util", util_mod);
+    git_checkout_mod.addAnonymousImport("fixture_git_checkout_switch_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_checkout_switch.stdout.txt"),
+    });
+    git_checkout_mod.addAnonymousImport("fixture_git_checkout_switch_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_checkout_switch.stderr.txt"),
+    });
+
+    const git_branch_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_branch.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_branch_mod.addAnonymousImport("fixture_git_branch_list", .{
+        .root_source_file = b.path("tests/fixtures/git_branch_list.txt"),
+    });
+
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
@@ -205,6 +227,8 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("git_fetch", git_fetch_mod);
     exe_mod.addImport("git_merge", git_merge_mod);
     exe_mod.addImport("git_rebase", git_rebase_mod);
+    exe_mod.addImport("git_checkout", git_checkout_mod);
+    exe_mod.addImport("git_branch", git_branch_mod);
 
     const exe = b.addExecutable(.{
         .name = "smll",
@@ -234,6 +258,8 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_fetch", git_fetch_mod);
     release_mod.addImport("git_merge", git_merge_mod);
     release_mod.addImport("git_rebase", git_rebase_mod);
+    release_mod.addImport("git_checkout", git_checkout_mod);
+    release_mod.addImport("git_branch", git_branch_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -283,6 +309,12 @@ pub fn build(b: *std.Build) void {
 
     const git_rebase_tests = b.addTest(.{ .root_module = git_rebase_mod });
     const run_git_rebase_tests = b.addRunArtifact(git_rebase_tests);
+
+    const git_checkout_tests = b.addTest(.{ .root_module = git_checkout_mod });
+    const run_git_checkout_tests = b.addRunArtifact(git_checkout_tests);
+
+    const git_branch_tests = b.addTest(.{ .root_module = git_branch_mod });
+    const run_git_branch_tests = b.addRunArtifact(git_branch_tests);
 
     const opts = b.addOptions();
     opts.addOptionPath("smll_exe_path", exe.getEmittedBin());
@@ -361,5 +393,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_fetch_tests.step);
     test_step.dependOn(&run_git_merge_tests.step);
     test_step.dependOn(&run_git_rebase_tests.step);
+    test_step.dependOn(&run_git_checkout_tests.step);
+    test_step.dependOn(&run_git_branch_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }

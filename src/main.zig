@@ -11,8 +11,14 @@ const git_pull = @import("git_pull");
 const git_fetch = @import("git_fetch");
 const git_merge = @import("git_merge");
 const git_rebase = @import("git_rebase");
+const git_checkout = @import("git_checkout");
+const git_branch = @import("git_branch");
 
-const Filters = .{ git_status, git_show, git_log, git_diff, git_commit };
+// git_branch is included in Filters because it pipe-matches (branch list output
+// is stable and identifiable by leading "  " or "* " prefix). It is positioned
+// after git_status and before git_show — the branch output shape is distinct from
+// both. git_checkout is NOT in Filters because its matches() always returns false.
+const Filters = .{ git_status, git_branch, git_show, git_log, git_diff, git_commit };
 
 test {
     _ = pipeline;
@@ -219,8 +225,22 @@ fn runWrapper(
                 return 1;
             };
         },
-        // Phase 2 formatters (Units 6b-7) will replace these passthrough arms.
-        .stash, .checkout, .branch, .blame, .unknown => {
+        .checkout => {
+            git_checkout.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .branch => {
+            git_branch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        // Phase 2 formatters (Units 7) will replace these passthrough arms.
+        .stash, .blame, .unknown => {
             try writer.writeAll(stdout_slice);
             try std.fs.File.stderr().writeAll(stderr_slice);
         },
