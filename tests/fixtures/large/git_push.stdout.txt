@@ -1,1 +1,10 @@
 branch 'main' set up to track 'origin/main'.
+branch 'feat-a' set up to track 'origin/feat-a'.
+branch 'feat-b' set up to track 'origin/feat-b'.
+branch 'feat-c' set up to track 'origin/feat-c'.
+branch 'feat-d' set up to track 'origin/feat-d'.
+branch 'feat-e' set up to track 'origin/feat-e'.
+branch 'feat-f' set up to track 'origin/feat-f'.
+branch 'fix-1' set up to track 'origin/fix-1'.
+branch 'fix-2' set up to track 'origin/fix-2'.
+branch 'fix-3' set up to track 'origin/fix-3'.

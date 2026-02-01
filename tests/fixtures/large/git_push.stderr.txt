@@ -1,2 +1,11 @@
-To /smll-fixture-large-remote
- * [new branch]      main -> main
+To github.com:acme/myrepo.git
+   abc1234..def5678  main -> main
+   111aaaa..222bbbb  feat-a -> feat-a
+   333cccc..444dddd  feat-b -> feat-b
+   555eeee..666ffff  feat-c -> feat-c
+ * [new branch]      feat-d -> feat-d
+ * [new branch]      feat-e -> feat-e
+ - [deleted]         origin/feat-f
+   777aaaa..888bbbb  fix-1 -> fix-1
+   999cccc..000dddd  fix-2 -> fix-2
+ ! [rejected]        fix-3 -> fix-3 (non-fast-forward)

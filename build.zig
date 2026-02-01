@@ -108,12 +108,66 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/large/git_commit.txt"),
     });
 
+    const git_push_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_push.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_push_mod.addImport("util", util_mod);
+    git_push_mod.addAnonymousImport("fixture_git_push_simple_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_push_simple.stdout.txt"),
+    });
+    git_push_mod.addAnonymousImport("fixture_git_push_simple_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_push_simple.stderr.txt"),
+    });
+    git_push_mod.addAnonymousImport("fixture_git_push_large_stdout", .{
+        .root_source_file = b.path("tests/fixtures/large/git_push.stdout.txt"),
+    });
+    git_push_mod.addAnonymousImport("fixture_git_push_large_stderr", .{
+        .root_source_file = b.path("tests/fixtures/large/git_push.stderr.txt"),
+    });
+
+    const git_pull_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_pull.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_pull_mod.addImport("util", util_mod);
+    git_pull_mod.addAnonymousImport("fixture_git_pull_ff_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_ff.stdout.txt"),
+    });
+    git_pull_mod.addAnonymousImport("fixture_git_pull_ff_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_ff.stderr.txt"),
+    });
+    git_pull_mod.addAnonymousImport("fixture_git_pull_uptodate_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_uptodate.stdout.txt"),
+    });
+    git_pull_mod.addAnonymousImport("fixture_git_pull_uptodate_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_pull_uptodate.stderr.txt"),
+    });
+
+    const git_fetch_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_fetch.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_fetch_mod.addImport("util", util_mod);
+    git_fetch_mod.addAnonymousImport("fixture_git_fetch_simple_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_fetch_simple.stdout.txt"),
+    });
+    git_fetch_mod.addAnonymousImport("fixture_git_fetch_simple_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_fetch_simple.stderr.txt"),
+    });
+
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
     exe_mod.addImport("git_show", git_show_mod);
     exe_mod.addImport("git_add", git_add_mod);
     exe_mod.addImport("git_commit", git_commit_mod);
+    exe_mod.addImport("git_push", git_push_mod);
+    exe_mod.addImport("git_pull", git_pull_mod);
+    exe_mod.addImport("git_fetch", git_fetch_mod);
 
     const exe = b.addExecutable(.{
         .name = "smll",
@@ -138,6 +192,9 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_show", git_show_mod);
     release_mod.addImport("git_add", git_add_mod);
     release_mod.addImport("git_commit", git_commit_mod);
+    release_mod.addImport("git_push", git_push_mod);
+    release_mod.addImport("git_pull", git_pull_mod);
+    release_mod.addImport("git_fetch", git_fetch_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -172,6 +229,15 @@ pub fn build(b: *std.Build) void {
 
     const git_commit_tests = b.addTest(.{ .root_module = git_commit_mod });
     const run_git_commit_tests = b.addRunArtifact(git_commit_tests);
+
+    const git_push_tests = b.addTest(.{ .root_module = git_push_mod });
+    const run_git_push_tests = b.addRunArtifact(git_push_tests);
+
+    const git_pull_tests = b.addTest(.{ .root_module = git_pull_mod });
+    const run_git_pull_tests = b.addRunArtifact(git_pull_tests);
+
+    const git_fetch_tests = b.addTest(.{ .root_module = git_fetch_mod });
+    const run_git_fetch_tests = b.addRunArtifact(git_fetch_tests);
 
     const opts = b.addOptions();
     opts.addOptionPath("smll_exe_path", exe.getEmittedBin());
@@ -245,5 +311,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_show_tests.step);
     test_step.dependOn(&run_git_add_tests.step);
     test_step.dependOn(&run_git_commit_tests.step);
+    test_step.dependOn(&run_git_push_tests.step);
+    test_step.dependOn(&run_git_pull_tests.step);
+    test_step.dependOn(&run_git_fetch_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }
