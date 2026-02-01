@@ -10,11 +10,18 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const util_mod = b.createModule(.{
+        .root_source_file = b.path("src/util.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const git_status_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/git_status.zig"),
         .target = target,
         .optimize = optimize,
     });
+    git_status_mod.addImport("util", util_mod);
     git_status_mod.addAnonymousImport("fixture_git_status_dirty", .{
         .root_source_file = b.path("tests/fixtures/git_status_dirty.txt"),
     });
@@ -30,6 +37,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    git_diff_mod.addImport("util", util_mod);
     git_diff_mod.addAnonymousImport("fixture_git_diff_simple", .{
         .root_source_file = b.path("tests/fixtures/git_diff_simple.txt"),
     });
@@ -48,6 +56,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    git_log_mod.addImport("util", util_mod);
     git_log_mod.addAnonymousImport("fixture_git_log_linear", .{
         .root_source_file = b.path("tests/fixtures/git_log_linear.txt"),
     });
@@ -60,6 +69,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    git_show_mod.addImport("util", util_mod);
     git_show_mod.addImport("git_log", git_log_mod);
     git_show_mod.addImport("git_diff", git_diff_mod);
     git_show_mod.addAnonymousImport("fixture_git_show_simple", .{
@@ -108,6 +118,9 @@ pub fn build(b: *std.Build) void {
 
     const exe_tests = b.addTest(.{ .root_module = exe_mod });
     const run_exe_tests = b.addRunArtifact(exe_tests);
+
+    const util_tests = b.addTest(.{ .root_module = util_mod });
+    const run_util_tests = b.addRunArtifact(util_tests);
 
     const git_status_tests = b.addTest(.{ .root_module = git_status_mod });
     const run_git_status_tests = b.addRunArtifact(git_status_tests);
@@ -186,6 +199,7 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_util_tests.step);
     test_step.dependOn(&run_git_status_tests.step);
     test_step.dependOn(&run_git_diff_tests.step);
     test_step.dependOn(&run_git_log_tests.step);

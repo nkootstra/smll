@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const util = @import("util");
 
 // v0.4 grammar for `git log`:
 //
@@ -75,7 +76,7 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
 
             const sha_start = "commit ".len;
             const sha_all = line[sha_start..][0..40];
-            @memcpy(&sha7, sha_all[0..7]);
+            sha7 = util.sha7(sha_all);
             sha7_valid = true;
             continue;
         }
@@ -217,8 +218,7 @@ fn monthNumber(abbr: []const u8) ?u8 {
 fn isCommitLine(line: []const u8) bool {
     if (!std.mem.startsWith(u8, line, "commit ")) return false;
     if (line.len < 7 + 40) return false;
-    const sha = line[7..][0..40];
-    for (sha) |c| if (!std.ascii.isHex(c)) return false;
+    if (!util.isHex40(line[7..][0..40])) return false;
     if (line.len > 7 + 40) {
         const c = line[7 + 40];
         if (c != ' ' and c != '\t') return false;
