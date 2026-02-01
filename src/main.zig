@@ -48,6 +48,32 @@ pub fn main() !void {
     if (code != 0) std.process.exit(code);
 }
 
+// Maximum bytes captured from child stdout + stderr combined.
+// 2 MiB matches the integration test cap and accommodates large git outputs.
+const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+
+// All 15 R4 git subcommands.  Phase 2 fills in the remaining 11; for now
+// only the 4 v0.3 filters (status, diff, log, show) are wired — the other
+// 11 arms fall through to passthrough.
+const KnownSubcommand = enum {
+    status,
+    diff,
+    log,
+    show,
+    add,
+    commit,
+    push,
+    pull,
+    fetch,
+    merge,
+    rebase,
+    stash,
+    checkout,
+    branch,
+    blame,
+    unknown,
+};
+
 fn runWrapper(
     allocator: std.mem.Allocator,
     argv: []const []const u8,
@@ -55,44 +81,94 @@ fn runWrapper(
 ) !u8 {
     var child = std.process.Child.init(argv, allocator);
     child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Inherit;
+    child.stderr_behavior = .Pipe;
     try child.spawn();
 
-    // Read child stdout into a 16 KiB stack buffer first. Real `git status`,
-    // `git diff`, `git log`, and `git show` outputs comfortably fit; only
-    // pathological cases overflow into the heap path. Mirrors pipeline.run.
-    var stack_buf: [16 * 1024]u8 = undefined;
-    var read_buf: [4096]u8 = undefined;
-    var child_reader = child.stdout.?.reader(&read_buf);
-    var total: usize = 0;
-    while (total < stack_buf.len) {
-        const got = try child_reader.interface.readSliceShort(stack_buf[total..]);
-        if (got == 0) break;
-        total += got;
-    }
+    // Concurrently drain both stdout and stderr into heap-backed ArrayLists.
+    // collectOutput uses std.Io.poll so neither pipe can deadlock the other.
+    var stdout_list: std.ArrayList(u8) = .empty;
+    defer stdout_list.deinit(allocator);
+    var stderr_list: std.ArrayList(u8) = .empty;
+    defer stderr_list.deinit(allocator);
 
-    if (total < stack_buf.len) {
-        try pipeline.dispatch(allocator, stack_buf[0..total], writer, Filters);
-        const term = try child.wait();
-        return switch (term) {
-            .Exited => |c| c,
-            .Signal, .Stopped, .Unknown => 1,
-        };
-    }
-
-    var allocating = std.Io.Writer.Allocating.init(allocator);
-    defer allocating.deinit();
-    try allocating.writer.writeAll(&stack_buf);
-    _ = child_reader.interface.streamRemaining(&allocating.writer) catch |err| switch (err) {
-        error.WriteFailed => return error.OutOfMemory,
-        error.ReadFailed => return err,
+    child.collectOutput(allocator, &stdout_list, &stderr_list, MAX_OUTPUT_BYTES) catch |err| switch (err) {
+        // collectOutput signals cap exceeded via stream-too-long errors.
+        error.StdoutStreamTooLong, error.StderrStreamTooLong => {
+            _ = child.wait() catch {};
+            const msg = "smll: child output exceeded 2 MiB cap\n";
+            std.fs.File.stderr().writeAll(msg) catch {};
+            return 1;
+        },
+        else => return err,
     };
 
     const term = try child.wait();
-    try pipeline.dispatch(allocator, allocating.written(), writer, Filters);
-
-    return switch (term) {
+    const exit_code: u8 = switch (term) {
         .Exited => |c| c,
         .Signal, .Stopped, .Unknown => 1,
     };
+
+    const stdout_slice = stdout_list.items;
+    const stderr_slice = stderr_list.items;
+
+    // Argv guard: only dispatch through the formatter switch when the outer
+    // command is literally "git".  Any other outer command (e.g. "cargo")
+    // goes straight to passthrough even if the subcommand string matches a
+    // KnownSubcommand.
+    const outer_cmd = argv[0];
+    // Strip any directory prefix: "git", "/usr/bin/git", etc. all match.
+    const cmd_basename = if (std.mem.lastIndexOfScalar(u8, outer_cmd, '/')) |idx|
+        outer_cmd[idx + 1 ..]
+    else
+        outer_cmd;
+
+    if (!std.mem.eql(u8, cmd_basename, "git") or argv.len < 2) {
+        // Non-git outer command: passthrough both streams verbatim.
+        try writer.writeAll(stdout_slice);
+        try std.fs.File.stderr().writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // argv[1] is the git subcommand (e.g. "status", "diff").
+    const subcmd_str = argv[1];
+    const subcmd = std.meta.stringToEnum(KnownSubcommand, subcmd_str) orelse .unknown;
+
+    switch (subcmd) {
+        .status => {
+            git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                // Formatter-error policy: emit raw stdout as fail-open, exit non-zero.
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .diff => {
+            git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .log => {
+            git_log.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .show => {
+            git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        // Phase 2 formatters (Units 4-7) will replace these passthrough arms.
+        .add, .commit, .push, .pull, .fetch, .merge, .rebase, .stash, .checkout, .branch, .blame, .unknown => {
+            try writer.writeAll(stdout_slice);
+            try std.fs.File.stderr().writeAll(stderr_slice);
+        },
+    }
+
+    return exit_code;
 }

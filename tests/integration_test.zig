@@ -110,7 +110,7 @@ test "buffer_size + 1 bytes pass through correctly (writer flush fires)" {
 fn expectedFilterOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try git_status.apply(allocator, input, &out.writer);
+    try git_status.apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
@@ -174,7 +174,7 @@ test "dirty fixture: smll output is strictly smaller than input" {
 fn expectedDiffOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try git_diff.apply(allocator, input, &out.writer);
+    try git_diff.apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
@@ -224,7 +224,7 @@ test "diff multi fixture: smll output is strictly smaller than input" {
 fn expectedLogOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try git_log.apply(allocator, input, &out.writer);
+    try git_log.apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
@@ -262,7 +262,7 @@ test "log merge fixture: smll output is strictly smaller than input" {
 fn expectedShowOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try git_show.apply(allocator, input, &out.writer);
+    try git_show.apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
@@ -348,7 +348,9 @@ fn runSmllWrapper(
     };
 }
 
-test "wrapper: `smll cat <fixture>` output == pipe-mode output" {
+test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd)" {
+    // v0.4 argv guard: the outer command is "cat", not "git", so the formatter
+    // switch is bypassed and stdout passes through verbatim (no filtering).
     const allocator = std.testing.allocator;
 
     var tmp = std.testing.tmpDir(.{});
@@ -357,13 +359,11 @@ test "wrapper: `smll cat <fixture>` output == pipe-mode output" {
     const tmp_path = try tmp.dir.realpathAlloc(allocator, "dirty.txt");
     defer allocator.free(tmp_path);
 
-    const expected = try expectedFilterOutput(allocator, dirty_fixture);
-    defer allocator.free(expected);
-
     var result = try runSmllWrapper(allocator, &.{ "/bin/cat", tmp_path });
     defer result.deinit(allocator);
 
-    try std.testing.expectEqualStrings(expected, result.stdout);
+    // Passthrough: raw fixture bytes must come through unchanged.
+    try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
     try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
 }
 
@@ -443,6 +443,179 @@ test "large show fixture: smll output == git_show.apply byte-for-byte" {
 
     try std.testing.expectEqualStrings(expected, result.stdout);
     try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: run smll with a custom PATH prefix (for fake-git tests).
+// Creates a modified copy of the current environment with PATH = binDir:$PATH.
+// ---------------------------------------------------------------------------
+fn runSmllWrapperFakeGit(
+    allocator: std.mem.Allocator,
+    bin_dir: []const u8,
+    inner_argv: []const []const u8,
+) !RunResult {
+    // Build full argv: [smll_exe, inner_argv...]
+    var full: std.ArrayList([]const u8) = .empty;
+    defer full.deinit(allocator);
+    try full.append(allocator, exe_path);
+    for (inner_argv) |a| try full.append(allocator, a);
+
+    // Build env with prepended PATH.
+    var env = try std.process.getEnvMap(allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
+    defer allocator.free(new_path);
+    try env.put("PATH", new_path);
+
+    var child = std.process.Child.init(full.items, allocator);
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.env_map = &env;
+    try child.spawn();
+
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(allocator);
+    try child.collectOutput(allocator, &stdout, &stderr, 2 * 1024 * 1024);
+
+    return .{
+        .stdout = try stdout.toOwnedSlice(allocator),
+        .stderr = try stderr.toOwnedSlice(allocator),
+        .term = try child.wait(),
+    };
+}
+
+// Write a shell script to dir/name that is executable.
+fn writeFakeScript(dir: std.fs.Dir, name: []const u8, body: []const u8) !void {
+    try dir.writeFile(.{ .sub_path = name, .data = body });
+    const file = try dir.openFile(name, .{});
+    defer file.close();
+    try file.chmod(0o755);
+}
+
+// ---------------------------------------------------------------------------
+// Unit-0 characterisation tests — must FAIL before dispatch is implemented.
+// ---------------------------------------------------------------------------
+
+// (a) Registered subcommand (status) with stderr noise:
+//     After dispatch: filter absorbs stderr — smll's own stderr is EMPTY.
+//     Before dispatch: stderr_behavior=.Inherit leaks child stderr into
+//     smll's stderr, so result.stderr is non-empty → test fails.
+test "dispatch: registered subcommand does not forward child stderr to smll stderr" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(bin_path);
+
+    // Fake `git` that emits clean-fixture-like stdout + a warning on stderr.
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'On branch main\nnothing to commit, working tree clean\n'
+        \\printf 'warning: test-stderr-noise\n' >&2
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "status" });
+    defer result.deinit(allocator);
+
+    // After dispatch: the filter's apply handles both buffers; stderr is NOT
+    // re-emitted.  smll's stderr must be empty.
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+// (b) Unregistered subcommand (reflog) whose fake-git stdout looks like a
+//     git_status fixture:
+//     After dispatch: argv-aware switch detects "reflog" is not a known
+//     formatter → passthrough → stdout is the raw unfiltered fixture bytes.
+//     Before dispatch: pipeline.dispatch runs git_status.matches on the
+//     output → matches → applies the filter → stdout is SMALLER than the
+//     raw fixture → test fails.
+test "dispatch: unregistered subcommand stdout is not filtered (verbatim passthrough)" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(bin_path);
+
+    // Fake `git` that always prints the dirty fixture on stdout regardless of
+    // the subcommand — this makes the content match git_status.matches.
+    // We invoke it as `git reflog` so the subcommand is unregistered.
+    // Use cat+heredoc to avoid printf %s interpretation issues.
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\ncat <<'SMLL_EOF'\n{s}SMLL_EOF\n",
+        .{dirty_fixture},
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp.dir, "git", script);
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "reflog" });
+    defer result.deinit(allocator);
+
+    // Passthrough: stdout must equal the raw dirty_fixture bytes.
+    try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
+}
+
+// (c) Registered subcommand (status) with BOTH stdout and stderr non-empty:
+//     After dispatch: filter receives both buffers; stderr is NOT forwarded.
+//     Before dispatch: child stderr leaks through .Inherit → result.stderr
+//     is non-empty → test fails.
+test "dispatch: registered subcommand with both stdout and stderr — stderr not forwarded" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(bin_path);
+
+    // Fake `git status` with non-trivial stdout and a stderr payload.
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'On branch main\nnothing to commit, working tree clean\n'
+        \\printf 'hint: use --verbose to see details\n' >&2
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "status" });
+    defer result.deinit(allocator);
+
+    // Verify filter ran on stdout (output non-empty) AND stderr is empty.
+    try std.testing.expect(result.stdout.len > 0);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+// (d) Non-git outer command (cargo push):
+//     argv[1] = "cargo" ≠ "git" → argv guard forces passthrough regardless of
+//     argv[2] = "push" being a KnownSubcommand.
+//     After dispatch: stdout is unfiltered raw bytes.
+//     Before dispatch: pipeline.dispatch runs git_status.matches on the stdout
+//     → if it looks like git status output it gets filtered → test fails.
+test "dispatch: non-git outer command bypasses formatter (argv guard)" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(bin_path);
+
+    // Fake `cargo` that emits dirty-fixture-like content so pipeline.dispatch
+    // would normally route it to git_status.apply.
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\ncat <<'SMLL_EOF'\n{s}SMLL_EOF\n",
+        .{dirty_fixture},
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp.dir, "cargo", script);
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "cargo", "push" });
+    defer result.deinit(allocator);
+
+    // Passthrough: raw dirty_fixture bytes must come through unchanged.
+    try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
 }
 
 test "broken pipe mid-stream returns non-zero exit without panic" {

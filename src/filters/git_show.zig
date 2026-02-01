@@ -9,15 +9,17 @@ pub fn matches(input: []const u8) bool {
     return findDiffStart(input) != null;
 }
 
-pub fn apply(allocator: Allocator, input: []const u8, writer: *Writer) !void {
+pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = stderr;
+    const input = stdout;
     const diff_start = findDiffStart(input) orelse {
-        return git_log.apply(allocator, input, writer);
+        return git_log.apply(allocator, input, &.{}, writer);
     };
 
     const header_end = stripTrailingBlankLines(input[0..diff_start]);
-    try git_log.apply(allocator, input[0..header_end], writer);
+    try git_log.apply(allocator, input[0..header_end], &.{}, writer);
     try writer.writeAll("\n\n");
-    try git_diff.apply(allocator, input[diff_start..], writer);
+    try git_diff.apply(allocator, input[diff_start..], &.{}, writer);
 }
 
 fn findDiffStart(input: []const u8) ?usize {
@@ -56,7 +58,7 @@ const body_fixture = @embedFile("fixture_git_show_body");
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
-    try apply(allocator, input, &out.writer);
+    try apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 

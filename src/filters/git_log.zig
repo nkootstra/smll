@@ -11,8 +11,10 @@ pub fn matches(input: []const u8) bool {
     return false;
 }
 
-pub fn apply(allocator: Allocator, input: []const u8, writer: *Writer) !void {
+pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
+    _ = stderr;
+    const input = stdout;
 
     const had_trailing_newline = input.len > 0 and input[input.len - 1] == '\n';
     const content = if (had_trailing_newline) input[0 .. input.len - 1] else input;
@@ -107,7 +109,7 @@ const merge_fixture = @embedFile("fixture_git_log_merge");
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
-    try apply(allocator, input, &out.writer);
+    try apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 

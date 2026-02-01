@@ -9,9 +9,10 @@ pub const Passthrough = struct {
         return false;
     }
 
-    pub fn apply(allocator: Allocator, input: []const u8, writer: *Writer) !void {
+    pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
         _ = allocator;
-        _ = input;
+        _ = stdout;
+        _ = stderr;
         _ = writer;
         unreachable;
     }
@@ -55,7 +56,8 @@ pub fn dispatch(
 ) !void {
     inline for (Filters) |Filter| {
         if (Filter.matches(input)) {
-            try Filter.apply(allocator, input, writer);
+            // Pipe-mode: no separate stderr stream; pass empty slice.
+            try Filter.apply(allocator, input, &.{}, writer);
             return;
         }
     }
@@ -106,8 +108,9 @@ test "filter match routes through apply" {
         pub fn matches(input: []const u8) bool {
             return std.mem.startsWith(u8, input, "UP:");
         }
-        pub fn apply(alloc: Allocator, input: []const u8, w: *Writer) !void {
+        pub fn apply(alloc: Allocator, input: []const u8, stderr: []const u8, w: *Writer) !void {
             _ = alloc;
+            _ = stderr;
             for (input[3..]) |c| try w.writeByte(std.ascii.toUpper(c));
         }
     };
@@ -125,8 +128,9 @@ const UpperFilter = struct {
     pub fn matches(input: []const u8) bool {
         return std.mem.startsWith(u8, input, "UP:");
     }
-    pub fn apply(alloc: Allocator, input: []const u8, w: *Writer) !void {
+    pub fn apply(alloc: Allocator, input: []const u8, stderr: []const u8, w: *Writer) !void {
         _ = alloc;
+        _ = stderr;
         for (input[3..]) |c| try w.writeByte(std.ascii.toUpper(c));
     }
 };
@@ -135,8 +139,9 @@ const LowerFilter = struct {
     pub fn matches(input: []const u8) bool {
         return std.mem.startsWith(u8, input, "LO:");
     }
-    pub fn apply(alloc: Allocator, input: []const u8, w: *Writer) !void {
+    pub fn apply(alloc: Allocator, input: []const u8, stderr: []const u8, w: *Writer) !void {
         _ = alloc;
+        _ = stderr;
         for (input[3..]) |c| try w.writeByte(std.ascii.toLower(c));
     }
 };
@@ -146,9 +151,10 @@ const NeverMatches = struct {
         _ = input;
         return false;
     }
-    pub fn apply(alloc: Allocator, input: []const u8, w: *Writer) !void {
+    pub fn apply(alloc: Allocator, input: []const u8, stderr: []const u8, w: *Writer) !void {
         _ = alloc;
         _ = input;
+        _ = stderr;
         _ = w;
         unreachable;
     }
@@ -159,9 +165,10 @@ const AlwaysMatchesMarkerA = struct {
         _ = input;
         return true;
     }
-    pub fn apply(alloc: Allocator, input: []const u8, w: *Writer) !void {
+    pub fn apply(alloc: Allocator, input: []const u8, stderr: []const u8, w: *Writer) !void {
         _ = alloc;
         _ = input;
+        _ = stderr;
         try w.writeAll("A");
     }
 };
@@ -171,9 +178,10 @@ const AlwaysMatchesMarkerB = struct {
         _ = input;
         return true;
     }
-    pub fn apply(alloc: Allocator, input: []const u8, w: *Writer) !void {
+    pub fn apply(alloc: Allocator, input: []const u8, stderr: []const u8, w: *Writer) !void {
         _ = alloc;
         _ = input;
+        _ = stderr;
         try w.writeAll("B");
     }
 };
