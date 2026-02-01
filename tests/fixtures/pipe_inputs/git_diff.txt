@@ -1,18 +1,19 @@
-diff --git a/fruit.txt b/fruit.txt
-index fde8dcd..f9d4f5a 100644
---- a/fruit.txt
-+++ b/fruit.txt
-@@ -1,3 +1,4 @@
- apple
- banana
- cherry
-+date
-diff --git a/numbers.txt b/numbers.txt
-index 4cb29ea..ddc897f 100644
---- a/numbers.txt
-+++ b/numbers.txt
-@@ -1,3 +1,3 @@
- one
--two
-+TWO
- three
+diff --git a/src/mod_02.rs b/src/mod_02.rs
+index abcd5ef..ea8b55c 100644
+--- a/src/mod_02.rs
++++ b/src/mod_02.rs
+@@ -7,3 +7,4 @@ fn init_02() {
+ fn process_02(x: i32) -> i32 {
+     x * 2 + 2
+ }
++// dirty
+diff --git a/src/mod_03.rs b/src/mod_03.rs
+index b66a772..c2e6ba0 100644
+--- a/src/mod_03.rs
++++ b/src/mod_03.rs
+@@ -7,3 +7,5 @@ fn init_03() {
+ fn process_03(x: i32) -> i32 {
+     x * 2 + 3
+ }
++// dirty
++// dirty

@@ -1,15 +1,15 @@
-commit 83f05d76b781d7f33d56038d8f27632cd7c08f38
+commit 86fd8c9831a888036f3cc3231aeb8691d1fd8bba
 Author: Alice Anderson <alice@example.com>
-Date:   Sat Apr 18 12:46:42 2026 +0200
+Date:   Sat Jan 3 00:00:00 2026 +0000
 
-    feat: add numbers
+    docs: add README
 
-diff --git a/numbers.txt b/numbers.txt
+diff --git a/README.md b/README.md
 new file mode 100644
-index 0000000..4cb29ea
+index 0000000..3148a11
 --- /dev/null
-+++ b/numbers.txt
++++ b/README.md
 @@ -0,0 +1,3 @@
-+one
-+two
-+three
++# readme
++
++Project root.
