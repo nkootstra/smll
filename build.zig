@@ -159,6 +159,41 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/git_fetch_simple.stderr.txt"),
     });
 
+    const git_merge_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_merge.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_merge_mod.addImport("util", util_mod);
+    git_merge_mod.addAnonymousImport("fixture_git_merge_ff", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_ff.txt"),
+    });
+    git_merge_mod.addAnonymousImport("fixture_git_merge_commit", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_commit.txt"),
+    });
+    git_merge_mod.addAnonymousImport("fixture_git_merge_conflict_stdout", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_conflict.stdout.txt"),
+    });
+    git_merge_mod.addAnonymousImport("fixture_git_merge_conflict_stderr", .{
+        .root_source_file = b.path("tests/fixtures/git_merge_conflict.stderr.txt"),
+    });
+    git_merge_mod.addAnonymousImport("fixture_git_merge_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_merge.txt"),
+    });
+
+    const git_rebase_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_rebase.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    git_rebase_mod.addImport("util", util_mod);
+    git_rebase_mod.addAnonymousImport("fixture_git_rebase_simple", .{
+        .root_source_file = b.path("tests/fixtures/git_rebase_simple.txt"),
+    });
+    git_rebase_mod.addAnonymousImport("fixture_git_rebase_large", .{
+        .root_source_file = b.path("tests/fixtures/large/git_rebase.txt"),
+    });
+
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
@@ -168,6 +203,8 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("git_push", git_push_mod);
     exe_mod.addImport("git_pull", git_pull_mod);
     exe_mod.addImport("git_fetch", git_fetch_mod);
+    exe_mod.addImport("git_merge", git_merge_mod);
+    exe_mod.addImport("git_rebase", git_rebase_mod);
 
     const exe = b.addExecutable(.{
         .name = "smll",
@@ -183,7 +220,7 @@ pub fn build(b: *std.Build) void {
     const release_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = .ReleaseFast,
+        .optimize = .ReleaseSmall,
         .strip = true,
     });
     release_mod.addImport("git_status", git_status_mod);
@@ -195,6 +232,8 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_push", git_push_mod);
     release_mod.addImport("git_pull", git_pull_mod);
     release_mod.addImport("git_fetch", git_fetch_mod);
+    release_mod.addImport("git_merge", git_merge_mod);
+    release_mod.addImport("git_rebase", git_rebase_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -238,6 +277,12 @@ pub fn build(b: *std.Build) void {
 
     const git_fetch_tests = b.addTest(.{ .root_module = git_fetch_mod });
     const run_git_fetch_tests = b.addRunArtifact(git_fetch_tests);
+
+    const git_merge_tests = b.addTest(.{ .root_module = git_merge_mod });
+    const run_git_merge_tests = b.addRunArtifact(git_merge_tests);
+
+    const git_rebase_tests = b.addTest(.{ .root_module = git_rebase_mod });
+    const run_git_rebase_tests = b.addRunArtifact(git_rebase_tests);
 
     const opts = b.addOptions();
     opts.addOptionPath("smll_exe_path", exe.getEmittedBin());
@@ -314,5 +359,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_push_tests.step);
     test_step.dependOn(&run_git_pull_tests.step);
     test_step.dependOn(&run_git_fetch_tests.step);
+    test_step.dependOn(&run_git_merge_tests.step);
+    test_step.dependOn(&run_git_rebase_tests.step);
     test_step.dependOn(&run_integration_tests.step);
 }

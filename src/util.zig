@@ -51,6 +51,64 @@ pub fn writeRefUpdateLine(line: []const u8, writer: anytype, sigil: u8) !void {
     try writer.writeByte('\n');
 }
 
+/// Write a compressed stat line "<path> |<N>\n" from a trimmed git stat line.
+/// Input: "path | N +++---"  Output: "path |N\n"
+pub noinline fn writeStatLine(t: []const u8, writer: *std.Io.Writer) !void {
+    const pipe = std.mem.indexOf(u8, t, " | ") orelse {
+        try writer.writeAll(t); try writer.writeByte('\n'); return;
+    };
+    const after = t[pipe + 3 ..];
+    var ne: usize = 0;
+    while (ne < after.len and std.ascii.isDigit(after[ne])) ne += 1;
+    try writer.writeAll(t[0..pipe]);
+    try writer.writeAll(" |");
+    try writer.writeAll(after[0..ne]);
+    try writer.writeByte('\n');
+}
+
+/// Write "+<ins>/-<del> files=<N>\n" from a git stat summary line.
+/// Input: " 3 files changed, 10 insertions(+), 2 deletions(-)"
+pub noinline fn writeSummary(t: []const u8, writer: *std.Io.Writer) !void {
+    try writer.writeByte('+');
+    try writer.writeAll(extractN(t, " insertion"));
+    try writer.writeAll("/-");
+    try writer.writeAll(extractN(t, " deletion"));
+    try writer.writeAll(" files=");
+    try writer.writeAll(firstNum(t));
+    try writer.writeByte('\n');
+}
+
+fn extractN(s: []const u8, marker: []const u8) []const u8 {
+    const idx = std.mem.indexOf(u8, s, marker) orelse return "0";
+    var e = idx; while (e > 0 and s[e-1] == ' ') e -= 1;
+    var b = e; while (b > 0 and std.ascii.isDigit(s[b-1])) b -= 1;
+    return if (b < e) s[b..e] else "0";
+}
+
+fn firstNum(s: []const u8) []const u8 {
+    var i: usize = 0; while (i < s.len and !std.ascii.isDigit(s[i])) i += 1;
+    var j = i; while (j < s.len and std.ascii.isDigit(s[j])) j += 1;
+    return if (i < j) s[i..j] else "0";
+}
+
+/// Skip a mode number token (e.g. "100644 ") and return the remainder.
+pub fn skipModeNum(s: []const u8) []const u8 {
+    return if (std.mem.indexOfScalar(u8, s, ' ')) |sp| s[sp + 1 ..] else s;
+}
+
+/// Extract the conflicted path from a CONFLICT line.
+/// "CONFLICT (...): Merge conflict in <path>" → "<path>"
+/// Falls back to text after ": " if no " in " marker found.
+pub noinline fn conflictPath(line: []const u8) []const u8 {
+    if (std.mem.lastIndexOf(u8, line, " in ")) |p| {
+        return std.mem.trim(u8, line[p + 4 ..], " \t\r");
+    }
+    if (std.mem.indexOf(u8, line, ": ")) |c| {
+        return std.mem.trim(u8, line[c + 2 ..], " \t\r");
+    }
+    return "";
+}
+
 test "isHex40: exact 40-char hex returns true" {
     try std.testing.expect(isHex40("95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37"));
     try std.testing.expect(isHex40("0123456789abcdef0123456789ABCDEF01234567"));

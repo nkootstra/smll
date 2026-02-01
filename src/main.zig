@@ -9,6 +9,8 @@ const git_commit = @import("git_commit");
 const git_push = @import("git_push");
 const git_pull = @import("git_pull");
 const git_fetch = @import("git_fetch");
+const git_merge = @import("git_merge");
+const git_rebase = @import("git_rebase");
 
 const Filters = .{ git_status, git_show, git_log, git_diff, git_commit };
 
@@ -203,8 +205,22 @@ fn runWrapper(
                 return 1;
             };
         },
-        // Phase 2 formatters (Units 6-7) will replace these passthrough arms.
-        .merge, .rebase, .stash, .checkout, .branch, .blame, .unknown => {
+        .merge => {
+            git_merge.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        .rebase => {
+            git_rebase.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try std.fs.File.stderr().writeAll(stderr_slice);
+                return 1;
+            };
+        },
+        // Phase 2 formatters (Units 6b-7) will replace these passthrough arms.
+        .stash, .checkout, .branch, .blame, .unknown => {
             try writer.writeAll(stdout_slice);
             try std.fs.File.stderr().writeAll(stderr_slice);
         },
