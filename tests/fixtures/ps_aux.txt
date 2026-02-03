@@ -1,0 +1,16 @@
+USER       PID  %CPU  %MEM      VSZ     RSS  TT   STAT  STARTED      TIME COMMAND
+root         1   0.0   0.0  4308288   12032  ??   Ss   Mon08AM   0:14.12 /sbin/launchd
+root        89   0.0   0.0  4319104    6144  ??   Ss   Mon08AM   0:02.04 /usr/sbin/syslogd
+root        91   0.0   0.1  4330880   18432  ??   Ss   Mon08AM   0:03.88 /usr/libexec/UserEventAgent
+root       102   0.0   0.1  4362752   22016  ??   Ss   Mon08AM   0:01.45 /usr/libexec/configd
+root       103   0.0   0.0  4309888   10752  ??   Ss   Mon08AM   0:00.92 /usr/libexec/powerd
+niels      312   0.1   0.2  4512384   41984  ??   S    Mon08AM   0:44.31 /Applications/Safari.app/Contents/MacOS/Safari
+niels      318   0.0   0.1  4402176   32000  ??   S    Mon08AM   0:12.08 /Applications/iTerm.app/Contents/MacOS/iTerm2
+niels      402   0.0   0.3  4678912   58880  ??   S    Mon09AM   1:22.14 /Applications/Visual Studio Code.app/Contents/MacOS/Electron
+niels      412   0.0   0.2  4556800   47104  ??   S    Mon09AM   0:36.92 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper
+niels      414   0.0   0.2  4556800   46080  ??   S    Mon09AM   0:34.11 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper
+niels      415   0.0   0.2  4556800   48128  ??   S    Mon09AM   0:38.44 /Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper
+niels      501   0.0   0.1  4411648   30720  ??   S    Mon09AM   0:08.55 /usr/local/bin/node /Users/niels/.local/bin/claude
+niels      502   0.0   0.0  4300928    8448  s000 Ss   Mon10AM   0:00.31 -zsh
+niels      605   0.0   0.0  4301952    9472  s001 Ss   Tue09AM   0:00.42 -zsh
+niels      812   0.0   0.0  4300928    8192  s002 S+   Wed02PM   0:00.18 tail -f /tmp/log.txt

@@ -1,0 +1,131 @@
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
+
+// Opt-in LOSSY compact filter for `ls -l` / `ls -la` (enabled via SMLL_COMPACT=1).
+//
+// Drops: permissions, link count, owner, group, size, date/time, the
+// leading "total N" line.
+// Keeps: filenames only, one per line, in original order. Directory vs file
+// distinction is marked with a trailing "/" on dirs, matching ls -F behavior.
+//
+// Contract:
+//   • Lossy — permissions, ownership, size, timestamps gone.
+//   • Filename list is preserved in order.
+//   • Byte reduction typically ~80-85% on ls -la output.
+//
+// Detection (matches):
+//   • First non-empty line starts with "total "; OR
+//   • First non-empty line matches [dl-cb][rwx-]{9} (mode bits).
+
+pub fn matches(input: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (isTotalLine(line)) return true;
+        return isLsLongLine(line);
+    }
+    return false;
+}
+
+fn isTotalLine(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, "total ")) return false;
+    const rest = line["total ".len..];
+    if (rest.len == 0) return false;
+    for (rest) |b| {
+        if (b < '0' or b > '9') return false;
+    }
+    return true;
+}
+
+fn isLsLongLine(line: []const u8) bool {
+    if (line.len < 10) return false;
+    const c0 = line[0];
+    if (c0 != 'd' and c0 != '-' and c0 != 'l' and c0 != 'c' and c0 != 'b' and c0 != 'p' and c0 != 's') return false;
+    for (line[1..10]) |b| {
+        switch (b) {
+            'r', 'w', 'x', '-', 's', 'S', 't', 'T' => {},
+            else => return false,
+        }
+    }
+    return true;
+}
+
+pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = allocator;
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    var first = true;
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (isTotalLine(line)) continue;
+        if (!isLsLongLine(line)) continue;
+
+        const name = extractName(line) orelse continue;
+        if (name.len == 0) continue;
+        if (!first) try writer.writeByte('\n');
+        first = false;
+        try writer.writeAll(name);
+        if (line[0] == 'd') try writer.writeByte('/');
+    }
+    if (!first) try writer.writeByte('\n');
+}
+
+/// Skip 8 whitespace-separated fields (mode, links, owner, group, size, mon, day, time/year).
+/// Return the rest of the line (filename, which may contain spaces).
+/// macOS ls -l may emit ACL markers ("@", "+") after mode — tokenizer ignores them
+/// because the "@" sticks to the mode token.
+fn extractName(line: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    var fields_consumed: usize = 0;
+    while (i < line.len and fields_consumed < 8) {
+        while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
+        if (i >= line.len) return null;
+        while (i < line.len and line[i] != ' ' and line[i] != '\t') i += 1;
+        fields_consumed += 1;
+    }
+    if (fields_consumed < 8) return null;
+    while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
+    if (i >= line.len) return null;
+    return std.mem.trimRight(u8, line[i..], " \t\r");
+}
+
+test "matches: total line" {
+    try std.testing.expect(matches("total 24\n-rw-r--r-- 1 a b 1 Apr 1 00:00 x\n"));
+}
+
+test "matches: bare mode line" {
+    try std.testing.expect(matches("drwxr-xr-x 1 a b 1 Apr 1 00:00 d\n"));
+}
+
+test "matches: rejects non-ls" {
+    try std.testing.expect(!matches("hello world\n"));
+    try std.testing.expect(!matches(""));
+    try std.testing.expect(!matches("total abc\n"));
+}
+
+test "apply: fixture produces filename list" {
+    const fixture = @embedFile("fixture_ls_la");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, fixture, &.{}, &out.writer);
+    const got = out.written();
+
+    try std.testing.expect(std.mem.indexOf(u8, got, "main.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "pipeline.zig") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "filters/") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "./") != null);
+    // Ensure metadata stripped
+    try std.testing.expect(std.mem.indexOf(u8, got, "nielskootstra") == null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "total") == null);
+}
+
+test "apply: filename with spaces preserved" {
+    const input = "-rw-r--r-- 1 a b 1 Apr 1 00:00 hello world.txt\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expectEqualStrings("hello world.txt\n", out.written());
+}

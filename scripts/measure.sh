@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Absolute metrics for smll v0.2: binary size, compression ratio, latency.
-# Emits plain Markdown so bench.sh can consume it.
+# Emits plain Markdown.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

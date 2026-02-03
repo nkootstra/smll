@@ -1,0 +1,186 @@
+const std = @import("std");
+const ansi = @import("ansi");
+const Allocator = std.mem.Allocator;
+const Writer = std.Io.Writer;
+
+// Opt-in LOSSY compact filter for `docker logs` / `kubectl logs` (SMLL_COMPACT=1).
+//
+// Collapses consecutive identical log lines (ignoring the leading ISO-8601
+// timestamp) into a single line + `(×N)` suffix. Strips ANSI escapes.
+//
+// Fingerprint: stripTimestamp(line). If leading token looks like
+//   "YYYY-MM-DDTHH:MM:SS...Z" or "YYYY-MM-DD HH:MM:SS" it is elided for the
+//   purpose of comparison only — the first occurrence is emitted verbatim.
+//
+// Detection: called unconditionally by the `docker logs` / `kubectl logs`
+// dispatch arm (wrapper mode only — no pipe-mode detection).
+
+pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    if (stdout.len == 0 and stderr.len == 0) return;
+
+    try applyStream(allocator, stdout, writer);
+    if (stderr.len != 0) {
+        try applyStream(allocator, stderr, writer);
+    }
+}
+
+fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
+    if (input.len == 0) return;
+
+    // Buffer the last line we emitted so we can coalesce repeats.
+    var pending: std.ArrayList(u8) = .empty;
+    defer pending.deinit(allocator);
+    var pending_payload_start: usize = 0;
+    var repeat_count: usize = 0;
+
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var first: bool = true;
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+    while (lines.next()) |raw| {
+        const clean = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const trimmed = std.mem.trimRight(u8, clean, " \t\r");
+        if (trimmed.len == 0) {
+            // Empty line — flush pending, don't emit blank.
+            if (!first and repeat_count > 0) {
+                try flushPending(writer, pending.items, pending_payload_start, repeat_count);
+                pending.clearRetainingCapacity();
+                repeat_count = 0;
+            }
+            continue;
+        }
+
+        const payload_start = timestampEnd(trimmed);
+        const payload = trimmed[payload_start..];
+
+        if (repeat_count > 0) {
+            const prev_payload = pending.items[pending_payload_start..];
+            if (std.mem.eql(u8, prev_payload, payload)) {
+                repeat_count += 1;
+                continue;
+            }
+            try flushPending(writer, pending.items, pending_payload_start, repeat_count);
+            pending.clearRetainingCapacity();
+            repeat_count = 0;
+        }
+
+        pending_payload_start = payload_start;
+        try pending.appendSlice(allocator, trimmed);
+        repeat_count = 1;
+        first = false;
+    }
+    if (repeat_count > 0) {
+        try flushPending(writer, pending.items, pending_payload_start, repeat_count);
+    }
+}
+
+fn flushPending(writer: *Writer, line: []const u8, _: usize, count: usize) !void {
+    try writer.writeAll(line);
+    if (count > 1) {
+        try writer.print(" (×{d})", .{count});
+    }
+    try writer.writeByte('\n');
+}
+
+/// Returns the byte index where the timestamp ends (pointing at the first
+/// non-space char after the timestamp + its trailing whitespace). If the line
+/// does not begin with an ISO-ish timestamp, returns 0.
+fn timestampEnd(line: []const u8) usize {
+    if (!looksLikeTimestamp(line)) return 0;
+    // Advance past non-space, then past space(s).
+    var i: usize = 0;
+    while (i < line.len and line[i] != ' ' and line[i] != '\t') i += 1;
+    while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
+    // Some docker formats have TWO leading tokens: "2026-04-19T08:42:01.1Z  INFO  msg"
+    // — the dedup payload should start after the timestamp only.
+    return i;
+}
+
+/// Heuristic: first 10 chars look like "YYYY-MM-DD" (4 digits, '-', 2 digits,
+/// '-', 2 digits).
+fn looksLikeTimestamp(line: []const u8) bool {
+    if (line.len < 10) return false;
+    for (0..4) |i| if (!std.ascii.isDigit(line[i])) return false;
+    if (line[4] != '-') return false;
+    for (5..7) |i| if (!std.ascii.isDigit(line[i])) return false;
+    if (line[7] != '-') return false;
+    for (8..10) |i| if (!std.ascii.isDigit(line[i])) return false;
+    return true;
+}
+
+test "timestampEnd: ISO docker line" {
+    const line = "2026-04-19T08:42:01.123456Z INFO  starting server";
+    const idx = timestampEnd(line);
+    try std.testing.expect(idx > 0);
+    try std.testing.expectEqualStrings("INFO  starting server", line[idx..]);
+}
+
+test "timestampEnd: no timestamp returns 0" {
+    try std.testing.expectEqual(@as(usize, 0), timestampEnd("starting"));
+    try std.testing.expectEqual(@as(usize, 0), timestampEnd("INFO foo"));
+}
+
+test "apply: fixture collapses repeated health checks" {
+    const input = @embedFile("fixture_docker_logs");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(got.len < input.len);
+    // Repeated GET /health collapsed.
+    try std.testing.expect(std.mem.indexOf(u8, got, "(×5)") != null);
+    // Repeated redis errors collapsed.
+    try std.testing.expect(std.mem.indexOf(u8, got, "failed to connect to redis: connection refused (×4)") != null);
+    // Unique lines preserved.
+    try std.testing.expect(std.mem.indexOf(u8, got, "starting server on :8080") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "shutting down gracefully") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "slow query") != null);
+}
+
+test "apply: no duplicates passes through verbatim" {
+    const input =
+        \\2026-04-19T08:42:01.1Z INFO  line a
+        \\2026-04-19T08:42:02.1Z INFO  line b
+        \\2026-04-19T08:42:03.1Z INFO  line c
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, got, "line a") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "line b") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "line c") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "(×") == null);
+}
+
+test "apply: non-consecutive duplicates are not collapsed" {
+    const input =
+        \\2026-04-19T08:42:01Z A
+        \\2026-04-19T08:42:02Z B
+        \\2026-04-19T08:42:03Z A
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, got, "(×") == null);
+}
+
+test "apply: strips ANSI" {
+    const input = "2026-04-19T08:42:01Z \x1b[31mERROR\x1b[0m boom\n2026-04-19T08:42:02Z \x1b[31mERROR\x1b[0m boom\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.indexOf(u8, got, "\x1b") == null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "ERROR boom (×2)") != null);
+}
+
+test "apply: lines without timestamps still dedup by full text" {
+    const input = "loading\nloading\nloading\ndone\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "loading (×3)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out.written(), "done") != null);
+}

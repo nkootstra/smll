@@ -1,0 +1,25 @@
+=== RUN   TestAdd
+--- PASS: TestAdd (0.00s)
+=== RUN   TestSubtract
+--- PASS: TestSubtract (0.00s)
+=== RUN   TestMultiply
+--- PASS: TestMultiply (0.00s)
+=== RUN   TestDivide
+    math_test.go:42: divide(10, 0) panic expected but got 0
+--- FAIL: TestDivide (0.00s)
+=== RUN   TestSqrt
+    math_test.go:58: sqrt(-1) = 0, want NaN
+--- FAIL: TestSqrt (0.00s)
+=== RUN   TestMod
+--- PASS: TestMod (0.00s)
+=== RUN   TestPow
+--- PASS: TestPow (0.00s)
+=== RUN   TestAbs
+--- PASS: TestAbs (0.00s)
+=== RUN   TestSign
+--- PASS: TestSign (0.00s)
+=== RUN   TestClamp
+--- PASS: TestClamp (0.00s)
+FAIL
+exit status 1
+FAIL	github.com/example/math	0.012s

@@ -1,0 +1,10 @@
+NAME                                 READY   STATUS    RESTARTS   AGE
+api-server-6f8b9c4d7-x2k8m           1/1     Running   0          2d3h
+api-server-6f8b9c4d7-qp4j9           1/1     Running   0          2d3h
+api-server-6f8b9c4d7-mnl2k           1/1     Running   0          2d3h
+worker-deployment-5b7c8d-abc12       1/1     Running   3          5d1h
+worker-deployment-5b7c8d-def34       1/1     Running   3          5d1h
+redis-master-0                       1/1     Running   0          7d4h
+postgres-primary-0                   1/1     Running   0          7d4h
+ingress-nginx-controller-xyz789      1/1     Running   2          12d
+cert-manager-5dc8f9b-abcde           1/1     Running   0          12d

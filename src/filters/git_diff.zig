@@ -6,7 +6,7 @@ const Writer = std.Io.Writer;
 //
 //   d <path>            — file header when a/<path> == b/<path> (common case)
 //   d <old> -> <new>    — file header when paths differ (rename/copy)
-//   @ -x,y +a,b ctx    — hunk header (strips outer @@ markers, preserves numbers)
+//   @x,y|a,b ctx        — hunk header (old range | new range, ctx preserved)
 //   +<content>          — added line (verbatim)
 //   -<content>          — removed line (verbatim)
 //    <content>          — context line (verbatim, leading space preserved)
@@ -94,17 +94,30 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
             continue;
         }
 
-        // @@ -x,y +a,b @@ ctx → @ -x,y +a,b ctx
+        // @@ -x,y +a,b @@ ctx → @x,y|a,b ctx
+        // coords = "-x,y +a,b"; split on " +" to isolate old/new ranges,
+        // then strip the leading '-' and join with '|'.
         if (std.mem.startsWith(u8, line, "@@ ")) {
-            // Find closing @@
             const after_open = line[3..]; // skip "@@ "
             const close = std.mem.indexOf(u8, after_open, " @@");
             if (close) |cp| {
                 const coords = after_open[0..cp];
                 const ctx = after_open[cp + " @@".len ..];
+                const split = std.mem.indexOf(u8, coords, " +");
                 if (!first_out) try writer.writeByte('\n');
-                try writer.writeAll("@ ");
-                try writer.writeAll(coords);
+                try writer.writeByte('@');
+                if (split) |sp| {
+                    const old_range = coords[0..sp];
+                    const new_range = coords[sp + " +".len ..];
+                    // Strip leading '-' from old range
+                    const old_clean = if (old_range.len > 0 and old_range[0] == '-') old_range[1..] else old_range;
+                    try writer.writeAll(old_clean);
+                    try writer.writeByte('|');
+                    try writer.writeAll(new_range);
+                } else {
+                    // Malformed coords — emit verbatim
+                    try writer.writeAll(coords);
+                }
                 if (ctx.len > 0) {
                     try writer.writeAll(ctx); // ctx already starts with space if non-empty
                 }
@@ -209,7 +222,7 @@ test "apply: emits @ sigil for hunk header on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ -1 +1,3\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@1|1,3\n") != null);
     // Old @@ form is gone
     try std.testing.expect(std.mem.indexOf(u8, out, "@@ -1 +1,3 @@") == null);
 }
@@ -298,7 +311,7 @@ test "apply: emits @ hunk header on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ -1,3 +1,4\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@1,3|1,4\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+date") != null);
 }
 

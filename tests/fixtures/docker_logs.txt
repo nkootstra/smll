@@ -1,0 +1,21 @@
+2026-04-19T08:42:01.123456Z INFO  starting server on :8080
+2026-04-19T08:42:01.234567Z INFO  connected to postgres
+2026-04-19T08:42:05.001234Z INFO  GET /health 200 2ms
+2026-04-19T08:42:05.002345Z INFO  GET /health 200 2ms
+2026-04-19T08:42:05.003456Z INFO  GET /health 200 2ms
+2026-04-19T08:42:05.004567Z INFO  GET /health 200 2ms
+2026-04-19T08:42:05.005678Z INFO  GET /health 200 2ms
+2026-04-19T08:42:10.100111Z WARN  slow query: SELECT * FROM users WHERE id=123 (512ms)
+2026-04-19T08:42:15.200222Z INFO  GET /api/users 200 45ms
+2026-04-19T08:42:15.201333Z INFO  GET /api/users 200 45ms
+2026-04-19T08:42:15.202444Z INFO  GET /api/users 200 45ms
+2026-04-19T08:42:20.300555Z ERROR failed to connect to redis: connection refused
+2026-04-19T08:42:20.301666Z ERROR failed to connect to redis: connection refused
+2026-04-19T08:42:20.302777Z ERROR failed to connect to redis: connection refused
+2026-04-19T08:42:20.303888Z ERROR failed to connect to redis: connection refused
+2026-04-19T08:42:25.400999Z INFO  redis reconnected
+2026-04-19T08:42:30.500111Z INFO  GET /health 200 1ms
+2026-04-19T08:42:30.501222Z INFO  GET /health 200 1ms
+2026-04-19T08:42:30.502333Z INFO  GET /health 200 1ms
+2026-04-19T08:42:30.503444Z INFO  GET /health 200 1ms
+2026-04-19T08:42:35.600555Z INFO  shutting down gracefully

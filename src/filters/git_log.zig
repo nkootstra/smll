@@ -3,11 +3,17 @@ const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const util = @import("util");
 
-// v0.4 grammar for `git log`:
+// v0.5 grammar for `git log`:
 //
-//   c <sha7> <YYYY-MM-DD> <author>   — commit header (SHA truncated to 7, ISO date, name only)
+//   c <sha7> <YYYY-MM-DD> <author>   — full commit header (first, or author changed)
+//   c <sha7> <YYYY-MM-DD>            — author inherited from last-emitted c header
+//   c <sha7>                         — date + author both inherited
 //   p <sha7> <sha7>...               — parent SHAs for merge commits (from Merge: line)
 //   : <subject/body line>            — every subject and body line (4-space indent stripped)
+//
+// RLE elision (v0.5): consecutive commits from the same author share ink by
+// dropping <author> and, if also same date, <date> from subsequent c headers.
+// Parser inherits forward from the most recent c header that carried the field.
 //
 // Dropped:
 //   "commit " prefix + full SHA      (replaced by c <sha7>)
@@ -39,6 +45,42 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try applyInner(stdout, writer);
 }
 
+/// SMLL_COMPACT=1 lossy v2: emit `<sha7> <subject>` one line per commit.
+/// Drops date, author, body, merge parents. The hash remains actionable
+/// (git show <sha7>, git cherry-pick <sha7>). Target ~2× reduction vs default.
+pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = allocator;
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    var sha7: [7]u8 = undefined;
+    var sha7_valid = false;
+    var subject_emitted = false;
+    var first_out = true;
+
+    while (lines.next()) |line| {
+        if (isCommitLine(line)) {
+            sha7 = util.sha7(line["commit ".len..][0..40]);
+            sha7_valid = true;
+            subject_emitted = false;
+            continue;
+        }
+        if (subject_emitted or !sha7_valid) continue;
+        // Accept the first 4-space-indented non-empty line as subject.
+        if (!std.mem.startsWith(u8, line, "    ")) continue;
+        const subject = std.mem.trim(u8, line[4..], " \t\r");
+        if (subject.len == 0) continue;
+        if (!first_out) try writer.writeByte('\n');
+        try writer.writeAll(&sha7);
+        try writer.writeByte(' ');
+        try writer.writeAll(subject);
+        first_out = false;
+        subject_emitted = true;
+    }
+    if (!first_out) try writer.writeByte('\n');
+}
+
 fn applyInner(input: []const u8, writer: *Writer) !void {
     if (input.len == 0) return;
 
@@ -63,6 +105,11 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
     var merge_parents_len: usize = 0;
     var c_line_emitted = false;
     var in_body = false;
+
+    // RLE state across commits: remember last-emitted date and author so subsequent
+    // c headers can elide unchanged fields. `first_header` forces the first header
+    // to emit both fields even if the parsed values happen to equal the zero-init.
+    var rle_state: CRleState = .{};
 
     while (lines.next()) |line| {
         if (isCommitLine(line)) {
@@ -109,7 +156,7 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
                 // Blank line after header fields: flush c + p, transition to body.
                 if (!c_line_emitted and sha7_valid) {
                     if (!first_out) try writer.writeByte('\n');
-                    try writeCLine(writer, &sha7, &date_buf, date_valid, author_buf[0..author_len]);
+                    try writeCLine(writer, &sha7, &date_buf, date_valid, author_buf[0..author_len], &rle_state);
                     first_out = false;
                     c_line_emitted = true;
                     if (merge_parents_len > 0) {
@@ -131,7 +178,7 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
             // Flush c + p if not yet emitted (handles case with no blank separator)
             if (!c_line_emitted and sha7_valid) {
                 if (!first_out) try writer.writeByte('\n');
-                try writeCLine(writer, &sha7, &date_buf, date_valid, author_buf[0..author_len]);
+                try writeCLine(writer, &sha7, &date_buf, date_valid, author_buf[0..author_len], &rle_state);
                 first_out = false;
                 c_line_emitted = true;
                 if (merge_parents_len > 0) {
@@ -160,17 +207,58 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
     if (had_trailing_newline and !first_out) try writer.writeByte('\n');
 }
 
-fn writeCLine(writer: *Writer, sha7: *const [7]u8, date_buf: *const [10]u8, date_valid: bool, author: []const u8) !void {
+/// State carried across commits in a single apply() call for RLE elision
+/// of unchanged <date> and <author> fields on c headers.
+const CRleState = struct {
+    last_date: [10]u8 = undefined,
+    last_date_valid: bool = false,
+    last_author: [128]u8 = undefined,
+    last_author_len: usize = 0,
+    first_header: bool = true,
+};
+
+fn writeCLine(
+    writer: *Writer,
+    sha7: *const [7]u8,
+    date_buf: *const [10]u8,
+    date_valid: bool,
+    author: []const u8,
+    rle: *CRleState,
+) !void {
     try writer.writeAll("c ");
     try writer.writeAll(sha7);
-    try writer.writeByte(' ');
-    if (date_valid) {
-        try writer.writeAll(date_buf);
-    } else {
-        try writer.writeAll("0000-00-00");
+
+    // Elide author when unchanged from last-emitted. Elide date when author
+    // also elided AND date unchanged. Date is always emitted when author is,
+    // so the parser can positionally disambiguate `c <sha>` from `c <sha> <date>`
+    // from `c <sha> <date> <author>` by token count.
+    const author_changed = !std.mem.eql(u8, author, rle.last_author[0..rle.last_author_len]);
+    const date_changed = blk: {
+        if (date_valid != rle.last_date_valid) break :blk true;
+        if (!date_valid) break :blk false;
+        break :blk !std.mem.eql(u8, date_buf, &rle.last_date);
+    };
+    const emit_author = rle.first_header or author_changed;
+    const emit_date = emit_author or date_changed;
+
+    if (emit_date) {
+        try writer.writeByte(' ');
+        if (date_valid) {
+            try writer.writeAll(date_buf);
+            @memcpy(&rle.last_date, date_buf);
+        } else {
+            try writer.writeAll("0000-00-00");
+        }
+        rle.last_date_valid = date_valid;
     }
-    try writer.writeByte(' ');
-    try writer.writeAll(author);
+    if (emit_author) {
+        try writer.writeByte(' ');
+        try writer.writeAll(author);
+        const n = @min(author.len, rle.last_author.len);
+        @memcpy(rle.last_author[0..n], author[0..n]);
+        rle.last_author_len = n;
+    }
+    rle.first_header = false;
 }
 
 /// Parse "Date:   Day Mon DD HH:MM:SS YYYY +ZONE" → "YYYY-MM-DD" into buf[0..10].
@@ -256,13 +344,15 @@ test "matches: non-log input returns false" {
     try std.testing.expect(!matches("commit g0ad49edaad09b3977b23cc38c5552c76734c2de\n"));
 }
 
-test "apply: emits c sigil with sha7, date, author on linear" {
+test "apply: emits c sigil with sha7, date, author on linear (first commit full)" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, linear_fixture);
     defer allocator.free(out);
+    // First commit: full header.
     try std.testing.expect(std.mem.indexOf(u8, out, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c f666a84 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
+    // Subsequent same-author/same-date commits: v0.5 RLE elides author+date → sha only.
+    try std.testing.expect(std.mem.indexOf(u8, out, "c f666a84\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "c 95cbeda\n") != null);
     // No full SHAs
     try std.testing.expect(std.mem.indexOf(u8, out, "f0ad49edaad09b3977b23cc38c5552c76734c2de") == null);
 }
@@ -305,10 +395,12 @@ test "apply: emits c sigils for all commits on merge fixture" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, merge_fixture);
     defer allocator.free(out);
+    // First commit: full header.
     try std.testing.expect(std.mem.indexOf(u8, out, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c 50c52b3 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c cb42c80 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
+    // Subsequent same-author/same-date commits: v0.5 RLE elides author+date → sha only.
+    try std.testing.expect(std.mem.indexOf(u8, out, "c 50c52b3\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "c cb42c80\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "c f0ad49e\n") != null);
 }
 
 test "apply: directional compression on linear fixture (byte count)" {
@@ -346,6 +438,27 @@ test "apply: preserves trailing newline when input has one" {
     const out = try applyToString(allocator, linear_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
+}
+
+test "applyCompact: emits sha7 + subject, drops body/date/author" {
+    const allocator = std.testing.allocator;
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyCompact(allocator, linear_fixture, &.{}, &out.writer);
+    const got = out.written();
+    // Hash + subject on a single line, no `c ` prefix, no date, no author.
+    try std.testing.expect(std.mem.indexOf(u8, got, "f0ad49e fix: third line") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "f666a84 feat: extend a.txt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "95cbeda feat: add a.txt with one line") != null);
+    // Date + author stripped
+    try std.testing.expect(std.mem.indexOf(u8, got, "2026-04-18") == null);
+    try std.testing.expect(std.mem.indexOf(u8, got, "Alice Anderson") == null);
+    // Body stripped
+    try std.testing.expect(std.mem.indexOf(u8, got, "This body explains") == null);
+    // Strictly smaller than default apply
+    const lossless = try applyToString(allocator, linear_fixture);
+    defer allocator.free(lossless);
+    try std.testing.expect(got.len < lossless.len);
 }
 
 test "pipe-mode idempotence: v0.4 log output piped again is unchanged" {

@@ -15,7 +15,7 @@ const git_diff = @import("git_diff");
 //   [: <body>...]              — body lines (from git_log)
 //                              — blank line separator
 //   d <path>                   — diff file header (from git_diff)
-//   @ -x,y +a,b                — hunk header (from git_diff)
+//   @x,y|a,b                   — hunk header (from git_diff)
 //   +/-/  <content>            — diff body lines (from git_diff)
 //
 // The sigil namespaces are disjoint: log lines start with c/p/:,
@@ -151,7 +151,7 @@ test "apply: emits @ hunk sigil on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ -0,0 +1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@0,0|1\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+line1") != null);
 }
 
@@ -168,7 +168,7 @@ test "apply: emits @ hunk and + lines on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ -1 +1,2\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "@1|1,2\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, " line1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "+line2") != null);
 }

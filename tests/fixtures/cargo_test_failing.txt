@@ -1,0 +1,31 @@
+   Compiling foo v0.1.0 (/Users/x/foo)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+     Running unittests src/lib.rs (target/debug/deps/foo-abc123)
+
+running 5 tests
+test tests::add ... ok
+test tests::mul ... ok
+test tests::div_by_zero ... FAILED
+test tests::sub ... ok
+test tests::edge_overflow ... FAILED
+
+failures:
+
+---- tests::div_by_zero stdout ----
+thread 'tests::div_by_zero' panicked at src/lib.rs:42:9:
+attempt to divide by zero
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::edge_overflow stdout ----
+thread 'tests::edge_overflow' panicked at src/lib.rs:58:13:
+assertion `left == right` failed
+  left: 2147483647
+ right: -2147483648
+
+failures:
+    tests::div_by_zero
+    tests::edge_overflow
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`

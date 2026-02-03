@@ -63,6 +63,16 @@ const stash_list_fixture = @embedFile("fixture_git_stash_list");
 // git_blame fixtures (argv-only)
 const blame_simple_fixture = @embedFile("fixture_git_blame_simple");
 const blame_large_fixture = @embedFile("fixture_git_blame_large");
+// columnar fixtures (opt-in SMLL_COMPACT dispatch)
+const docker_ps_fixture = @embedFile("fixture_docker_ps");
+const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
+const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
+// v0.9 smoke-test fixtures
+const jest_failing_fixture = @embedFile("fixture_jest_failing");
+const tsc_errors_fixture = @embedFile("fixture_tsc_errors");
+const go_test_v_fixture = @embedFile("fixture_go_test_v");
+const docker_logs_fixture = @embedFile("fixture_docker_logs");
+const npm_install_fixture = @embedFile("fixture_npm_install");
 
 const RunResult = struct {
     stdout: []u8,
@@ -589,7 +599,7 @@ test "diff simple fixture: v0.4 format — d sigil, @ sigil, no diff --git" {
     var result = try runSmll(allocator, diff_simple_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d simple.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@ -1 +1,3\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@1|1,3\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "+line two") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "diff --git") == null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "index ") == null);
@@ -600,7 +610,7 @@ test "diff rename+modify fixture: v0.4 format — d rename sigil, @ sigil" {
     var result = try runSmll(allocator, diff_rename_modify_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d old.txt -> new.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@ -1,3 +1,4\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@1,3|1,4\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "rename from") == null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "similarity index") == null);
 }
@@ -641,7 +651,7 @@ test "show simple fixture: v0.4 format — c sigil + d sigil, no diff --git or A
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, ": feat: add a.txt with one line\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d a.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@ -0,0 +1\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@0,0|1\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "+line1") != null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "diff --git") == null);
     try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Author:") == null);
@@ -1195,4 +1205,288 @@ test "broken pipe mid-stream returns non-zero exit without panic" {
         .Signal => {},
         else => {},
     }
+}
+
+// ---------------------------------------------------------------------------
+// Columnar filter dispatch (SMLL_COMPACT opt-in)
+// ---------------------------------------------------------------------------
+
+fn runSmllWrapperEnv(
+    allocator: std.mem.Allocator,
+    bin_dir: []const u8,
+    inner_argv: []const []const u8,
+    extra_env: []const [2][]const u8,
+) !RunResult {
+    var full: std.ArrayList([]const u8) = .empty;
+    defer full.deinit(allocator);
+    try full.append(allocator, exe_path);
+    for (inner_argv) |a| try full.append(allocator, a);
+
+    var env = try std.process.getEnvMap(allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
+    defer allocator.free(new_path);
+    try env.put("PATH", new_path);
+    for (extra_env) |kv| try env.put(kv[0], kv[1]);
+
+    var child = std.process.Child.init(full.items, allocator);
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    child.env_map = &env;
+    try child.spawn();
+
+    var stdout: std.ArrayList(u8) = .empty;
+    defer stdout.deinit(allocator);
+    var stderr: std.ArrayList(u8) = .empty;
+    defer stderr.deinit(allocator);
+    try child.collectOutput(allocator, &stdout, &stderr, 2 * 1024 * 1024);
+
+    return .{
+        .stdout = try stdout.toOwnedSlice(allocator),
+        .stderr = try stderr.toOwnedSlice(allocator),
+        .term = try child.wait(),
+    };
+}
+
+fn setupFakeTool(
+    allocator: std.mem.Allocator,
+    tmp_dir: std.fs.Dir,
+    tool_name: []const u8,
+    fixture: []const u8,
+) ![]u8 {
+    // Write fixture to file, then create a shim script that cats it.
+    const fixture_name = try std.fmt.allocPrint(allocator, "{s}_fixture.txt", .{tool_name});
+    defer allocator.free(fixture_name);
+    try tmp_dir.writeFile(.{ .sub_path = fixture_name, .data = fixture });
+    const fixture_path = try tmp_dir.realpathAlloc(allocator, fixture_name);
+    defer allocator.free(fixture_path);
+
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\nexec /bin/cat {s}\n",
+        .{fixture_path},
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp_dir, tool_name, script);
+
+    return try tmp_dir.realpathAlloc(allocator, ".");
+}
+
+test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "kubectl", kubectl_pods_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"kubectl"},
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    // v0.8: kubectl_compact dispatches to dedicated pod-name summary filter.
+    // Emits single line: "[k8s] N running: name1 name2 ...". Pod names preserved.
+    try std.testing.expect(result.stdout.len < kubectl_pods_fixture.len);
+    const savings_pct = (kubectl_pods_fixture.len - result.stdout.len) * 100 / kubectl_pods_fixture.len;
+    try std.testing.expect(savings_pct >= 40);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "[k8s] "));
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "api-server-6f8b9c4d7-x2k8m") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "redis-master-0") != null);
+}
+
+test "columnar: kubectl without SMLL_COMPACT passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "kubectl", kubectl_pods_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"kubectl"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, kubectl_pods_fixture, result.stdout);
+}
+
+test "columnar: gh pr list with SMLL_COMPACT=1 preserves preamble" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_pr_list_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"gh"},
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    // First line is the banner — must appear verbatim.
+    try std.testing.expect(std.mem.startsWith(
+        u8,
+        result.stdout,
+        "Showing 8 of 8 open pull requests in example/repo\n",
+    ));
+    // Still smaller overall (padding collapse in the table region).
+    try std.testing.expect(result.stdout.len < gh_pr_list_fixture.len);
+}
+
+test "columnar: docker SMLL_COMPACT=0 stays passthrough" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_ps_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"docker"},
+        &.{.{ "SMLL_COMPACT", "0" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    // SMLL_COMPACT=0 → gate is closed, byte-identical passthrough required.
+    try std.testing.expectEqualSlices(u8, docker_ps_fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// v0.9 new filters — end-to-end smoke tests (SMLL_COMPACT=1 wrapper mode).
+// Each drives a fake tool shim on PATH, asserts the compressed output retains
+// the actionable payload (failure markers / error codes / dedup counts /
+// migration warnings), and confirms gate-closed runs fall back to passthrough.
+// ---------------------------------------------------------------------------
+
+test "smoke: jest SMLL_COMPACT=1 keeps FAIL + ● titles, drops PASS" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "jest", jest_failing_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"jest"},
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < jest_failing_fixture.len);
+    // FAIL + failure title markers survive.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "FAIL  src/components/Button.test.tsx") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "● Button component › renders with uppercase label") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Test Suites:") != null);
+    // Passing-file lines are dropped.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "PASS  src/utils/format.test.ts") == null);
+}
+
+test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "tsc", tsc_errors_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"tsc"},
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < tsc_errors_fixture.len);
+    // Locations-only transform: path:L:C TSnnnn survives; message text + carets drop.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "src/api/client.ts:42:5 TS2322") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "src/components/Button.tsx:15:7 TS2345") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Found 5 errors") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, " - error TS") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "~~~~~~") == null);
+}
+
+test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "go", go_test_v_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "go", "test", "-v" },
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < go_test_v_fixture.len);
+    // Failure markers + their Errorf evidence survive.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "--- FAIL: TestDivide") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "--- FAIL: TestSqrt") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "divide(10, 0) panic expected") != null);
+    // Passing run + per-test PASS lines are dropped.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "--- PASS: TestAdd") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "=== RUN   TestAdd") == null);
+}
+
+test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_logs_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "docker", "logs", "myapp" },
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < docker_logs_fixture.len);
+    // Repeat marker appears; first occurrence of each unique payload survives.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "(×") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "GET /health 200 2ms") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "failed to connect to redis: connection refused") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "shutting down gracefully") != null);
+}
+
+test "smoke: npm install SMLL_COMPACT=1 keeps WARN + summary, drops notice" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "npm", npm_install_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "npm", "install" },
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < npm_install_fixture.len);
+    // Deprecation warnings + install summary survive.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "npm WARN deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "added 847 packages") != null);
+    // Upgrade-nag "npm notice" + funding prompts drop.
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "npm notice") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "looking for funding") == null);
 }

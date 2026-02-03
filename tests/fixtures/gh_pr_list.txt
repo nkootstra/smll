@@ -1,0 +1,11 @@
+Showing 8 of 8 open pull requests in example/repo
+
+ID   TITLE                                                BRANCH                     CREATED
+#142 feat: Add user authentication flow                   feat/auth                  about 2 hours ago
+#141 fix: CORS regression on /api/v2 endpoints            fix/cors-v2                about 3 hours ago
+#140 chore: Bump dependency versions for Q2 cycle         chore/deps-q2              about 5 hours ago
+#139 feat: Expose websocket subscription API              feat/ws-subs               about 1 day ago
+#138 docs: Update README with new install steps           docs/install-readme        about 1 day ago
+#137 refactor: Extract shared validation helpers          refactor/validation        about 2 days ago
+#136 fix: Avoid double-submit on checkout form            fix/checkout-submit        about 2 days ago
+#135 feat: Agent-readable columnar compression            feat/smll-v06              about 3 days ago

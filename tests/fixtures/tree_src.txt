@@ -1,0 +1,26 @@
+src/
+├── filters
+│   ├── detect.zig
+│   ├── git_add.zig
+│   ├── git_blame.zig
+│   ├── git_branch.zig
+│   ├── git_checkout.zig
+│   ├── git_commit.zig
+│   ├── git_diff.zig
+│   ├── git_fetch.zig
+│   ├── git_log.zig
+│   ├── git_merge.zig
+│   ├── git_pull.zig
+│   ├── git_push.zig
+│   ├── git_rebase.zig
+│   ├── git_show.zig
+│   ├── git_stash.zig
+│   ├── git_status.zig
+│   ├── rg.zig
+│   ├── sigil_rle.zig
+│   └── validator.zig
+├── main.zig
+├── pipeline.zig
+└── util.zig
+
+2 directories, 22 files

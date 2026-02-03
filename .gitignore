@@ -1,2 +1,6 @@
 .zig-cache/
 zig-out/
+docs/plans/
+docs/brainstorms/
+docs/solutions/
+benchmarks/

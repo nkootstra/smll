@@ -3,18 +3,21 @@ const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const util = @import("util");
 
-// v0.4 grammar for `git blame`:
+// v0.5 grammar for `git blame`:
 //
-//   b <sha7> <YYYY-MM-DD> <author>   — run header, emitted once per run of consecutive
-//                                      lines from the same commit
-//    <code>                           — code line with a single leading space (all code
-//                                      is preserved byte-identical, satisfying R2)
+//   b <sha7> <YYYY-MM-DD> <author>   — full header (first, or author changed)
+//   b <sha7> <YYYY-MM-DD>            — author inherited from last-emitted header
+//   b <sha7>                         — date + author both inherited
+//    <code>                          — code line with a single leading space (all code
+//                                     is preserved byte-identical, satisfying R2)
 //
-// Compression mechanism: **run-length encoding** of consecutive rows from the same commit.
+// Compression mechanism: **run-length encoding** at two levels.
+// (1) Consecutive lines from the same commit share a single `b` header.
+// (2) Across SHA boundaries, author and date are elided from `b` headers when
+//     unchanged from the previously-emitted values. Parser inherits forward.
 // Raw git blame output repeats the full 40-char SHA + author + timestamp on every line.
-// This formatter emits the header once per run, then only the code lines.
-// On a typical file with long runs (e.g. same author/commit across many lines), this
-// yields 60-80% byte reduction.
+// On a typical file with long runs and a single dominant author, this yields
+// 70-90% byte reduction.
 //
 // Author policy: full author name is preserved in the run header. If the name is
 // extremely long (>20 chars), we keep only the first name token to save bytes while
@@ -39,6 +42,10 @@ fn applyInner(input: []const u8, w: *Writer) !void {
     // Track the current run's SHA (first 7 chars). Empty = no run started yet.
     var cur_sha7: [7]u8 = undefined;
     var cur_sha7_valid = false;
+    // Metadata carried forward for RLE elision. Slices point into the persistent
+    // input buffer, so they remain valid across iterations.
+    var last_date: []const u8 = "";
+    var last_author: []const u8 = "";
 
     while (lines.next()) |line| {
         if (line.len == 0) continue;
@@ -83,19 +90,30 @@ fn applyInner(input: []const u8, w: *Writer) !void {
         const author, const date = parseParenMeta(paren_content);
 
         // Run-length encoding: emit 'b' header only when SHA changes.
-        const sha_changed = !cur_sha7_valid or !std.mem.eql(u8, sha7, cur_sha7[0..sha7.len]);
+        const first_header = !cur_sha7_valid;
+        const sha_changed = first_header or !std.mem.eql(u8, sha7, cur_sha7[0..sha7.len]);
         if (sha_changed) {
             @memcpy(cur_sha7[0..sha7.len], sha7);
             cur_sha7_valid = true;
 
-            try w.writeAll("b ");
-            try w.writeAll(sha7);
-            try w.writeByte(' ');
-            try w.writeAll(date);
-            try w.writeByte(' ');
             // Author policy: preserve full name if ≤20 chars, else first token only.
             const author_out = if (author.len <= 20) author else firstToken(author);
-            try w.writeAll(author_out);
+            // Elide author when unchanged; elide date when author elided AND date unchanged.
+            const emit_author = first_header or !std.mem.eql(u8, author_out, last_author);
+            const emit_date = emit_author or !std.mem.eql(u8, date, last_date);
+
+            try w.writeAll("b ");
+            try w.writeAll(sha7);
+            if (emit_date) {
+                try w.writeByte(' ');
+                try w.writeAll(date);
+                last_date = date;
+            }
+            if (emit_author) {
+                try w.writeByte(' ');
+                try w.writeAll(author_out);
+                last_author = author_out;
+            }
             try w.writeByte('\n');
         }
 
@@ -304,6 +322,55 @@ test "lossless: all code lines preserved in simple fixture" {
     for (codes) |expected| {
         try std.testing.expect(std.mem.indexOf(u8, out, expected) != null);
     }
+}
+
+test "RLE: same author across SHA changes → author elided" {
+    const a = std.testing.allocator;
+    const input =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Alice 2026-02-01 00:00:01 +0000  2) two\n";
+    const out = try str(a, input, ""); defer a.free(out);
+    // First header: full (b <sha> <date> <author>)
+    try std.testing.expect(std.mem.indexOf(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
+    // Second header: author elided, date explicit (b <sha> <date>)
+    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb 2026-02-01\n") != null);
+    // Second header must NOT carry the author again
+    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb 2026-02-01 Alice") == null);
+}
+
+test "RLE: same author + same date across SHA changes → both elided" {
+    const a = std.testing.allocator;
+    const input =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Alice 2026-01-01 00:00:02 +0000  2) two\n" ++
+        "cccccccccccccccccccccccccccccccccccccccc (Alice 2026-01-01 00:00:03 +0000  3) three\n";
+    const out = try str(a, input, ""); defer a.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
+    // Subsequent headers: sha only (b <sha>)
+    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "b ccccccc\n") != null);
+}
+
+test "RLE: author change re-emits author" {
+    const a = std.testing.allocator;
+    const input =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Bob   2026-01-01 00:00:02 +0000  2) two\n";
+    const out = try str(a, input, ""); defer a.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
+    // Bob differs from Alice → author re-emitted; date redundantly emitted because author changed
+    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb 2026-01-01 Bob\n") != null);
+}
+
+test "RLE: author returns to previous value → still re-emitted (stateful)" {
+    const a = std.testing.allocator;
+    const input =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Bob   2026-01-01 00:00:02 +0000  2) two\n" ++
+        "cccccccccccccccccccccccccccccccccccccccc (Alice 2026-01-01 00:00:03 +0000  3) three\n";
+    const out = try str(a, input, ""); defer a.free(out);
+    // Third header: author went Alice→Bob→Alice, differs from last-emitted (Bob), so re-emit
+    try std.testing.expect(std.mem.indexOf(u8, out, "b ccccccc 2026-01-01 Alice\n") != null);
 }
 
 test "R3: simple fixture" {

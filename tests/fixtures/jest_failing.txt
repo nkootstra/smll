@@ -1,0 +1,42 @@
+PASS  src/utils/format.test.ts
+PASS  src/hooks/useAuth.test.ts
+FAIL  src/components/Button.test.tsx
+  Button component
+    ✓ renders children (5 ms)
+    ✗ renders with uppercase label (12 ms)
+    ✓ handles click (3 ms)
+
+  ● Button component › renders with uppercase label
+
+    expect(received).toBe(expected) // Object.is equality
+
+    Expected: "Submit"
+    Received: "submit"
+
+      12 |   it('renders with uppercase label', () => {
+      13 |     render(<Button>submit</Button>);
+    > 14 |     expect(screen.getByText('Submit')).toBeInTheDocument();
+         |            ^
+      15 |   });
+      16 | });
+
+      at Object.<anonymous> (src/components/Button.test.tsx:14:12)
+
+PASS  src/api/users.test.ts
+FAIL  src/api/client.test.ts
+  client
+    ✓ builds request (2 ms)
+    ✗ handles 401 (88 ms)
+
+  ● client › handles 401
+
+    Error: Network timeout after 5000ms
+
+      at fetchJson (src/api/client.ts:42:11)
+      at async handleLogin (src/api/client.ts:58:3)
+
+Test Suites: 2 failed, 3 passed, 5 total
+Tests:       2 failed, 15 passed, 17 total
+Snapshots:   0 total
+Time:        3.842 s
+Ran all test suites.

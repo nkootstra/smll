@@ -1,0 +1,34 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.12.0, pytest-8.0.0, pluggy-1.4.0
+rootdir: /Users/x/proj
+configfile: pyproject.toml
+plugins: anyio-4.2.0, cov-4.1.0
+collected 8 items
+
+tests/test_api.py ..F..F..                                               [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_login_flow ________________________________
+
+    def test_login_flow():
+        client = make_client()
+        resp = client.post("/login", json={"user": "alice"})
+>       assert resp.status_code == 200
+E       assert 401 == 200
+E        +  where 401 = <Response [401]>.status_code
+
+tests/test_api.py:24: AssertionError
+_______________________________ test_rate_limit ________________________________
+
+    def test_rate_limit():
+        for _ in range(100):
+            hit_endpoint()
+>       assert limiter.is_throttled()
+E       assert False
+E        +  where False = <bound method Limiter.is_throttled of <RateLimiter>>()
+
+tests/test_api.py:48: AssertionError
+=========================== short test summary info ============================
+FAILED tests/test_api.py::test_login_flow - assert 401 == 200
+FAILED tests/test_api.py::test_rate_limit - assert False
+========================= 2 failed, 6 passed in 0.43s ==========================
