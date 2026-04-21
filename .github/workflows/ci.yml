@@ -1,0 +1,61 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+          cache-size-limit: 512
+          cache-key: ${{ matrix.os }}
+      - name: Confirm Zig version
+        run: bash scripts/check-zig-version.sh
+      - name: Run tests
+        run: zig build test --summary all
+
+  size-gate:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+          cache-size-limit: 512
+          cache-key: size-gate
+      - name: Build release
+        run: zig build release
+      - name: Enforce R6 size cap
+        run: |
+          set -euo pipefail
+          size=$(wc -c < zig-out/release/smll)
+          limit=153600
+          echo "binary size: ${size} bytes (cap ${limit})"
+          if [ "$size" -ge "$limit" ]; then
+            echo "::error::binary size ${size} exceeds R6 cap ${limit}"
+            exit 1
+          fi
+      - name: Upload release artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smll-linux
+          path: zig-out/release/smll
+          retention-days: 14
