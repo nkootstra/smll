@@ -89,7 +89,7 @@ fn extractName(line: []const u8) ?[]const u8 {
     if (fields_consumed < 8) return null;
     while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
     if (i >= line.len) return null;
-    return std.mem.trimRight(u8, line[i..], " \t\r");
+    return std.mem.trimEnd(u8, line[i..], " \t\r");
 }
 
 test "matches: total line" {
@@ -113,13 +113,13 @@ test "apply: fixture produces filename list" {
     try apply(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
 
-    try std.testing.expect(std.mem.indexOf(u8, got, "main.zig") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "pipeline.zig") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "filters/") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "./") != null);
+    try std.testing.expect(std.mem.find(u8, got, "main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "pipeline.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "filters/") != null);
+    try std.testing.expect(std.mem.find(u8, got, "./") != null);
     // Ensure metadata stripped
-    try std.testing.expect(std.mem.indexOf(u8, got, "nielskootstra") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "total") == null);
+    try std.testing.expect(std.mem.find(u8, got, "nielskootstra") == null);
+    try std.testing.expect(std.mem.find(u8, got, "total") == null);
 }
 
 test "apply: filename with spaces preserved" {

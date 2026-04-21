@@ -31,20 +31,20 @@ const KEEP_PREFIXES = [_][]const u8{
 };
 
 pub fn matches(input: []const u8) bool {
-    if (std.mem.indexOf(u8, input, "added ") != null and
-        std.mem.indexOf(u8, input, "packages") != null) return true;
-    if (std.mem.indexOf(u8, input, "up to date") != null) return true;
-    if (std.mem.indexOf(u8, input, "audited ") != null) return true;
-    if (std.mem.indexOf(u8, input, "npm error") != null) return true;
-    if (std.mem.indexOf(u8, input, "npm ERR!") != null) return true;
-    if (std.mem.indexOf(u8, input, "npm WARN") != null) return true;
+    if (std.mem.find(u8, input, "added ") != null and
+        std.mem.find(u8, input, "packages") != null) return true;
+    if (std.mem.find(u8, input, "up to date") != null) return true;
+    if (std.mem.find(u8, input, "audited ") != null) return true;
+    if (std.mem.find(u8, input, "npm error") != null) return true;
+    if (std.mem.find(u8, input, "npm ERR!") != null) return true;
+    if (std.mem.find(u8, input, "npm WARN") != null) return true;
     return false;
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
-    var scratch = std.ArrayList(u8){};
+    var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
     var kept_lines: usize = 0;
@@ -79,7 +79,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 fn shouldKeep(line: []const u8) bool {
     // Explicit drops take priority.
     if (std.mem.startsWith(u8, line, "npm notice")) return false;
-    if (std.mem.indexOf(u8, line, "packages are looking for funding") != null) return false;
+    if (std.mem.find(u8, line, "packages are looking for funding") != null) return false;
     if (std.mem.startsWith(u8, line, "run `npm ")) return false;
     for (KEEP_PREFIXES) |p| {
         if (std.mem.startsWith(u8, line, p)) return true;
@@ -111,13 +111,13 @@ test "apply: fixture keeps WARN + summary, drops notice + funding noise" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < input.len);
-    try std.testing.expect(std.mem.indexOf(u8, got, "npm WARN deprecated lodash.isequal") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "added 847 packages") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "found 2 vulnerabilities") != null);
+    try std.testing.expect(std.mem.find(u8, got, "npm WARN deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.find(u8, got, "added 847 packages") != null);
+    try std.testing.expect(std.mem.find(u8, got, "found 2 vulnerabilities") != null);
     // Dropped noise.
-    try std.testing.expect(std.mem.indexOf(u8, got, "npm notice") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "packages are looking for funding") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "run `npm fund`") == null);
+    try std.testing.expect(std.mem.find(u8, got, "npm notice") == null);
+    try std.testing.expect(std.mem.find(u8, got, "packages are looking for funding") == null);
+    try std.testing.expect(std.mem.find(u8, got, "run `npm fund`") == null);
 }
 
 test "apply: silent run emits 'up to date'" {
@@ -134,6 +134,6 @@ test "apply: strips ANSI" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "\x1b") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "added 5 packages") != null);
+    try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
+    try std.testing.expect(std.mem.find(u8, got, "added 5 packages") != null);
 }

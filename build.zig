@@ -446,6 +446,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
         .strip = true,
+        .unwind_tables = .none,
     });
     release_mod.addImport("git_status", git_status_mod);
     release_mod.addImport("git_diff", git_diff_mod);

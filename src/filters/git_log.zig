@@ -138,7 +138,7 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
 
         if (std.mem.startsWith(u8, line, "Author: ")) {
             const author_rest = line["Author: ".len..];
-            const email_start = std.mem.indexOf(u8, author_rest, " <") orelse author_rest.len;
+            const email_start = std.mem.find(u8, author_rest, " <") orelse author_rest.len;
             const name = author_rest[0..email_start];
             author_len = @min(name.len, author_buf.len);
             @memcpy(author_buf[0..author_len], name[0..author_len]);
@@ -349,46 +349,46 @@ test "apply: emits c sigil with sha7, date, author on linear (first commit full)
     const out = try applyToString(allocator, linear_fixture);
     defer allocator.free(out);
     // First commit: full header.
-    try std.testing.expect(std.mem.indexOf(u8, out, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
     // Subsequent same-author/same-date commits: v0.5 RLE elides author+date → sha only.
-    try std.testing.expect(std.mem.indexOf(u8, out, "c f666a84\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c 95cbeda\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c f666a84\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c 95cbeda\n") != null);
     // No full SHAs
-    try std.testing.expect(std.mem.indexOf(u8, out, "f0ad49edaad09b3977b23cc38c5552c76734c2de") == null);
+    try std.testing.expect(std.mem.find(u8, out, "f0ad49edaad09b3977b23cc38c5552c76734c2de") == null);
 }
 
 test "apply: no commit/Author/Date labels in output" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, linear_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "commit ") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Author:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Date:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@example.com") == null);
+    try std.testing.expect(std.mem.find(u8, out, "commit ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Date:") == null);
+    try std.testing.expect(std.mem.find(u8, out, "@example.com") == null);
 }
 
 test "apply: emits : sigil for every body line on linear" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, linear_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": fix: third line\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": feat: extend a.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": feat: add a.txt with one line\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": fix: third line\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": feat: extend a.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": feat: add a.txt with one line\n") != null);
 }
 
 test "apply: preserves multi-line commit body verbatim under : sigil" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, linear_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": This body explains why we added a second line.\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": It spans multiple lines and contains punctuation.\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": This body explains why we added a second line.\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": It spans multiple lines and contains punctuation.\n") != null);
 }
 
 test "apply: emits p sigil for merge parents on merge fixture" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, merge_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "p 50c52b3 cb42c80\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "p 50c52b3 cb42c80\n") != null);
 }
 
 test "apply: emits c sigils for all commits on merge fixture" {
@@ -396,11 +396,11 @@ test "apply: emits c sigils for all commits on merge fixture" {
     const out = try applyToString(allocator, merge_fixture);
     defer allocator.free(out);
     // First commit: full header.
-    try std.testing.expect(std.mem.indexOf(u8, out, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
     // Subsequent same-author/same-date commits: v0.5 RLE elides author+date → sha only.
-    try std.testing.expect(std.mem.indexOf(u8, out, "c 50c52b3\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c cb42c80\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c f0ad49e\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c 50c52b3\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c cb42c80\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c f0ad49e\n") != null);
 }
 
 test "apply: directional compression on linear fixture (byte count)" {
@@ -447,14 +447,14 @@ test "applyCompact: emits sha7 + subject, drops body/date/author" {
     try applyCompact(allocator, linear_fixture, &.{}, &out.writer);
     const got = out.written();
     // Hash + subject on a single line, no `c ` prefix, no date, no author.
-    try std.testing.expect(std.mem.indexOf(u8, got, "f0ad49e fix: third line") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "f666a84 feat: extend a.txt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "95cbeda feat: add a.txt with one line") != null);
+    try std.testing.expect(std.mem.find(u8, got, "f0ad49e fix: third line") != null);
+    try std.testing.expect(std.mem.find(u8, got, "f666a84 feat: extend a.txt") != null);
+    try std.testing.expect(std.mem.find(u8, got, "95cbeda feat: add a.txt with one line") != null);
     // Date + author stripped
-    try std.testing.expect(std.mem.indexOf(u8, got, "2026-04-18") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Alice Anderson") == null);
+    try std.testing.expect(std.mem.find(u8, got, "2026-04-18") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Alice Anderson") == null);
     // Body stripped
-    try std.testing.expect(std.mem.indexOf(u8, got, "This body explains") == null);
+    try std.testing.expect(std.mem.find(u8, got, "This body explains") == null);
     // Strictly smaller than default apply
     const lossless = try applyToString(allocator, linear_fixture);
     defer allocator.free(lossless);
@@ -475,7 +475,7 @@ test "apply: author without email angle bracket passes through name" {
     const input = "commit abcdef0123456789abcdef0123456789abcdef01\nAuthor: Just A Name\nDate:   Sat Apr 18 09:00:00 2026 +0000\n\n    subject\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c abcdef0 2026-04-18 Just A Name\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c abcdef0 2026-04-18 Just A Name\n") != null);
 }
 
 test "apply: malformed Date falls back to 0000-00-00" {
@@ -483,5 +483,5 @@ test "apply: malformed Date falls back to 0000-00-00" {
     const input = "commit abcdef0123456789abcdef0123456789abcdef01\nAuthor: n <n@n>\nDate:   garbage\n\n    subject\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c abcdef0 0000-00-00 n\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "c abcdef0 0000-00-00 n\n") != null);
 }

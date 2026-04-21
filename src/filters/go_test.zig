@@ -16,13 +16,13 @@ const Writer = std.Io.Writer;
 //            "FAIL\t" / "ok  \t" package lines.
 
 pub fn matches(input: []const u8) bool {
-    if (std.mem.indexOf(u8, input, "=== RUN") != null) return true;
-    if (std.mem.indexOf(u8, input, "--- FAIL:") != null) return true;
-    if (std.mem.indexOf(u8, input, "--- PASS:") != null) return true;
+    if (std.mem.find(u8, input, "=== RUN") != null) return true;
+    if (std.mem.find(u8, input, "--- FAIL:") != null) return true;
+    if (std.mem.find(u8, input, "--- PASS:") != null) return true;
     // Package summary lines
-    if (std.mem.indexOf(u8, input, "\nok  \t") != null) return true;
+    if (std.mem.find(u8, input, "\nok  \t") != null) return true;
     if (std.mem.startsWith(u8, input, "ok  \t")) return true;
-    if (std.mem.indexOf(u8, input, "\nFAIL\t") != null) return true;
+    if (std.mem.find(u8, input, "\nFAIL\t") != null) return true;
     if (std.mem.startsWith(u8, input, "FAIL\t")) return true;
     return false;
 }
@@ -30,7 +30,7 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
-    var scratch = std.ArrayList(u8){};
+    var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
     var kept_lines: usize = 0;
@@ -45,8 +45,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 }
 
 fn hasFailureMarker(s: []const u8) bool {
-    if (std.mem.indexOf(u8, s, "--- FAIL:") != null) return true;
-    if (std.mem.indexOf(u8, s, "FAIL\t") != null) return true;
+    if (std.mem.find(u8, s, "--- FAIL:") != null) return true;
+    if (std.mem.find(u8, s, "FAIL\t") != null) return true;
     if (std.mem.startsWith(u8, s, "FAIL\n")) return true;
     // "FAIL" on its own line (package-level)
     var it = std.mem.splitScalar(u8, s, '\n');
@@ -146,16 +146,16 @@ test "apply: fixture keeps FAIL + error context + package summary" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "--- FAIL: TestDivide") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "--- FAIL: TestSqrt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "divide(10, 0) panic expected") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "sqrt(-1) = 0, want NaN") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "FAIL\tgithub.com/example/math") != null);
+    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestDivide") != null);
+    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestSqrt") != null);
+    try std.testing.expect(std.mem.find(u8, got, "divide(10, 0) panic expected") != null);
+    try std.testing.expect(std.mem.find(u8, got, "sqrt(-1) = 0, want NaN") != null);
+    try std.testing.expect(std.mem.find(u8, got, "FAIL\tgithub.com/example/math") != null);
     // PASS markers dropped.
-    try std.testing.expect(std.mem.indexOf(u8, got, "--- PASS:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "=== RUN") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "TestAdd") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "TestMultiply") == null);
+    try std.testing.expect(std.mem.find(u8, got, "--- PASS:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "=== RUN") == null);
+    try std.testing.expect(std.mem.find(u8, got, "TestAdd") == null);
+    try std.testing.expect(std.mem.find(u8, got, "TestMultiply") == null);
 }
 
 test "apply: all passing emits 'all tests passed'" {
@@ -184,7 +184,7 @@ test "apply: FAIL on own line counts as failure" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "--- FAIL: TestA") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "foo_test.go:5: boom") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "exit status 1") != null);
+    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestA") != null);
+    try std.testing.expect(std.mem.find(u8, got, "foo_test.go:5: boom") != null);
+    try std.testing.expect(std.mem.find(u8, got, "exit status 1") != null);
 }

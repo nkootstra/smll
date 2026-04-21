@@ -74,7 +74,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
 /// Locate column-start index of a named header in the HEADER row.
 fn findColumnStart(header: []const u8, name: []const u8) ?usize {
-    return std.mem.indexOf(u8, header, name);
+    return std.mem.find(u8, header, name);
 }
 
 /// Extract name field. If names_col points into the line, take from there;
@@ -87,7 +87,7 @@ fn extractName(line: []const u8, names_col: usize) []const u8 {
 }
 
 fn lastField(line: []const u8) []const u8 {
-    const trimmed = std.mem.trimRight(u8, line, " \t\r");
+    const trimmed = std.mem.trimEnd(u8, line, " \t\r");
     if (trimmed.len == 0) return trimmed;
     var i: usize = trimmed.len;
     while (i >= 2) : (i -= 1) {
@@ -117,10 +117,10 @@ test "apply: fixture produces compact summary" {
     const got = out.written();
     try std.testing.expect(std.mem.startsWith(u8, got, "[docker] 4 "));
     try std.testing.expect(std.mem.endsWith(u8, got, "\n"));
-    try std.testing.expect(std.mem.indexOf(u8, got, "helios-assistant") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "helios-convex-dashboard") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "helios-convex-backend") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "helios-mysql") != null);
+    try std.testing.expect(std.mem.find(u8, got, "helios-assistant") != null);
+    try std.testing.expect(std.mem.find(u8, got, "helios-convex-dashboard") != null);
+    try std.testing.expect(std.mem.find(u8, got, "helios-convex-backend") != null);
+    try std.testing.expect(std.mem.find(u8, got, "helios-mysql") != null);
 }
 
 test "apply: empty input produces nothing" {

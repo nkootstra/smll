@@ -86,29 +86,56 @@ const RunResult = struct {
 };
 
 fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
-    var child = std.process.Child.init(&.{exe_path}, allocator);
-    child.stdin_behavior = .Pipe;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    try child.spawn();
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = &.{exe_path},
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
 
     if (input.len > 0) {
-        try child.stdin.?.writeAll(input);
+        try child.stdin.?.writeStreamingAll(io, input);
     }
-    child.stdin.?.close();
+    child.stdin.?.close(io);
     child.stdin = null;
 
-    var stdout: std.ArrayList(u8) = .empty;
-    defer stdout.deinit(allocator);
-    var stderr: std.ArrayList(u8) = .empty;
-    defer stderr.deinit(allocator);
-    try child.collectOutput(allocator, &stdout, &stderr, 2 * 1024 * 1024);
+    return try drainChild(allocator, io, &child);
+}
 
-    return .{
-        .stdout = try stdout.toOwnedSlice(allocator),
-        .stderr = try stderr.toOwnedSlice(allocator),
-        .term = try child.wait(),
-    };
+/// Concurrently drain stdout + stderr from a running child, wait on it,
+/// and return owned slices. Mirrors what std.process.run does internally so
+/// we don't deadlock when both pipes fill.
+fn drainChild(allocator: std.mem.Allocator, io: std.Io, child: *std.process.Child) !RunResult {
+    var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: std.Io.File.MultiReader = undefined;
+    multi_reader.init(
+        allocator,
+        io,
+        multi_reader_buffer.toStreams(),
+        &.{ child.stdout.?, child.stderr.? },
+    );
+    defer multi_reader.deinit();
+
+    const stdout_reader = multi_reader.reader(0);
+    const stderr_reader = multi_reader.reader(1);
+
+    while (multi_reader.fill(64, .none)) |_| {
+        if (stdout_reader.buffered().len > 2 * 1024 * 1024) return error.StreamTooLong;
+        if (stderr_reader.buffered().len > 2 * 1024 * 1024) return error.StreamTooLong;
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        else => |e| return e,
+    }
+
+    try multi_reader.checkAnyError();
+
+    const term = try child.wait(io);
+    const stdout_slice = try multi_reader.toOwnedSlice(0);
+    errdefer allocator.free(stdout_slice);
+    const stderr_slice = try multi_reader.toOwnedSlice(1);
+
+    return .{ .stdout = stdout_slice, .stderr = stderr_slice, .term = term };
 }
 
 test "echo hello passes through" {
@@ -116,7 +143,7 @@ test "echo hello passes through" {
     var result = try runSmll(allocator, "hello\n");
     defer result.deinit(allocator);
     try std.testing.expectEqualStrings("hello\n", result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "empty stdin produces empty stdout, exit 0" {
@@ -124,7 +151,7 @@ test "empty stdin produces empty stdout, exit 0" {
     var result = try runSmll(allocator, "");
     defer result.deinit(allocator);
     try std.testing.expectEqualStrings("", result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "1KB arbitrary bytes pass through byte-identically (fail-open)" {
@@ -134,7 +161,7 @@ test "1KB arbitrary bytes pass through byte-identically (fail-open)" {
     var result = try runSmll(allocator, &input);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, &input, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "100KB input passes through correctly (buffer growth)" {
@@ -145,7 +172,7 @@ test "100KB input passes through correctly (buffer growth)" {
     var result = try runSmll(allocator, input);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, input, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "buffer_size + 1 bytes pass through correctly (writer flush fires)" {
@@ -156,7 +183,7 @@ test "buffer_size + 1 bytes pass through correctly (writer flush fires)" {
     var result = try runSmll(allocator, input);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, input, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 fn expectedFilterOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
@@ -176,7 +203,7 @@ test "dirty fixture: smll output == GitStatusFilter.apply byte-for-byte" {
 
     try std.testing.expectEqualStrings(expected, result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "clean fixture: smll output == GitStatusFilter.apply byte-for-byte" {
@@ -189,7 +216,7 @@ test "clean fixture: smll output == GitStatusFilter.apply byte-for-byte" {
 
     try std.testing.expectEqualStrings(expected, result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "conflict fixture: smll output == GitStatusFilter.apply byte-for-byte" {
@@ -202,7 +229,7 @@ test "conflict fixture: smll output == GitStatusFilter.apply byte-for-byte" {
 
     try std.testing.expectEqualStrings(expected, result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "non-git input passes through unchanged (fail-open)" {
@@ -213,7 +240,7 @@ test "non-git input passes through unchanged (fail-open)" {
 
     try std.testing.expectEqualStrings(ls_like, result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "dirty fixture: smll output is strictly smaller than input" {
@@ -231,16 +258,16 @@ test "dirty fixture: v0.4 format — branch sigil, path sigils, no headers" {
     // Branch line
     try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
     // Unstaged modified paths
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "M src/main.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "M src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "M src/main.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "M src/pipeline.zig\n") != null);
     // Untracked paths
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "? src/filters/git_status.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "? tests/fixtures/git_status_dirty.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "? src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "? tests/fixtures/git_status_dirty.txt\n") != null);
     // No section headers
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Changes not staged") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Untracked files:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Changes not staged") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Untracked files:") == null);
     // No hint lines
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "(use \"git") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "(use \"git") == null);
 }
 
 test "clean fixture: v0.4 format — branch line only" {
@@ -255,9 +282,9 @@ test "conflict fixture: v0.4 format — S sigil staged, UU sigil unmerged" {
     var result = try runSmll(allocator, conflict_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "S src/pipeline.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "UU src/filters/git_status.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "? tests/fixtures/git_status_conflict.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "S src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "UU src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "? tests/fixtures/git_status_conflict.txt\n") != null);
 }
 
 test "dirty fixture: R3 gate — smll ≤ 80% of raw bytes" {
@@ -290,7 +317,7 @@ test "pipe-mode idempotence: v0.4 status output piped into smll again is unchang
     defer second.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, second.term);
 }
 
 fn expectedDiffOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
@@ -309,7 +336,7 @@ test "diff simple fixture: smll output == git_diff.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "diff multi fixture: smll output == git_diff.apply byte-for-byte" {
@@ -321,7 +348,7 @@ test "diff multi fixture: smll output == git_diff.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "diff rename+modify fixture: smll output == git_diff.apply byte-for-byte" {
@@ -333,7 +360,7 @@ test "diff rename+modify fixture: smll output == git_diff.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "diff multi fixture: smll output is strictly smaller than input" {
@@ -359,7 +386,7 @@ test "log linear fixture: smll output == git_log.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "log merge fixture: smll output == git_log.apply byte-for-byte" {
@@ -371,7 +398,7 @@ test "log merge fixture: smll output == git_log.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "log merge fixture: smll output is strictly smaller than input" {
@@ -397,7 +424,7 @@ test "show simple fixture: smll output == git_show.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "show body fixture: smll output == git_show.apply byte-for-byte" {
@@ -409,7 +436,7 @@ test "show body fixture: smll output == git_show.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "show body fixture: smll output is strictly smaller than input" {
@@ -434,11 +461,13 @@ test "show: priority over log (show output routes to git_show, not git_log)" {
 
 test "dirty fixture: latency smoke (<100ms loose bound)" {
     const allocator = std.testing.allocator;
-    var timer = try std.time.Timer.start();
+    const io = std.testing.io;
+    const start = std.Io.Clock.Timestamp.now(io, .awake);
     var result = try runSmll(allocator, dirty_fixture);
     defer result.deinit(allocator);
-    const elapsed_ns = timer.read();
-    const elapsed_ms = elapsed_ns / std.time.ns_per_ms;
+    const elapsed = start.untilNow(io);
+    const elapsed_ns: i128 = elapsed.raw.nanoseconds;
+    const elapsed_ms = @divTrunc(elapsed_ns, std.time.ns_per_ms);
     // Loose smoke: full process spawn + IPC dominates. Unit 5 does a real hyperfine benchmark.
     try std.testing.expect(elapsed_ms < 100);
 }
@@ -452,22 +481,12 @@ fn runSmllWrapper(
     try full.append(allocator, exe_path);
     for (inner_argv) |a| try full.append(allocator, a);
 
-    var child = std.process.Child.init(full.items, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    try child.spawn();
-
-    var stdout: std.ArrayList(u8) = .empty;
-    defer stdout.deinit(allocator);
-    var stderr: std.ArrayList(u8) = .empty;
-    defer stderr.deinit(allocator);
-    try child.collectOutput(allocator, &stdout, &stderr, 2 * 1024 * 1024);
-
-    return .{
-        .stdout = try stdout.toOwnedSlice(allocator),
-        .stderr = try stderr.toOwnedSlice(allocator),
-        .term = try child.wait(),
-    };
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = full.items,
+        .stdout_limit = .limited(2 * 1024 * 1024),
+        .stderr_limit = .limited(2 * 1024 * 1024),
+    });
+    return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
 }
 
 test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd)" {
@@ -477,8 +496,8 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    try tmp.dir.writeFile(.{ .sub_path = "dirty.txt", .data = dirty_fixture });
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, "dirty.txt");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "dirty.txt", .data = dirty_fixture });
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, "dirty.txt", allocator);
     defer allocator.free(tmp_path);
 
     var result = try runSmllWrapper(allocator, &.{ "/bin/cat", tmp_path });
@@ -486,14 +505,14 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
 
     // Passthrough: raw fixture bytes must come through unchanged.
     try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "wrapper: child exit code propagates (exit 42)" {
     const allocator = std.testing.allocator;
     var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", "exit 42" });
     defer result.deinit(allocator);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 42 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 42 }, result.term);
 }
 
 test "wrapper: child stderr flows through to smll's stderr" {
@@ -504,7 +523,7 @@ test "wrapper: child stderr flows through to smll's stderr" {
     );
     defer result.deinit(allocator);
     try std.testing.expectEqualStrings("child-err\n", result.stderr);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "wrapper: non-zero exit still emits filtered stdout" {
@@ -514,9 +533,9 @@ test "wrapper: non-zero exit still emits filtered stdout" {
     const script = "printf 'On branch main\\nnothing to commit, working tree clean\\n'; exit 1";
     var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", script });
     defer result.deinit(allocator);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 1 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
     try std.testing.expect(result.stdout.len > 0);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "On branch main") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "On branch main") != null);
 }
 
 test "large status fixture: smll output == git_status.apply byte-for-byte" {
@@ -528,7 +547,7 @@ test "large status fixture: smll output == git_status.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "large status fixture: v0.4 format — branch sigil, A sigils for staged new files" {
@@ -538,12 +557,12 @@ test "large status fixture: v0.4 format — branch sigil, A sigils for staged ne
     // Branch line
     try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
     // Staged new files use A sigil
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "A src/components/comp_01.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "A src/components/comp_01.rs\n") != null);
     // Unstaged modified uses M sigil
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "M src/mod_01.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "M src/mod_01.rs\n") != null);
     // No section headers
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Changes to be committed:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Changes not staged") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Changes to be committed:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Changes not staged") == null);
 }
 
 test "large status fixture: R3 gate — smll ≤ 80% of raw bytes" {
@@ -563,7 +582,7 @@ test "large diff fixture: smll output == git_diff.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "large log fixture: smll output == git_log.apply byte-for-byte" {
@@ -575,7 +594,7 @@ test "large log fixture: smll output == git_log.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "large show fixture: smll output == git_show.apply byte-for-byte" {
@@ -587,7 +606,7 @@ test "large show fixture: smll output == git_show.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 // ---------------------------------------------------------------------------
@@ -598,21 +617,21 @@ test "diff simple fixture: v0.4 format — d sigil, @ sigil, no diff --git" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, diff_simple_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d simple.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@1|1,3\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "+line two") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "diff --git") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "index ") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "d simple.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@1|1,3\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "+line two") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "diff --git") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "index ") == null);
 }
 
 test "diff rename+modify fixture: v0.4 format — d rename sigil, @ sigil" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, diff_rename_modify_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d old.txt -> new.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@1,3|1,4\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "rename from") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "similarity index") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "d old.txt -> new.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@1,3|1,4\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "rename from") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "similarity index") == null);
 }
 
 // ---------------------------------------------------------------------------
@@ -623,21 +642,21 @@ test "log linear fixture: v0.4 format — c sigil, : sigil, no commit/Author/Dat
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, log_linear_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, ": fix: third line\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "commit ") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Author:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Date:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@example.com") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, ": fix: third line\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "commit ") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Date:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@example.com") == null);
 }
 
 test "log merge fixture: v0.4 format — p sigil for merge parents" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, log_merge_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "p 50c52b3 cb42c80\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Merge:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "p 50c52b3 cb42c80\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Merge:") == null);
 }
 
 // ---------------------------------------------------------------------------
@@ -648,13 +667,13 @@ test "show simple fixture: v0.4 format — c sigil + d sigil, no diff --git or A
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, show_simple_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, ": feat: add a.txt with one line\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "d a.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "@0,0|1\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "+line1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "diff --git") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, ": feat: add a.txt with one line\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "d a.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@0,0|1\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "+line1") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "diff --git") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);
 }
 
 // ---------------------------------------------------------------------------
@@ -757,7 +776,7 @@ test "pipe-mode idempotence: v0.4 diff output piped into smll is unchanged" {
     defer second.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, second.term);
 }
 
 test "pipe-mode idempotence: v0.4 log output piped into smll is unchanged" {
@@ -772,7 +791,7 @@ test "pipe-mode idempotence: v0.4 log output piped into smll is unchanged" {
     defer second.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, second.term);
 }
 
 test "pipe-mode idempotence: v0.4 show output piped into smll is unchanged" {
@@ -786,7 +805,7 @@ test "pipe-mode idempotence: v0.4 show output piped into smll is unchanged" {
     defer second.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, first.stdout, second.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, second.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, second.term);
 }
 
 // ---------------------------------------------------------------------------
@@ -805,38 +824,29 @@ fn runSmllWrapperFakeGit(
     for (inner_argv) |a| try full.append(allocator, a);
 
     // Build env with prepended PATH.
-    var env = try std.process.getEnvMap(allocator);
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
     const old_path = env.get("PATH") orelse "";
     const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
     defer allocator.free(new_path);
     try env.put("PATH", new_path);
 
-    var child = std.process.Child.init(full.items, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    child.env_map = &env;
-    try child.spawn();
-
-    var stdout: std.ArrayList(u8) = .empty;
-    defer stdout.deinit(allocator);
-    var stderr: std.ArrayList(u8) = .empty;
-    defer stderr.deinit(allocator);
-    try child.collectOutput(allocator, &stdout, &stderr, 2 * 1024 * 1024);
-
-    return .{
-        .stdout = try stdout.toOwnedSlice(allocator),
-        .stderr = try stderr.toOwnedSlice(allocator),
-        .term = try child.wait(),
-    };
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = full.items,
+        .stdout_limit = .limited(2 * 1024 * 1024),
+        .stderr_limit = .limited(2 * 1024 * 1024),
+        .environ_map = &env,
+    });
+    return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
 }
 
 // Write a shell script to dir/name that is executable.
-fn writeFakeScript(dir: std.fs.Dir, name: []const u8, body: []const u8) !void {
-    try dir.writeFile(.{ .sub_path = name, .data = body });
-    const file = try dir.openFile(name, .{});
-    defer file.close();
-    try file.chmod(0o755);
+fn writeFakeScript(dir: std.Io.Dir, name: []const u8, body: []const u8) !void {
+    const io = std.testing.io;
+    try dir.writeFile(io, .{ .sub_path = name, .data = body });
+    const file = try dir.openFile(io, name, .{});
+    defer file.close(io);
+    try file.setPermissions(io, .fromMode(0o755));
 }
 
 // ---------------------------------------------------------------------------
@@ -852,7 +862,7 @@ test "dispatch: registered subcommand does not forward child stderr to smll stde
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(bin_path);
 
     // Fake `git` that emits clean-fixture-like stdout + a warning on stderr.
@@ -882,7 +892,7 @@ test "dispatch: unregistered subcommand stdout is not filtered (verbatim passthr
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(bin_path);
 
     // Fake `git` that always prints the dirty fixture on stdout regardless of
@@ -913,7 +923,7 @@ test "dispatch: registered subcommand with both stdout and stderr — stderr not
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(bin_path);
 
     // Fake `git status` with non-trivial stdout and a stderr payload.
@@ -942,7 +952,7 @@ test "dispatch: non-git outer command bypasses formatter (argv guard)" {
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const bin_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(bin_path);
 
     // Fake `cargo` that emits dirty-fixture-like content so pipeline.dispatch
@@ -982,7 +992,7 @@ test "git_commit simple fixture: smll output == git_commit.apply byte-for-byte" 
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_commit multifile fixture: smll output == git_commit.apply byte-for-byte" {
@@ -994,7 +1004,7 @@ test "git_commit multifile fixture: smll output == git_commit.apply byte-for-byt
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_commit large fixture: smll output == git_commit.apply byte-for-byte" {
@@ -1006,7 +1016,7 @@ test "git_commit large fixture: smll output == git_commit.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,7 +1039,7 @@ test "git_branch list fixture: smll output == git_branch.apply byte-for-byte" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings(expected, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 // ---------------------------------------------------------------------------
@@ -1044,7 +1054,7 @@ test "git_add small fixture: pipe-mode passes through unchanged (argv-only filte
     var result = try runSmll(allocator, add_error_stderr_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, add_error_stderr_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_push small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1052,7 +1062,7 @@ test "git_push small fixture: pipe-mode passes through unchanged (argv-only filt
     var result = try runSmll(allocator, push_simple_stdout_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, push_simple_stdout_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_push large fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1060,7 +1070,7 @@ test "git_push large fixture: pipe-mode passes through unchanged (argv-only filt
     var result = try runSmll(allocator, push_large_stdout_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, push_large_stdout_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_pull small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1068,7 +1078,7 @@ test "git_pull small fixture: pipe-mode passes through unchanged (argv-only filt
     var result = try runSmll(allocator, pull_ff_stdout_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, pull_ff_stdout_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_pull uptodate fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1076,7 +1086,7 @@ test "git_pull uptodate fixture: pipe-mode passes through unchanged (argv-only f
     var result = try runSmll(allocator, pull_uptodate_stdout_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, pull_uptodate_stdout_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_fetch small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1085,7 +1095,7 @@ test "git_fetch small fixture: pipe-mode passes through unchanged (argv-only fil
     var result = try runSmll(allocator, fetch_simple_stderr_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, fetch_simple_stderr_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_merge small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1093,7 +1103,7 @@ test "git_merge small fixture: pipe-mode passes through unchanged (argv-only fil
     var result = try runSmll(allocator, merge_ff_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, merge_ff_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_merge large fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1101,7 +1111,7 @@ test "git_merge large fixture: pipe-mode passes through unchanged (argv-only fil
     var result = try runSmll(allocator, merge_large_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, merge_large_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_rebase small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1109,7 +1119,7 @@ test "git_rebase small fixture: pipe-mode passes through unchanged (argv-only fi
     var result = try runSmll(allocator, rebase_simple_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, rebase_simple_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_rebase large fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1117,7 +1127,7 @@ test "git_rebase large fixture: pipe-mode passes through unchanged (argv-only fi
     var result = try runSmll(allocator, rebase_large_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, rebase_large_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_checkout small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1126,7 +1136,7 @@ test "git_checkout small fixture: pipe-mode passes through unchanged (argv-only 
     var result = try runSmll(allocator, checkout_switch_stderr_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, checkout_switch_stderr_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_stash small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1134,7 +1144,7 @@ test "git_stash small fixture: pipe-mode passes through unchanged (argv-only fil
     var result = try runSmll(allocator, stash_save_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, stash_save_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_stash list fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1142,7 +1152,7 @@ test "git_stash list fixture: pipe-mode passes through unchanged (argv-only filt
     var result = try runSmll(allocator, stash_list_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, stash_list_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_blame small fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1150,7 +1160,7 @@ test "git_blame small fixture: pipe-mode passes through unchanged (argv-only fil
     var result = try runSmll(allocator, blame_simple_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, blame_simple_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "git_blame large fixture: pipe-mode passes through unchanged (argv-only filter)" {
@@ -1158,7 +1168,7 @@ test "git_blame large fixture: pipe-mode passes through unchanged (argv-only fil
     var result = try runSmll(allocator, blame_large_fixture);
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, blame_large_fixture, result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 // ---------------------------------------------------------------------------
@@ -1172,37 +1182,39 @@ test "fail-open regression: non-git outer command (echo) passes through unchange
     var result = try runSmllWrapper(allocator, &.{ "/bin/echo", "hello" });
     defer result.deinit(allocator);
     try std.testing.expectEqualStrings("hello\n", result.stdout);
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
 test "broken pipe mid-stream returns non-zero exit without panic" {
     const allocator = std.testing.allocator;
-    var child = std.process.Child.init(&.{exe_path}, allocator);
-    child.stdin_behavior = .Pipe;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    try child.spawn();
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = &.{exe_path},
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
 
-    child.stdout.?.close();
+    child.stdout.?.close(io);
     child.stdout = null;
 
     const input = try allocator.alloc(u8, 16 * 1024);
     defer allocator.free(input);
     @memset(input, 'x');
-    child.stdin.?.writeAll(input) catch {};
-    child.stdin.?.close();
+    child.stdin.?.writeStreamingAll(io, input) catch {};
+    child.stdin.?.close(io);
     child.stdin = null;
 
     var stderr: std.ArrayList(u8) = .empty;
     defer stderr.deinit(allocator);
     var stderr_reader_buf: [4096]u8 = undefined;
-    var stderr_reader = child.stderr.?.reader(&stderr_reader_buf);
+    var stderr_reader = child.stderr.?.reader(io, &stderr_reader_buf);
     stderr_reader.interface.appendRemainingUnlimited(allocator, &stderr) catch {};
 
-    const term = try child.wait();
+    const term = try child.wait(io);
     switch (term) {
-        .Exited => |code| try std.testing.expect(code != 0),
-        .Signal => {},
+        .exited => |code| try std.testing.expect(code != 0),
+        .signal => {},
         else => {},
     }
 }
@@ -1222,7 +1234,7 @@ fn runSmllWrapperEnv(
     try full.append(allocator, exe_path);
     for (inner_argv) |a| try full.append(allocator, a);
 
-    var env = try std.process.getEnvMap(allocator);
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
     const old_path = env.get("PATH") orelse "";
     const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
@@ -1230,36 +1242,27 @@ fn runSmllWrapperEnv(
     try env.put("PATH", new_path);
     for (extra_env) |kv| try env.put(kv[0], kv[1]);
 
-    var child = std.process.Child.init(full.items, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    child.env_map = &env;
-    try child.spawn();
-
-    var stdout: std.ArrayList(u8) = .empty;
-    defer stdout.deinit(allocator);
-    var stderr: std.ArrayList(u8) = .empty;
-    defer stderr.deinit(allocator);
-    try child.collectOutput(allocator, &stdout, &stderr, 2 * 1024 * 1024);
-
-    return .{
-        .stdout = try stdout.toOwnedSlice(allocator),
-        .stderr = try stderr.toOwnedSlice(allocator),
-        .term = try child.wait(),
-    };
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = full.items,
+        .stdout_limit = .limited(2 * 1024 * 1024),
+        .stderr_limit = .limited(2 * 1024 * 1024),
+        .environ_map = &env,
+    });
+    return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
 }
 
 fn setupFakeTool(
     allocator: std.mem.Allocator,
-    tmp_dir: std.fs.Dir,
+    tmp_dir: std.Io.Dir,
     tool_name: []const u8,
     fixture: []const u8,
 ) ![]u8 {
+    const io = std.testing.io;
     // Write fixture to file, then create a shim script that cats it.
     const fixture_name = try std.fmt.allocPrint(allocator, "{s}_fixture.txt", .{tool_name});
     defer allocator.free(fixture_name);
-    try tmp_dir.writeFile(.{ .sub_path = fixture_name, .data = fixture });
-    const fixture_path = try tmp_dir.realpathAlloc(allocator, fixture_name);
+    try tmp_dir.writeFile(io, .{ .sub_path = fixture_name, .data = fixture });
+    const fixture_path = try tmp_dir.realPathFileAlloc(io, fixture_name, allocator);
     defer allocator.free(fixture_path);
 
     const script = try std.fmt.allocPrint(
@@ -1270,7 +1273,7 @@ fn setupFakeTool(
     defer allocator.free(script);
     try writeFakeScript(tmp_dir, tool_name, script);
 
-    return try tmp_dir.realpathAlloc(allocator, ".");
+    return try tmp_dir.realPathFileAlloc(io, ".", allocator);
 }
 
 test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
@@ -1288,15 +1291,15 @@ test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // v0.8: kubectl_compact dispatches to dedicated pod-name summary filter.
     // Emits single line: "[k8s] N running: name1 name2 ...". Pod names preserved.
     try std.testing.expect(result.stdout.len < kubectl_pods_fixture.len);
     const savings_pct = (kubectl_pods_fixture.len - result.stdout.len) * 100 / kubectl_pods_fixture.len;
     try std.testing.expect(savings_pct >= 40);
     try std.testing.expect(std.mem.startsWith(u8, result.stdout, "[k8s] "));
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "api-server-6f8b9c4d7-x2k8m") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "redis-master-0") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "api-server-6f8b9c4d7-x2k8m") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "redis-master-0") != null);
 }
 
 test "columnar: kubectl without SMLL_COMPACT passes through unchanged" {
@@ -1309,7 +1312,7 @@ test "columnar: kubectl without SMLL_COMPACT passes through unchanged" {
     var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"kubectl"}, &.{});
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, kubectl_pods_fixture, result.stdout);
 }
 
@@ -1328,7 +1331,7 @@ test "columnar: gh pr list with SMLL_COMPACT=1 preserves preamble" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // First line is the banner — must appear verbatim.
     try std.testing.expect(std.mem.startsWith(
         u8,
@@ -1354,7 +1357,7 @@ test "columnar: docker SMLL_COMPACT=0 stays passthrough" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // SMLL_COMPACT=0 → gate is closed, byte-identical passthrough required.
     try std.testing.expectEqualSlices(u8, docker_ps_fixture, result.stdout);
 }
@@ -1381,14 +1384,14 @@ test "smoke: jest SMLL_COMPACT=1 keeps FAIL + ● titles, drops PASS" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < jest_failing_fixture.len);
     // FAIL + failure title markers survive.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "FAIL  src/components/Button.test.tsx") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "● Button component › renders with uppercase label") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Test Suites:") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "FAIL  src/components/Button.test.tsx") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "● Button component › renders with uppercase label") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Test Suites:") != null);
     // Passing-file lines are dropped.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "PASS  src/utils/format.test.ts") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "PASS  src/utils/format.test.ts") == null);
 }
 
 test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
@@ -1406,14 +1409,14 @@ test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < tsc_errors_fixture.len);
     // Locations-only transform: path:L:C TSnnnn survives; message text + carets drop.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "src/api/client.ts:42:5 TS2322") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "src/components/Button.tsx:15:7 TS2345") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "Found 5 errors") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, " - error TS") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "~~~~~~") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/api/client.ts:42:5 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/components/Button.tsx:15:7 TS2345") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Found 5 errors") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, " - error TS") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "~~~~~~") == null);
 }
 
 test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
@@ -1431,15 +1434,15 @@ test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < go_test_v_fixture.len);
     // Failure markers + their Errorf evidence survive.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "--- FAIL: TestDivide") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "--- FAIL: TestSqrt") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "divide(10, 0) panic expected") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- FAIL: TestDivide") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- FAIL: TestSqrt") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "divide(10, 0) panic expected") != null);
     // Passing run + per-test PASS lines are dropped.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "--- PASS: TestAdd") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "=== RUN   TestAdd") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- PASS: TestAdd") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "=== RUN   TestAdd") == null);
 }
 
 test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
@@ -1457,13 +1460,13 @@ test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < docker_logs_fixture.len);
     // Repeat marker appears; first occurrence of each unique payload survives.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "(×") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "GET /health 200 2ms") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "failed to connect to redis: connection refused") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "shutting down gracefully") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "(×") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "GET /health 200 2ms") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "failed to connect to redis: connection refused") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "shutting down gracefully") != null);
 }
 
 test "smoke: npm install SMLL_COMPACT=1 keeps WARN + summary, drops notice" {
@@ -1481,12 +1484,12 @@ test "smoke: npm install SMLL_COMPACT=1 keeps WARN + summary, drops notice" {
     );
     defer result.deinit(allocator);
 
-    try std.testing.expectEqual(std.process.Child.Term{ .Exited = 0 }, result.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < npm_install_fixture.len);
     // Deprecation warnings + install summary survive.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "npm WARN deprecated lodash.isequal") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "added 847 packages") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "npm WARN deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "added 847 packages") != null);
     // Upgrade-nag "npm notice" + funding prompts drop.
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "npm notice") == null);
-    try std.testing.expect(std.mem.indexOf(u8, result.stdout, "looking for funding") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "npm notice") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "looking for funding") == null);
 }

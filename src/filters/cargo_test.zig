@@ -27,13 +27,13 @@ const KEEP_NEEDLES = [_][]const u8{
 
 pub fn matches(input: []const u8) bool {
     // Quick scan for either the "running N tests" or "test result:" markers.
-    if (std.mem.indexOf(u8, input, "test result:") != null) return true;
+    if (std.mem.find(u8, input, "test result:") != null) return true;
     // Match "running <digits> test" to avoid false positives on "running X".
     var it = std.mem.splitScalar(u8, input, '\n');
     while (it.next()) |line| {
         const stripped = stripLeadingSpace(line);
         if (std.mem.startsWith(u8, stripped, "running ") and
-            std.mem.indexOf(u8, stripped, " test") != null) return true;
+            std.mem.find(u8, stripped, " test") != null) return true;
     }
     return false;
 }
@@ -41,7 +41,7 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
-    var scratch = std.ArrayList(u8){};
+    var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
     var kept_lines: usize = 0;
@@ -75,7 +75,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 
 fn shouldKeep(line: []const u8) bool {
     for (KEEP_NEEDLES) |n| {
-        if (std.mem.indexOf(u8, line, n) != null) return true;
+        if (std.mem.find(u8, line, n) != null) return true;
     }
     return false;
 }
@@ -136,12 +136,12 @@ test "apply: keeps failure context" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "FAILED") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "failures:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "---- tests::b stdout ----") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "panicked at") != null);
+    try std.testing.expect(std.mem.find(u8, got, "FAILED") != null);
+    try std.testing.expect(std.mem.find(u8, got, "failures:") != null);
+    try std.testing.expect(std.mem.find(u8, got, "---- tests::b stdout ----") != null);
+    try std.testing.expect(std.mem.find(u8, got, "panicked at") != null);
     // Pass lines dropped.
-    try std.testing.expect(std.mem.indexOf(u8, got, "tests::a ... ok") == null);
+    try std.testing.expect(std.mem.find(u8, got, "tests::a ... ok") == null);
 }
 
 test "apply: strips ANSI from kept lines" {
@@ -150,6 +150,6 @@ test "apply: strips ANSI from kept lines" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "\x1b") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "FAILED") != null);
+    try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
+    try std.testing.expect(std.mem.find(u8, got, "FAILED") != null);
 }

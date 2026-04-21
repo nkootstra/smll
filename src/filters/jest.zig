@@ -36,10 +36,10 @@ const KEEP_NEEDLES = [_][]const u8{
 };
 
 pub fn matches(input: []const u8) bool {
-    if (std.mem.indexOf(u8, input, "Test Suites:") != null) return true;
-    if (std.mem.indexOf(u8, input, "Test Files") != null) return true;
+    if (std.mem.find(u8, input, "Test Suites:") != null) return true;
+    if (std.mem.find(u8, input, "Test Files") != null) return true;
     // Vitest / jest "Tests:" summary line
-    if (std.mem.indexOf(u8, input, "\nTests:") != null) return true;
+    if (std.mem.find(u8, input, "\nTests:") != null) return true;
     if (std.mem.startsWith(u8, input, "Tests:")) return true;
     return false;
 }
@@ -47,7 +47,7 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
-    var scratch = std.ArrayList(u8){};
+    var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
     var kept_lines: usize = 0;
@@ -62,12 +62,12 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 }
 
 fn hasFailureMarker(s: []const u8) bool {
-    if (std.mem.indexOf(u8, s, "FAIL") != null) return true;
-    if (std.mem.indexOf(u8, s, "●") != null) return true;
+    if (std.mem.find(u8, s, "FAIL") != null) return true;
+    if (std.mem.find(u8, s, "●") != null) return true;
     // "Tests:  N failed" with N >= 1
     var it = std.mem.splitScalar(u8, s, '\n');
     while (it.next()) |line| {
-        const idx = std.mem.indexOf(u8, line, "failed") orelse continue;
+        const idx = std.mem.find(u8, line, "failed") orelse continue;
         if (idx < 2) continue;
         var j = idx - 1;
         if (line[j] != ' ') continue;
@@ -109,7 +109,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 
 fn shouldKeep(line: []const u8) bool {
     for (KEEP_NEEDLES) |n| {
-        if (std.mem.indexOf(u8, line, n) != null) return true;
+        if (std.mem.find(u8, line, n) != null) return true;
     }
     return false;
 }
@@ -133,17 +133,17 @@ test "apply: fixture drops PASS, keeps failures" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "FAIL  src/components/Button.test.tsx") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "● Button component") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Expected: \"Submit\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Received: \"submit\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Test Suites: 2 failed") != null);
+    try std.testing.expect(std.mem.find(u8, got, "FAIL  src/components/Button.test.tsx") != null);
+    try std.testing.expect(std.mem.find(u8, got, "● Button component") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Expected: \"Submit\"") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Received: \"submit\"") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Test Suites: 2 failed") != null);
     // PASS lines dropped.
-    try std.testing.expect(std.mem.indexOf(u8, got, "PASS  src/utils/format.test.ts") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "PASS  src/hooks/useAuth.test.ts") == null);
+    try std.testing.expect(std.mem.find(u8, got, "PASS  src/utils/format.test.ts") == null);
+    try std.testing.expect(std.mem.find(u8, got, "PASS  src/hooks/useAuth.test.ts") == null);
     // Time/Ran lines dropped.
-    try std.testing.expect(std.mem.indexOf(u8, got, "Time:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Ran all") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Time:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Ran all") == null);
 }
 
 test "apply: all passing emits 'all tests passed'" {
@@ -169,6 +169,6 @@ test "apply: strips ANSI" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.indexOf(u8, got, "\x1b") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "FAIL src/x.test.ts") != null);
+    try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
+    try std.testing.expect(std.mem.find(u8, got, "FAIL src/x.test.ts") != null);
 }

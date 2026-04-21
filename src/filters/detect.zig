@@ -142,8 +142,8 @@ test "ansi strip: removes CSI sequences" {
     }
     const got = try applyToString(std.testing.allocator, list.items);
     defer std.testing.allocator.free(got);
-    try std.testing.expect(std.mem.indexOf(u8, got, "\x1b[") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "red line") != null);
+    try std.testing.expect(std.mem.find(u8, got, "\x1b[") == null);
+    try std.testing.expect(std.mem.find(u8, got, "red line") != null);
 }
 
 test "whitespace collapse: runs of spaces shrunk, trailing stripped, leading kept" {
@@ -155,8 +155,8 @@ test "whitespace collapse: runs of spaces shrunk, trailing stripped, leading kep
     }
     const got = try applyToString(std.testing.allocator, list.items);
     defer std.testing.allocator.free(got);
-    try std.testing.expect(std.mem.indexOf(u8, got, "  indent_kept alpha beta gamma\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "gamma   \n") == null);
+    try std.testing.expect(std.mem.find(u8, got, "  indent_kept alpha beta gamma\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "gamma   \n") == null);
 }
 
 test "prefix RLE: identical 16-byte prefix on consecutive lines elided" {

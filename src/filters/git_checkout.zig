@@ -41,9 +41,9 @@ fn scanStderr(src: []const u8, w: *Writer) !void {
 
         if (std.mem.startsWith(u8, line, "Switched to")) {
             // "Switched to branch 'feature'" or "Switched to a new branch 'feature'"
-            if (std.mem.indexOf(u8, line, "'")) |q| {
+            if (std.mem.find(u8, line, "'")) |q| {
                 const after_q = line[q + 1 ..];
-                if (std.mem.indexOf(u8, after_q, "'")) |eq| {
+                if (std.mem.find(u8, after_q, "'")) |eq| {
                     const branch = after_q[0..eq];
                     try w.writeAll("^ ");
                     try w.writeAll(branch);
@@ -73,7 +73,7 @@ fn scanStderr(src: []const u8, w: *Writer) !void {
         if (std.mem.startsWith(u8, line, "Your branch is up to date with '")) {
             // "Your branch is up to date with 'origin/feature'."
             const after = line["Your branch is up to date with '".len..];
-            if (std.mem.indexOf(u8, after, "'")) |eq| {
+            if (std.mem.find(u8, after, "'")) |eq| {
                 const remote_ref = after[0..eq];
                 try w.writeAll("= ");
                 try w.writeAll(remote_ref);
@@ -163,8 +163,8 @@ test "switch: up-to-date with remote" {
     const a = std.testing.allocator;
     const input = "Switched to branch 'feature-x'\nYour branch is up to date with 'origin/feature-x'.\n";
     const out = try str(a, "", input); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "^ feature-x\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "= origin/feature-x\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "^ feature-x\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "= origin/feature-x\n") != null);
 }
 
 test "switch: empty output (silent checkout) passthrough" {
@@ -177,9 +177,9 @@ test "switch: dirty-state stdout markers" {
     const a = std.testing.allocator;
     const out = try str(a, "M\tsrc/main.zig\nD\told_file.zig\n", "Switched to branch 'main'\n");
     defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "^ main\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "M src/main.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d old_file.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "^ main\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M src/main.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "d old_file.zig\n") != null);
 }
 
 test "switch fixture: emits ^ sigil" {

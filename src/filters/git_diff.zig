@@ -63,7 +63,7 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
             // The format is: a/<path_a> b/<path_b>
             // We look for the last occurrence of " b/" to split
             const b_marker = " b/";
-            const b_pos = std.mem.lastIndexOf(u8, rest, b_marker);
+            const b_pos = std.mem.findLast(u8, rest, b_marker);
             if (b_pos) |bp| {
                 const path_a = rest[0..bp];
                 const path_b = rest[bp + b_marker.len ..];
@@ -99,11 +99,11 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
         // then strip the leading '-' and join with '|'.
         if (std.mem.startsWith(u8, line, "@@ ")) {
             const after_open = line[3..]; // skip "@@ "
-            const close = std.mem.indexOf(u8, after_open, " @@");
+            const close = std.mem.find(u8, after_open, " @@");
             if (close) |cp| {
                 const coords = after_open[0..cp];
                 const ctx = after_open[cp + " @@".len ..];
-                const split = std.mem.indexOf(u8, coords, " +");
+                const split = std.mem.find(u8, coords, " +");
                 if (!first_out) try writer.writeByte('\n');
                 try writer.writeByte('@');
                 if (split) |sp| {
@@ -198,87 +198,87 @@ test "apply: emits d sigil for file header on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d simple.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "d simple.txt\n") != null);
     // diff --git line gone
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
+    try std.testing.expect(std.mem.find(u8, out, "diff --git") == null);
 }
 
 test "apply: drops index line on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "index ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "index ") == null);
 }
 
 test "apply: drops --- a/ and +++ b/ twin on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "--- a/") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+++ b/") == null);
+    try std.testing.expect(std.mem.find(u8, out, "--- a/") == null);
+    try std.testing.expect(std.mem.find(u8, out, "+++ b/") == null);
 }
 
 test "apply: emits @ sigil for hunk header on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@1|1,3\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1|1,3\n") != null);
     // Old @@ form is gone
-    try std.testing.expect(std.mem.indexOf(u8, out, "@@ -1 +1,3 @@") == null);
+    try std.testing.expect(std.mem.find(u8, out, "@@ -1 +1,3 @@") == null);
 }
 
 test "apply: preserves every + line on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+line two") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+line three") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+line two") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+line three") != null);
 }
 
 test "apply: preserves context line on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, " line one") != null);
+    try std.testing.expect(std.mem.find(u8, out, " line one") != null);
 }
 
 test "apply: emits d sigils for every file on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d color.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d fruit.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d numbers.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "d color.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "d fruit.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "d numbers.txt\n") != null);
     // No diff --git lines
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
+    try std.testing.expect(std.mem.find(u8, out, "diff --git") == null);
 }
 
 test "apply: drops every index line on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "index ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "index ") == null);
 }
 
 test "apply: preserves +/- content lines on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+green") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+blue") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "-apple") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+banana") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "-two") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+TWO") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+green") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+blue") != null);
+    try std.testing.expect(std.mem.find(u8, out, "-apple") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+banana") != null);
+    try std.testing.expect(std.mem.find(u8, out, "-two") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+TWO") != null);
 }
 
 test "apply: preserves context lines on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, " red") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, " one") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, " three") != null);
+    try std.testing.expect(std.mem.find(u8, out, " red") != null);
+    try std.testing.expect(std.mem.find(u8, out, " one") != null);
+    try std.testing.expect(std.mem.find(u8, out, " three") != null);
 }
 
 test "apply: emits d rename sigil on rename fixture" {
@@ -286,33 +286,33 @@ test "apply: emits d rename sigil on rename fixture" {
     const out = try applyToString(allocator, rename_fixture);
     defer allocator.free(out);
     // Paths differ: fruit.txt -> produce.txt
-    try std.testing.expect(std.mem.indexOf(u8, out, "d fruit.txt -> produce.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "d fruit.txt -> produce.txt\n") != null);
     // No diff --git, no similarity index, no rename from/to
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "similarity index ") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename from") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename to") == null);
+    try std.testing.expect(std.mem.find(u8, out, "diff --git") == null);
+    try std.testing.expect(std.mem.find(u8, out, "similarity index ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "rename from") == null);
+    try std.testing.expect(std.mem.find(u8, out, "rename to") == null);
 }
 
 test "apply: emits d rename sigil on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d old.txt -> new.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "similarity index ") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "index ") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "--- a/") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+++ b/") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename from") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "rename to") == null);
+    try std.testing.expect(std.mem.find(u8, out, "d old.txt -> new.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "similarity index ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "index ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "--- a/") == null);
+    try std.testing.expect(std.mem.find(u8, out, "+++ b/") == null);
+    try std.testing.expect(std.mem.find(u8, out, "rename from") == null);
+    try std.testing.expect(std.mem.find(u8, out, "rename to") == null);
 }
 
 test "apply: emits @ hunk header on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@1,3|1,4\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+date") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1,3|1,4\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+date") != null);
 }
 
 test "apply: hunk-internal line starting with --- is preserved (state tracking)" {
@@ -326,7 +326,7 @@ test "apply: hunk-internal line starting with --- is preserved (state tracking)"
         "---- content\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "---- content") != null);
+    try std.testing.expect(std.mem.find(u8, out, "---- content") != null);
 }
 
 test "apply: directional compression on simple (byte count)" {

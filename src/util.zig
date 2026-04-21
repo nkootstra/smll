@@ -30,7 +30,7 @@ pub fn isRefUpdateLine(line: []const u8) bool {
 
 /// Write "<sigil> sha7..sha7 <rest>\n" from a trimmed ref-update line.
 pub fn writeRefUpdateLine(line: []const u8, writer: anytype, sigil: u8) !void {
-    const dot_pos = std.mem.indexOf(u8, line, "..") orelse return;
+    const dot_pos = std.mem.find(u8, line, "..") orelse return;
     const sha_a = line[0..dot_pos];
     const after_dot = line[dot_pos + 2 ..];
     var sha_b_end: usize = 0;
@@ -54,7 +54,7 @@ pub fn writeRefUpdateLine(line: []const u8, writer: anytype, sigil: u8) !void {
 /// Write a compressed stat line "<path> |<N>\n" from a trimmed git stat line.
 /// Input: "path | N +++---"  Output: "path |N\n"
 pub noinline fn writeStatLine(t: []const u8, writer: *std.Io.Writer) !void {
-    const pipe = std.mem.indexOf(u8, t, " | ") orelse {
+    const pipe = std.mem.find(u8, t, " | ") orelse {
         try writer.writeAll(t); try writer.writeByte('\n'); return;
     };
     const after = t[pipe + 3 ..];
@@ -79,7 +79,7 @@ pub noinline fn writeSummary(t: []const u8, writer: *std.Io.Writer) !void {
 }
 
 fn extractN(s: []const u8, marker: []const u8) []const u8 {
-    const idx = std.mem.indexOf(u8, s, marker) orelse return "0";
+    const idx = std.mem.find(u8, s, marker) orelse return "0";
     var e = idx; while (e > 0 and s[e-1] == ' ') e -= 1;
     var b = e; while (b > 0 and std.ascii.isDigit(s[b-1])) b -= 1;
     return if (b < e) s[b..e] else "0";
@@ -93,17 +93,17 @@ fn firstNum(s: []const u8) []const u8 {
 
 /// Skip a mode number token (e.g. "100644 ") and return the remainder.
 pub fn skipModeNum(s: []const u8) []const u8 {
-    return if (std.mem.indexOfScalar(u8, s, ' ')) |sp| s[sp + 1 ..] else s;
+    return if (std.mem.findScalar(u8, s, ' ')) |sp| s[sp + 1 ..] else s;
 }
 
 /// Extract the conflicted path from a CONFLICT line.
 /// "CONFLICT (...): Merge conflict in <path>" → "<path>"
 /// Falls back to text after ": " if no " in " marker found.
 pub noinline fn conflictPath(line: []const u8) []const u8 {
-    if (std.mem.lastIndexOf(u8, line, " in ")) |p| {
+    if (std.mem.findLast(u8, line, " in ")) |p| {
         return std.mem.trim(u8, line[p + 4 ..], " \t\r");
     }
-    if (std.mem.indexOf(u8, line, ": ")) |c| {
+    if (std.mem.find(u8, line, ": ")) |c| {
         return std.mem.trim(u8, line[c + 2 ..], " \t\r");
     }
     return "";

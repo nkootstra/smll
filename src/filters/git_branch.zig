@@ -43,7 +43,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 
     var it = std.mem.splitScalar(u8, input, '\n');
     while (it.next()) |raw| {
-        const line = std.mem.trimRight(u8, raw, "\r");
+        const line = std.mem.trimEnd(u8, raw, "\r");
         if (line.len == 0) continue;
 
         if (std.mem.startsWith(u8, line, "* ")) {
@@ -58,7 +58,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
             // Pipe-mode idempotence: single-space prefix ("  " → " ") does NOT
             // start with "  " (two spaces), so re-matching returns false.
             try w.writeByte(' ');
-            try w.writeAll(std.mem.trimLeft(u8, line, " "));
+            try w.writeAll(std.mem.trimStart(u8, line, " "));
             try w.writeByte('\n');
         } else {
             // Unknown line shape — pass through verbatim.
@@ -115,37 +115,37 @@ test "pipe-mode idempotence: compressed output is NOT re-matched" {
 test "apply: current branch emits * sigil" {
     const a = std.testing.allocator;
     const out = try str(a, "* main\n  feature\n"); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "* main\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "* main\n") != null);
 }
 
 test "apply: other branches get single-space indent" {
     const a = std.testing.allocator;
     const out = try str(a, "* main\n  feature\n  dev\n"); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, " feature\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, " dev\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " feature\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " dev\n") != null);
 }
 
 test "apply: all branch names preserved" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_branch_list); defer a.free(out);
     // fixture contains: feature-x, feature-y, main
-    try std.testing.expect(std.mem.indexOf(u8, out, "feature-x") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "feature-y") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "main") != null);
+    try std.testing.expect(std.mem.find(u8, out, "feature-x") != null);
+    try std.testing.expect(std.mem.find(u8, out, "feature-y") != null);
+    try std.testing.expect(std.mem.find(u8, out, "main") != null);
 }
 
 test "apply: current branch marker (* main)" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_branch_list); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "* main") != null);
+    try std.testing.expect(std.mem.find(u8, out, "* main") != null);
 }
 
 test "apply: order preserved" {
     const a = std.testing.allocator;
     const out = try str(a, "* main\n  alpha\n  beta\n"); defer a.free(out);
-    const main_pos = std.mem.indexOf(u8, out, "main").?;
-    const alpha_pos = std.mem.indexOf(u8, out, "alpha").?;
-    const beta_pos = std.mem.indexOf(u8, out, "beta").?;
+    const main_pos = std.mem.find(u8, out, "main").?;
+    const alpha_pos = std.mem.find(u8, out, "alpha").?;
+    const beta_pos = std.mem.find(u8, out, "beta").?;
     try std.testing.expect(main_pos < alpha_pos);
     try std.testing.expect(alpha_pos < beta_pos);
 }

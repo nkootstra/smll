@@ -246,7 +246,7 @@ fn writeUnmergedEntry(writer: *Writer, content: []const u8) !void {
     } else if (std.mem.startsWith(u8, content, "deleted by them:")) {
         try writer.writeAll("UD ");
         // "deleted by them:" may have 1 or 2 trailing spaces before path
-        const rest = std.mem.trimLeft(u8, content["deleted by them:".len..], " ");
+        const rest = std.mem.trimStart(u8, content["deleted by them:".len..], " ");
         try writer.writeAll(rest);
     } else {
         // Unknown unmerged type — preserve with UU.
@@ -263,7 +263,7 @@ fn isHintLine(line: []const u8) bool {
 /// Extract the number following `marker` in `line` (e.g. "by 2 commits." → "2").
 /// Returns a slice into `line`.
 fn findAheadBehindCount(line: []const u8, marker: []const u8) ?[]const u8 {
-    const idx = std.mem.indexOf(u8, line, marker) orelse return null;
+    const idx = std.mem.find(u8, line, marker) orelse return null;
     const rest = line[idx + marker.len ..];
     // Digits until non-digit.
     var end: usize = 0;
@@ -278,7 +278,7 @@ fn findDivergedCounts(line: []const u8) ?[2][]const u8 {
     // "have diverged, and have X and Y different commits each."
     var search = line;
     // Find "and have " which precedes the counts
-    var idx = std.mem.indexOf(u8, search, "and have ") orelse return null;
+    var idx = std.mem.find(u8, search, "and have ") orelse return null;
     search = search[idx + "and have ".len..];
     // Now parse X
     var end_x: usize = 0;
@@ -287,7 +287,7 @@ fn findDivergedCounts(line: []const u8) ?[2][]const u8 {
     const ahead = search[0..end_x];
     // Skip " and "
     const and_marker = " and ";
-    idx = std.mem.indexOf(u8, search[end_x..], and_marker) orelse return null;
+    idx = std.mem.find(u8, search[end_x..], and_marker) orelse return null;
     search = search[end_x + idx + and_marker.len..];
     var end_y: usize = 0;
     while (end_y < search.len and search[end_y] >= '0' and search[end_y] <= '9') : (end_y += 1) {}
@@ -371,11 +371,11 @@ test "apply: output for dirty fixture has correct format" {
     // Branch line
     try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
     // Unstaged modified paths
-    try std.testing.expect(std.mem.indexOf(u8, out, "M src/main.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "M src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M src/main.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M src/pipeline.zig\n") != null);
     // Untracked paths
-    try std.testing.expect(std.mem.indexOf(u8, out, "? src/filters/git_status.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "? tests/fixtures/git_status_dirty.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? tests/fixtures/git_status_dirty.txt\n") != null);
 }
 
 test "apply: output for clean fixture is just branch line" {
@@ -390,26 +390,26 @@ test "apply: output for conflict fixture has UU sigil" {
     const out = try applyToString(allocator, conflict_fixture);
     defer allocator.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
-    try std.testing.expect(std.mem.indexOf(u8, out, "S src/pipeline.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "UU src/filters/git_status.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "? tests/fixtures/git_status_conflict.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "S src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "UU src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? tests/fixtures/git_status_conflict.txt\n") != null);
 }
 
 test "apply: drops all hint lines on dirty" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, dirty_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "(use \"git add") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "(use \"git restore") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "(use \"git commit") == null);
+    try std.testing.expect(std.mem.find(u8, out, "(use \"git add") == null);
+    try std.testing.expect(std.mem.find(u8, out, "(use \"git restore") == null);
+    try std.testing.expect(std.mem.find(u8, out, "(use \"git commit") == null);
 }
 
 test "apply: drops section headers on dirty" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, dirty_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Changes not staged for commit:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Untracked files:") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Changes not staged for commit:") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Untracked files:") == null);
 }
 
 test "apply: R3 gate — dirty fixture ≤ 80% of raw" {
@@ -441,7 +441,7 @@ test "apply: staged-new-file uses A sigil" {
         "\tnew file:   src/new_module.zig\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "A src/new_module.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "A src/new_module.zig\n") != null);
 }
 
 test "apply: ahead/behind counts preserved" {

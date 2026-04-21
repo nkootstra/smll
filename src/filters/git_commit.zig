@@ -36,7 +36,7 @@ fn isCommitHeader(line: []const u8) bool {
     if (line[0] != '[') return false;
 
     // Find the closing bracket.
-    const bracket_pos = std.mem.indexOfScalar(u8, line, ']') orelse return false;
+    const bracket_pos = std.mem.findScalar(u8, line, ']') orelse return false;
     // Content between brackets: "branch sha7" or "branch (root-commit) sha7"
     const inner = line[1..bracket_pos];
 
@@ -80,7 +80,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     const hdr = header orelse return;
 
     // Parse: [branch sha7] subject  or  [branch (root-commit) sha7] subject
-    const bracket_pos = std.mem.indexOfScalar(u8, hdr, ']') orelse {
+    const bracket_pos = std.mem.findScalar(u8, hdr, ']') orelse {
         // Unrecognized format — pass through.
         try writer.writeAll(hdr);
         try writer.writeByte('\n');
@@ -89,7 +89,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     const inner = hdr[1..bracket_pos];
     const subject_raw = hdr[bracket_pos + 1 ..];
     // subject_raw starts with "] " — trim leading space.
-    const subject = std.mem.trimLeft(u8, subject_raw, " ");
+    const subject = std.mem.trimStart(u8, subject_raw, " ");
 
     // Extract sha7: last space-delimited token in inner.
     var last_space: usize = inner.len;
@@ -105,7 +105,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     const branch_inner = inner[0..last_space];
 
     // branch_inner may be "main" or "main (root-commit)" — strip " (root-commit)" suffix.
-    const branch = if (std.mem.indexOf(u8, branch_inner, " (")) |paren_pos|
+    const branch = if (std.mem.find(u8, branch_inner, " (")) |paren_pos|
         branch_inner[0..paren_pos]
     else
         branch_inner;
@@ -128,8 +128,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var stats_found = false;
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        const trimmed = std.mem.trimLeft(u8, line, " ");
-        if (std.mem.indexOf(u8, trimmed, " changed") != null) {
+        const trimmed = std.mem.trimStart(u8, line, " ");
+        if (std.mem.find(u8, trimmed, " changed") != null) {
             files = parseNumber(trimmed);
             insertions = extractInsertions(trimmed);
             deletions = extractDeletions(trimmed);
@@ -155,7 +155,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     // --- Remaining lines: create/delete mode ---
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        const trimmed = std.mem.trimLeft(u8, line, " ");
+        const trimmed = std.mem.trimStart(u8, line, " ");
         if (std.mem.startsWith(u8, trimmed, "create mode ")) {
             // "create mode 100644 <path>"
             const after_mode = trimmed["create mode ".len..];
@@ -180,7 +180,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
 /// Skip past the mode number (e.g. "100644 ") and return the rest (the path).
 fn skipModeNumber(s: []const u8) []const u8 {
-    if (std.mem.indexOfScalar(u8, s, ' ')) |sp| {
+    if (std.mem.findScalar(u8, s, ' ')) |sp| {
         return s[sp + 1 ..];
     }
     return s;
@@ -201,14 +201,14 @@ fn parseNumber(s: []const u8) []const u8 {
 fn extractInsertions(s: []const u8) []const u8 {
     // Find "insertion" and walk back to the number before it.
     const marker = " insertion";
-    const idx = std.mem.indexOf(u8, s, marker) orelse return "0";
+    const idx = std.mem.find(u8, s, marker) orelse return "0";
     return numberBefore(s, idx);
 }
 
 /// Extract deletion count from stats line.
 fn extractDeletions(s: []const u8) []const u8 {
     const marker = " deletion";
-    const idx = std.mem.indexOf(u8, s, marker) orelse return "0";
+    const idx = std.mem.find(u8, s, marker) orelse return "0";
     return numberBefore(s, idx);
 }
 
@@ -279,23 +279,23 @@ test "apply: simple fixture produces correct summary line" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, fixture_simple);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+1/-0 files=1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+1/-0 files=1\n") != null);
 }
 
 test "apply: simple fixture preserves create-mode path" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, fixture_simple);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ a.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ a.txt\n") != null);
 }
 
 test "apply: multifile fixture preserves all create-mode paths" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, fixture_multifile);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ b.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ c.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+2/-0 files=2\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ b.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ c.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+2/-0 files=2\n") != null);
 }
 
 test "apply: delete mode produces - sigil" {
@@ -306,8 +306,8 @@ test "apply: delete mode produces - sigil" {
         " delete mode 100644 old/module.zig\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "- old/module.zig\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+0/-3 files=1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "- old/module.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+0/-3 files=1\n") != null);
 }
 
 test "apply: large fixture preserves all 100 create-mode paths" {
@@ -315,10 +315,10 @@ test "apply: large fixture preserves all 100 create-mode paths" {
     const out = try applyToString(allocator, fixture_large);
     defer allocator.free(out);
     // Check a sample of paths to confirm all preserved.
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ src/generated/gen_001.rs\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ src/generated/gen_050.rs\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ src/generated/gen_100.rs\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+750/-0 files=150\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/gen_001.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/gen_050.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/gen_100.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+750/-0 files=150\n") != null);
 }
 
 test "apply: R3 gate — simple fixture smll ≤ 80% of raw" {

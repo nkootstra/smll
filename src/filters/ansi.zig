@@ -10,8 +10,8 @@ const Allocator = std.mem.Allocator;
 /// `noinline` forces outlining so all call sites share a single copy — critical
 /// for R6 binary budget with 7+ filter modules that each strip ANSI.
 pub noinline fn strip(allocator: Allocator, input: []const u8) ![]const u8 {
-    if (std.mem.indexOfScalar(u8, input, 0x1b) == null) return input;
-    var buf = std.ArrayList(u8){};
+    if (std.mem.findScalar(u8, input, 0x1b) == null) return input;
+    var buf = std.ArrayList(u8).empty;
     errdefer buf.deinit(allocator);
     try stripAppend(&buf, allocator, input);
     return buf.toOwnedSlice(allocator);
@@ -26,7 +26,7 @@ pub noinline fn strip(allocator: Allocator, input: []const u8) ![]const u8 {
 /// This is the per-line hot-path entry: reuses capacity across thousands of
 /// lines in test-runner / log filters instead of bump-allocating each time.
 pub fn stripInto(scratch: *std.ArrayList(u8), allocator: Allocator, input: []const u8) ![]const u8 {
-    if (std.mem.indexOfScalar(u8, input, 0x1b) == null) return input;
+    if (std.mem.findScalar(u8, input, 0x1b) == null) return input;
     scratch.clearRetainingCapacity();
     try stripAppend(scratch, allocator, input);
     return scratch.items;
@@ -38,7 +38,7 @@ noinline fn stripAppend(buf: *std.ArrayList(u8), allocator: Allocator, input: []
         // Jump to the next ESC (or end) in one SIMD-friendly scan, then bulk-
         // copy the literal run. Byte-at-a-time was the bottleneck for dense
         // ANSI inputs like colorized test-runner output.
-        const next_esc = std.mem.indexOfScalarPos(u8, input, i, 0x1b) orelse input.len;
+        const next_esc = std.mem.findScalarPos(u8, input, i, 0x1b) orelse input.len;
         if (next_esc > i) try buf.appendSlice(allocator, input[i..next_esc]);
         i = next_esc;
         if (i >= input.len) break;

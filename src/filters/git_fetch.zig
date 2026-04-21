@@ -41,20 +41,20 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             std.mem.startsWith(u8, line, "Resolving") or
             std.mem.startsWith(u8, line, "Total ") or
             std.mem.startsWith(u8, line, "Delta ")) continue;
-        if (std.mem.indexOf(u8, line, "-> FETCH_HEAD") != null) continue;
+        if (std.mem.find(u8, line, "-> FETCH_HEAD") != null) continue;
 
-        if (std.mem.indexOf(u8, line, "[new branch]") != null or
-            std.mem.indexOf(u8, line, "[new tag]") != null)
+        if (std.mem.find(u8, line, "[new branch]") != null or
+            std.mem.find(u8, line, "[new tag]") != null)
         {
-            const bracket_end = std.mem.indexOf(u8, line, "]") orelse continue;
+            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
             const after_bracket = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
             try writer.writeAll("+ new ");
             try writer.writeAll(after_bracket);
             try writer.writeByte('\n');
             continue;
         }
-        if (std.mem.indexOf(u8, line, "[deleted]") != null) {
-            const bracket_end = std.mem.indexOf(u8, line, "]") orelse continue;
+        if (std.mem.find(u8, line, "[deleted]") != null) {
+            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
             const ref = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
             if (ref.len > 0) {
                 try writer.writeAll("- deleted ");
@@ -63,8 +63,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             }
             continue;
         }
-        if (std.mem.indexOf(u8, line, "[rejected]") != null) {
-            const bracket_end = std.mem.indexOf(u8, line, "]") orelse continue;
+        if (std.mem.find(u8, line, "[rejected]") != null) {
+            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
             const rest = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
             if (rest.len > 0) {
                 try writer.writeAll("! rejected ");
@@ -73,7 +73,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             }
             continue;
         }
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (util.isRefUpdateLine(trimmed)) {
             try util.writeRefUpdateLine(trimmed, writer, '<');
         }
@@ -107,21 +107,21 @@ test "apply: simple fetch emits < ref row" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_stdout_fixture, simple_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "< 2cee6f5..81a7b77") != null);
+    try std.testing.expect(std.mem.find(u8, out, "< 2cee6f5..81a7b77") != null);
 }
 
 test "apply: drops From-remote header" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_stdout_fixture, simple_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "From ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "From ") == null);
 }
 
 test "apply: drops FETCH_HEAD lines" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_stdout_fixture, simple_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "FETCH_HEAD") == null);
+    try std.testing.expect(std.mem.find(u8, out, "FETCH_HEAD") == null);
 }
 
 test "apply: new remote-tracking branch emits + new" {
@@ -129,7 +129,7 @@ test "apply: new remote-tracking branch emits + new" {
     const stderr = "From github.com:foo/bar.git\n * [new branch]      feat-x -> origin/feat-x\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ new feat-x") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ new feat-x") != null);
 }
 
 test "apply: deleted remote branch emits - deleted" {
@@ -137,7 +137,7 @@ test "apply: deleted remote branch emits - deleted" {
     const stderr = "From github.com:foo/bar.git\n - [deleted]         origin/old-feat\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "- deleted origin/old-feat\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "- deleted origin/old-feat\n") != null);
 }
 
 test "apply: two ref updates produce two < rows" {
@@ -148,8 +148,8 @@ test "apply: two ref updates produce two < rows" {
         "   111aaaa..222bbbb  feat -> origin/feat\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "< abc1234..def5678") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "< 111aaaa..222bbbb") != null);
+    try std.testing.expect(std.mem.find(u8, out, "< abc1234..def5678") != null);
+    try std.testing.expect(std.mem.find(u8, out, "< 111aaaa..222bbbb") != null);
 }
 
 test "apply: R3 gate — simple fixture ≤ 80% of raw" {
