@@ -1,5 +1,7 @@
 # smll
 
+[![ci](https://github.com/nkootstra/smll/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nkootstra/smll/actions/workflows/ci.yml)
+
 A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Lossless by
 default, opt-in lossy filters when you're willing to trade detail for tokens.
