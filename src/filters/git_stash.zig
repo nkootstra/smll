@@ -33,7 +33,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
     const src = if (stdout.len > 0) stdout else stderr;
     if (src.len == 0) return;
 
-    const trimmed = std.mem.trimLeft(u8, src, " \t\r\n");
+    const trimmed = std.mem.trimStart(u8, src, " \t\r\n");
 
     if (std.mem.startsWith(u8, trimmed, "Saved working directory")) {
         // Save shape: single line output.
@@ -64,7 +64,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 
     // Out-of-scope shapes (show, drop, apply, pop, or unknown): passthrough.
     try w.writeAll(stdout);
-    try std.fs.File.stderr().writeAll(stderr);
+    if (stderr.len > 0) std.debug.print("{s}", .{stderr});
 }
 
 /// Parse and emit a save-shape line.
@@ -78,10 +78,10 @@ fn applySaveLine(line: []const u8, w: *Writer) !void {
     var branch_start: usize = 0;
     var found = false;
 
-    if (std.mem.indexOf(u8, line, wip_on)) |pos| {
+    if (std.mem.find(u8, line, wip_on)) |pos| {
         branch_start = pos + wip_on.len;
         found = true;
-    } else if (std.mem.indexOf(u8, line, plain_on)) |pos| {
+    } else if (std.mem.find(u8, line, plain_on)) |pos| {
         branch_start = pos + plain_on.len;
         found = true;
     }
@@ -93,12 +93,12 @@ fn applySaveLine(line: []const u8, w: *Writer) !void {
 
     const after_on = line[branch_start..];
     // Find the colon that separates branch from the rest.
-    const colon = std.mem.indexOfScalar(u8, after_on, ':') orelse {
+    const colon = std.mem.findScalar(u8, after_on, ':') orelse {
         try w.writeAll("$ "); try w.writeAll(after_on); try w.writeByte('\n');
         return;
     };
     const branch = after_on[0..colon];
-    const after_colon = std.mem.trimLeft(u8, after_on[colon + 1 ..], " \t");
+    const after_colon = std.mem.trimStart(u8, after_on[colon + 1 ..], " \t");
 
     // after_colon may be "<sha7> <subject>" or just "<subject>".
     // We emit: "$ <branch> <after_colon>" (preserve whatever git gives us).
@@ -117,10 +117,10 @@ fn applySaveLine(line: []const u8, w: *Writer) !void {
 /// Output: "$N <branch> <subject>\n"
 fn applyListLine(line: []const u8, w: *Writer) !void {
     // Extract N from "stash@{N}:".
-    const open = std.mem.indexOfScalar(u8, line, '{') orelse {
+    const open = std.mem.findScalar(u8, line, '{') orelse {
         try w.writeAll(line); try w.writeByte('\n'); return;
     };
-    const close = std.mem.indexOfScalar(u8, line[open..], '}') orelse {
+    const close = std.mem.findScalar(u8, line[open..], '}') orelse {
         try w.writeAll(line); try w.writeByte('\n'); return;
     };
     const n_str = line[open + 1 .. open + close];
@@ -151,13 +151,13 @@ fn applyListLine(line: []const u8, w: *Writer) !void {
     }
 
     const after_on = body[branch_start..];
-    const colon = std.mem.indexOfScalar(u8, after_on, ':') orelse {
+    const colon = std.mem.findScalar(u8, after_on, ':') orelse {
         try w.writeByte('$'); try w.writeAll(n_str); try w.writeByte(' ');
         try w.writeAll(after_on); try w.writeByte('\n');
         return;
     };
     const branch = after_on[0..colon];
-    const after_colon = std.mem.trimLeft(u8, after_on[colon + 1 ..], " \t");
+    const after_colon = std.mem.trimStart(u8, after_on[colon + 1 ..], " \t");
 
     try w.writeByte('$');
     try w.writeAll(n_str);
@@ -201,7 +201,7 @@ test "save: sigil and branch" {
     const input = "Saved working directory and index state On main: wip: fixture stash entry 1\n";
     const out = try str(a, input, ""); defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "$ main "));
-    try std.testing.expect(std.mem.indexOf(u8, out, "wip: fixture stash entry 1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 1") != null);
 }
 
 test "save: WIP on branch format" {
@@ -209,23 +209,23 @@ test "save: WIP on branch format" {
     const input = "Saved working directory and index state WIP on feature/x: abc1234 do the thing\n";
     const out = try str(a, input, ""); defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "$ feature/x "));
-    try std.testing.expect(std.mem.indexOf(u8, out, "abc1234 do the thing") != null);
+    try std.testing.expect(std.mem.find(u8, out, "abc1234 do the thing") != null);
 }
 
 test "save: fixture" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_save, ""); defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "$ main "));
-    try std.testing.expect(std.mem.indexOf(u8, out, "wip: fixture stash entry 1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 1") != null);
 }
 
 test "list: 2-entry fixture" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_list, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "$0 main ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "$1 main ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "wip: fixture stash entry 2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "wip: fixture stash entry 1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "$0 main ") != null);
+    try std.testing.expect(std.mem.find(u8, out, "$1 main ") != null);
+    try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 2") != null);
+    try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 1") != null);
 }
 
 test "list: 3-entry list" {
@@ -235,9 +235,9 @@ test "list: 3-entry list" {
         "stash@{1}: WIP on main: abc1234 fix bug\n" ++
         "stash@{2}: On dev: something else\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "$0 feat ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "$1 main ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "$2 dev ") != null);
+    try std.testing.expect(std.mem.find(u8, out, "$0 feat ") != null);
+    try std.testing.expect(std.mem.find(u8, out, "$1 main ") != null);
+    try std.testing.expect(std.mem.find(u8, out, "$2 dev ") != null);
 }
 
 test "passthrough: show/drop/apply output" {

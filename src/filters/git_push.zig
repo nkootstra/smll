@@ -45,16 +45,16 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             std.mem.startsWith(u8, line, "Writing objects") or
             std.mem.startsWith(u8, line, "Total ") or
             std.mem.startsWith(u8, line, "Delta ")) continue;
-        if (std.mem.indexOf(u8, line, "[new branch]") != null) {
-            const bracket_end = std.mem.indexOf(u8, line, "]") orelse continue;
+        if (std.mem.find(u8, line, "[new branch]") != null) {
+            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
             const after_bracket = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
             try writer.writeAll("+ new ");
             try writer.writeAll(after_bracket);
             try writer.writeByte('\n');
             continue;
         }
-        if (std.mem.indexOf(u8, line, "[deleted]") != null) {
-            const bracket_end = std.mem.indexOf(u8, line, "]") orelse continue;
+        if (std.mem.find(u8, line, "[deleted]") != null) {
+            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
             const ref = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
             if (ref.len > 0) {
                 try writer.writeAll("- deleted ");
@@ -63,8 +63,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             }
             continue;
         }
-        if (std.mem.indexOf(u8, line, "[rejected]") != null) {
-            const bracket_end = std.mem.indexOf(u8, line, "]") orelse continue;
+        if (std.mem.find(u8, line, "[rejected]") != null) {
+            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
             const rest = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
             if (rest.len > 0) {
                 try writer.writeAll("! rejected ");
@@ -73,7 +73,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             }
             continue;
         }
-        const trimmed = std.mem.trimLeft(u8, line, " \t");
+        const trimmed = std.mem.trimStart(u8, line, " \t");
         if (util.isRefUpdateLine(trimmed)) {
             try util.writeRefUpdateLine(trimmed, writer, '>');
         }
@@ -110,14 +110,14 @@ test "apply: new branch emits + new sigil" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_stdout_fixture, simple_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ new main") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ new main") != null);
 }
 
 test "apply: drops To-remote header" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_stdout_fixture, simple_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "To ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "To ") == null);
 }
 
 test "apply: everything up-to-date emits = up-to-date" {
@@ -132,7 +132,7 @@ test "apply: updated ref emits > sigil with sha pair" {
     const stderr = "To github.com:foo/bar.git\n   abc1234..def5678  main -> main\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "> abc1234..def5678 main -> main\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "> abc1234..def5678 main -> main\n") != null);
 }
 
 test "apply: deleted ref emits - deleted sigil" {
@@ -140,7 +140,7 @@ test "apply: deleted ref emits - deleted sigil" {
     const stderr = "To github.com:foo/bar.git\n - [deleted]         origin/old-branch\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "- deleted origin/old-branch\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "- deleted origin/old-branch\n") != null);
 }
 
 test "apply: rejected ref emits ! rejected sigil" {
@@ -148,7 +148,7 @@ test "apply: rejected ref emits ! rejected sigil" {
     const stderr = "To github.com:foo/bar.git\n ! [rejected]        fix-3 -> fix-3 (non-fast-forward)\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "! rejected fix-3 -> fix-3 (non-fast-forward)\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "! rejected fix-3 -> fix-3 (non-fast-forward)\n") != null);
 }
 
 test "apply: R3 gate — large fixture (combined) ≤ 80% of raw" {
@@ -183,9 +183,9 @@ test "apply: large fixture preserves all 10 refs" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, large_stdout_fixture, large_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "main") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "feat-a") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "fix-3") != null);
+    try std.testing.expect(std.mem.find(u8, out, "main") != null);
+    try std.testing.expect(std.mem.find(u8, out, "feat-a") != null);
+    try std.testing.expect(std.mem.find(u8, out, "fix-3") != null);
 }
 
 test "apply: empty stderr produces empty output" {

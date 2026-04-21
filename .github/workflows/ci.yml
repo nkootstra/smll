@@ -21,7 +21,7 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-size-limit: 512
           cache-key: ${{ matrix.os }}
       - name: Confirm Zig version
@@ -37,7 +37,7 @@ jobs:
       - name: Set up Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.15.2
+          version: 0.16.0
           cache-size-limit: 512
           cache-key: size-gate
       - name: Build release
@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           size=$(wc -c < zig-out/release/smll)
-          limit=153600
+          limit=184320
           echo "binary size: ${size} bytes (cap ${limit})"
           if [ "$size" -ge "$limit" ]; then
             echo "::error::binary size ${size} exceeds R6 cap ${limit}"

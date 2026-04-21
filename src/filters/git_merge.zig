@@ -26,7 +26,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 
     if (std.mem.startsWith(u8, first, "Updating ")) {
         const r = first["Updating ".len..];
-        if (std.mem.indexOf(u8, r, "..")) |d| {
+        if (std.mem.find(u8, r, "..")) |d| {
             try w.writeAll("@ ff ");
             try w.writeAll(r[0..@min(d, 7)]);
             try w.writeAll("..");
@@ -40,9 +40,9 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
         try emitBody(&it, w);
     } else if (std.mem.startsWith(u8, first, "Merge made by")) {
         var strat: []const u8 = "ort";
-        if (std.mem.indexOf(u8, first, "'")) |q| {
+        if (std.mem.find(u8, first, "'")) |q| {
             const s = first[q + 1 ..];
-            if (std.mem.indexOf(u8, s, "'")) |e| strat = s[0..e];
+            if (std.mem.find(u8, s, "'")) |e| strat = s[0..e];
         }
         try w.writeAll("@ merge "); try w.writeAll(strat); try w.writeByte('\n');
         try emitBody(&it, w);
@@ -58,7 +58,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 fn emitBody(it: *std.mem.SplitIterator(u8, .scalar), w: *Writer) !void {
     while (it.next()) |line| {
         if (line.len == 0) continue;
-        const t = std.mem.trimLeft(u8, line, " \t");
+        const t = std.mem.trimStart(u8, line, " \t");
         if (t.len == 0) continue;
         // Fast dispatch on first char to reduce string comparisons.
         switch (t[0]) {
@@ -66,9 +66,9 @@ fn emitBody(it: *std.mem.SplitIterator(u8, .scalar), w: *Writer) !void {
             'A' => if (std.mem.startsWith(u8, t, "Automatic merge failed")) try w.writeAll("! failed\n"),
             'c' => if (std.mem.startsWith(u8, t, "create mode ")) { try w.writeAll("+ "); try w.writeAll(util.skipModeNum(t[12..])); try w.writeByte('\n'); },
             'd' => if (std.mem.startsWith(u8, t, "delete mode ")) { try w.writeAll("- "); try w.writeAll(util.skipModeNum(t[12..])); try w.writeByte('\n'); },
-            else => if (std.mem.indexOf(u8, t, " | ") != null) {
+            else => if (std.mem.find(u8, t, " | ") != null) {
                 try util.writeStatLine(t, w);
-            } else if (std.mem.indexOf(u8, t, " changed") != null) {
+            } else if (std.mem.find(u8, t, " changed") != null) {
                 try util.writeSummary(t, w);
             },
         }
@@ -77,7 +77,7 @@ fn emitBody(it: *std.mem.SplitIterator(u8, .scalar), w: *Writer) !void {
 
 fn emitConflicts(it: *std.mem.SplitIterator(u8, .scalar), w: *Writer) !void {
     while (it.next()) |line| {
-        const t = std.mem.trimLeft(u8, line, " \t");
+        const t = std.mem.trimStart(u8, line, " \t");
         if (std.mem.startsWith(u8, t, "CONFLICT (")) {
             try emitConflictLine(t, w);
         } else if (std.mem.startsWith(u8, t, "Automatic merge failed")) {
@@ -130,19 +130,19 @@ test "ff: header" {
 test "ff: summary" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_ff, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+1/-0 files=1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+1/-0 files=1\n") != null);
 }
 
 test "ff: stat path" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_ff, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "fx.txt") != null);
+    try std.testing.expect(std.mem.find(u8, out, "fx.txt") != null);
 }
 
 test "ff: create mode" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_ff, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ fx.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ fx.txt\n") != null);
 }
 
 test "merge-commit: header" {
@@ -154,25 +154,25 @@ test "merge-commit: header" {
 test "merge-commit: summary and path" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_commit, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+1/-0 files=1\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "fy.txt") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+1/-0 files=1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "fy.txt") != null);
 }
 
 test "conflict: path and failed" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_conflict_stdout, fixture_conflict_stderr); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "! conflict conflict.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "! failed\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Auto-merging") == null);
+    try std.testing.expect(std.mem.find(u8, out, "! conflict conflict.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "! failed\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "Auto-merging") == null);
 }
 
 test "large: stat paths and summary" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_large, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "src/module_01.rs") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "src/module_60.rs") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+300/-0 files=60\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+ src/module_51.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "src/module_01.rs") != null);
+    try std.testing.expect(std.mem.find(u8, out, "src/module_60.rs") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+300/-0 files=60\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+ src/module_51.rs\n") != null);
 }
 
 test "R3: ff" {

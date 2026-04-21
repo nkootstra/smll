@@ -53,7 +53,7 @@ fn scan(src: []const u8, w: *Writer) !void {
             var end: usize = 0;
             while (end < rest.len and rest[end] != '\n' and rest[end] != '\r') end += 1;
             rest = rest[0..end];
-            if (std.mem.indexOf(u8, rest, uptodate_marker) != null) {
+            if (std.mem.find(u8, rest, uptodate_marker) != null) {
                 try w.writeAll("@ up-to-date\n");
             }
             i += "Current branch ".len + end;
@@ -114,19 +114,19 @@ test "pipe-mode" {
 test "simple: @ rebased" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_simple, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ rebased refs/heads/rebase-branch\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ rebased refs/heads/rebase-branch\n") != null);
 }
 
 test "simple: no progress noise" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_simple, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Rebasing") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Rebasing") == null);
 }
 
 test "large: @ rebased" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_large, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ rebased refs/heads/large-rebase-branch\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ rebased refs/heads/large-rebase-branch\n") != null);
 }
 
 test "up-to-date" {
@@ -140,15 +140,15 @@ test "conflict path" {
     const a = std.testing.allocator;
     const input = "CONFLICT (content): Merge conflict in src/main.zig\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "! conflict src/main.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "! conflict src/main.zig\n") != null);
 }
 
 test "Applying becomes r row" {
     const a = std.testing.allocator;
     const input = "Applying: feat: add feature\nSuccessfully rebased and updated refs/heads/main.\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "r feat: add feature\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ rebased refs/heads/main\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "r feat: add feature\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ rebased refs/heads/main\n") != null);
 }
 
 test "R3: simple" {

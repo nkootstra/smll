@@ -105,72 +105,72 @@ test "apply: emits c sigil with sha7 on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37") == null);
+    try std.testing.expect(std.mem.find(u8, out, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37") == null);
 }
 
 test "apply: no Author/Date labels on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Author:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "Date:") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@example.com") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, out, "Date:") == null);
+    try std.testing.expect(std.mem.find(u8, out, "@example.com") == null);
 }
 
 test "apply: emits : sigil for subject on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": feat: add a.txt with one line\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": feat: add a.txt with one line\n") != null);
 }
 
 test "apply: drops index line in diff section on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "index ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "index ") == null);
 }
 
 test "apply: emits d sigil for diff file header on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "d a.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "diff --git") == null);
+    try std.testing.expect(std.mem.find(u8, out, "d a.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "diff --git") == null);
 }
 
 test "apply: preserves new file mode on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "new file mode 100644") != null);
+    try std.testing.expect(std.mem.find(u8, out, "new file mode 100644") != null);
 }
 
 test "apply: emits @ hunk sigil on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@0,0|1\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+line1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@0,0|1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+line1") != null);
 }
 
 test "apply: emits : sigil for body and preserves content on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": feat: extend a.txt\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": This body explains why we added a second line.\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, ": It spans multiple lines and contains punctuation.\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": feat: extend a.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": This body explains why we added a second line.\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, ": It spans multiple lines and contains punctuation.\n") != null);
 }
 
 test "apply: emits @ hunk and + lines on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@1|1,2\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, " line1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "+line2") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1|1,2\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " line1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+line2") != null);
 }
 
 test "apply: directional compression on simple show (byte count)" {
@@ -223,7 +223,7 @@ test "apply: show priority over log (output differs from log-only on same input)
 
     // show output has diff section; log-only does not
     try std.testing.expect(!std.mem.eql(u8, log_str, show_str));
-    try std.testing.expect(std.mem.indexOf(u8, show_str, "d a.txt") != null);
+    try std.testing.expect(std.mem.find(u8, show_str, "d a.txt") != null);
 }
 
 test "pipe-mode idempotence: v0.4 show output piped again is unchanged" {

@@ -64,11 +64,11 @@ fn applyInner(input: []const u8, w: *Writer) !void {
         const sha7 = sha_raw[0..@min(sha_raw.len, 7)];
 
         // Parse the parenthesised metadata: (<Author> <YYYY-MM-DD> HH:MM:SS <tz> <line>)
-        const paren_start = std.mem.indexOfScalar(u8, rest_after_sha, '(') orelse {
+        const paren_start = std.mem.findScalar(u8, rest_after_sha, '(') orelse {
             try w.writeByte(' '); try w.writeAll(rest_after_sha); try w.writeByte('\n');
             continue;
         };
-        const paren_end = std.mem.indexOfScalar(u8, rest_after_sha[paren_start..], ')') orelse {
+        const paren_end = std.mem.findScalar(u8, rest_after_sha[paren_start..], ')') orelse {
             try w.writeByte(' '); try w.writeAll(rest_after_sha); try w.writeByte('\n');
             continue;
         };
@@ -180,14 +180,14 @@ fn parseParenMeta(content: []const u8) struct { []const u8, []const u8 } {
     // Author is everything before YYYY-MM-DD.
     const date: []const u8 = if (ntok >= 4) tokens[3] else "0000-00-00";
     // Author: everything up to where date starts.
-    const date_pos = if (ntok >= 4) (std.mem.lastIndexOf(u8, t, tokens[3]) orelse 0) else 0;
-    const author_raw = std.mem.trimRight(u8, t[0..date_pos], " \t");
+    const date_pos = if (ntok >= 4) (std.mem.findLast(u8, t, tokens[3]) orelse 0) else 0;
+    const author_raw = std.mem.trimEnd(u8, t[0..date_pos], " \t");
     const author = if (author_raw.len > 0) author_raw else "unknown";
     return .{ author, date };
 }
 
 fn firstToken(s: []const u8) []const u8 {
-    const end = std.mem.indexOfScalar(u8, s, ' ') orelse return s;
+    const end = std.mem.findScalar(u8, s, ' ') orelse return s;
     return s[0..end];
 }
 
@@ -261,21 +261,21 @@ test "simple: sha7 in header" {
     const a = std.testing.allocator;
     const input = "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37 (Alice 2026-01-01 00:00:00 +0000 1) code here\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "b 95cbeda ") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b 95cbeda ") != null);
 }
 
 test "simple: date in header" {
     const a = std.testing.allocator;
     const input = "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37 (Alice 2026-04-18 12:34:56 +0000 1) my code\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "2026-04-18") != null);
+    try std.testing.expect(std.mem.find(u8, out, "2026-04-18") != null);
 }
 
 test "simple: code preserved verbatim" {
     const a = std.testing.allocator;
     const input = "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37 (Alice 2026-01-01 00:00:00 +0000 1) fn init() { x = 1; }\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, " fn init() { x = 1; }\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " fn init() { x = 1; }\n") != null);
 }
 
 test "simple: boundary ^ prefix (initial commit)" {
@@ -284,7 +284,7 @@ test "simple: boundary ^ prefix (initial commit)" {
     const input = "^95cbeda (Alice 2026-01-01 00:00:00 +0000 1) initial\n";
     const out = try str(a, input, ""); defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "b "));
-    try std.testing.expect(std.mem.indexOf(u8, out, " initial\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " initial\n") != null);
 }
 
 test "simple: fixture has 5 commits → 5 headers" {
@@ -320,7 +320,7 @@ test "lossless: all code lines preserved in simple fixture" {
         " }\n",
     };
     for (codes) |expected| {
-        try std.testing.expect(std.mem.indexOf(u8, out, expected) != null);
+        try std.testing.expect(std.mem.find(u8, out, expected) != null);
     }
 }
 
@@ -331,11 +331,11 @@ test "RLE: same author across SHA changes → author elided" {
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Alice 2026-02-01 00:00:01 +0000  2) two\n";
     const out = try str(a, input, ""); defer a.free(out);
     // First header: full (b <sha> <date> <author>)
-    try std.testing.expect(std.mem.indexOf(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
     // Second header: author elided, date explicit (b <sha> <date>)
-    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb 2026-02-01\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b bbbbbbb 2026-02-01\n") != null);
     // Second header must NOT carry the author again
-    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb 2026-02-01 Alice") == null);
+    try std.testing.expect(std.mem.find(u8, out, "b bbbbbbb 2026-02-01 Alice") == null);
 }
 
 test "RLE: same author + same date across SHA changes → both elided" {
@@ -345,10 +345,10 @@ test "RLE: same author + same date across SHA changes → both elided" {
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Alice 2026-01-01 00:00:02 +0000  2) two\n" ++
         "cccccccccccccccccccccccccccccccccccccccc (Alice 2026-01-01 00:00:03 +0000  3) three\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
     // Subsequent headers: sha only (b <sha>)
-    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "b ccccccc\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b bbbbbbb\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b ccccccc\n") != null);
 }
 
 test "RLE: author change re-emits author" {
@@ -357,9 +357,9 @@ test "RLE: author change re-emits author" {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Bob   2026-01-01 00:00:02 +0000  2) two\n";
     const out = try str(a, input, ""); defer a.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
     // Bob differs from Alice → author re-emitted; date redundantly emitted because author changed
-    try std.testing.expect(std.mem.indexOf(u8, out, "b bbbbbbb 2026-01-01 Bob\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b bbbbbbb 2026-01-01 Bob\n") != null);
 }
 
 test "RLE: author returns to previous value → still re-emitted (stateful)" {
@@ -370,7 +370,7 @@ test "RLE: author returns to previous value → still re-emitted (stateful)" {
         "cccccccccccccccccccccccccccccccccccccccc (Alice 2026-01-01 00:00:03 +0000  3) three\n";
     const out = try str(a, input, ""); defer a.free(out);
     // Third header: author went Alice→Bob→Alice, differs from last-emitted (Bob), so re-emit
-    try std.testing.expect(std.mem.indexOf(u8, out, "b ccccccc 2026-01-01 Alice\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "b ccccccc 2026-01-01 Alice\n") != null);
 }
 
 test "R3: simple fixture" {

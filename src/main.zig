@@ -47,37 +47,50 @@ test {
     _ = pipeline;
 }
 
-pub fn main() !void {
-    var out_buf: [4096]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&out_buf);
+/// Returns true when `name` env var is set and its first byte is '1'.
+fn envFlagOn(environ_map: *const std.process.Environ.Map, name: []const u8) bool {
+    const v = environ_map.get(name) orelse return false;
+    return v.len > 0 and v[0] == '1';
+}
 
-    // Fast path: no extra argv → stdin mode. Skip the page_allocator,
-    // argsWithAllocator iterator, and ArrayList entirely. std.os.argv is
-    // already populated by the runtime; len 1 = program name only.
-    if (std.os.argv.len <= 1) {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const environ = init.environ_map;
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+
+    var out_buf: [4096]u8 = undefined;
+    var stdout_file = std.Io.File.stdout();
+    var stdout_writer = stdout_file.writer(io, &out_buf);
+
+    var err_buf: [1024]u8 = undefined;
+    var stderr_file = std.Io.File.stderr();
+    var stderr_writer = stderr_file.writer(io, &err_buf);
+
+    // Fast path: no extra argv → stdin mode. Skip the wrapper-mode arena
+    // init entirely. args[0] is the program name; len 1 = stdin mode.
+    if (args.len <= 1) {
         // v0.6 prototype: SMLL_DETECT=1 enables the tool-agnostic detect filter
         // (ANSI strip + whitespace collapse + prefix RLE) instead of the git filter
         // tuple. Used for measurement only.
-        const detect_env = std.posix.getenv("SMLL_DETECT") orelse "";
-        if (detect_env.len > 0 and detect_env[0] == '1') {
+        if (envFlagOn(environ, "SMLL_DETECT")) {
             const allocator = std.heap.page_allocator;
-            const input = try readAllStdin(allocator);
+            const input = try readAllStdin(allocator, io);
             defer allocator.free(input);
             try detect.apply(allocator, input, &.{}, &stdout_writer.interface);
             try stdout_writer.interface.flush();
             return;
         }
-        const validate_env = std.posix.getenv("SMLL_VALIDATE") orelse "";
-        if (validate_env.len > 0 and validate_env[0] == '1') {
+        if (envFlagOn(environ, "SMLL_VALIDATE")) {
             const allocator = std.heap.page_allocator;
-            const input = try readAllStdin(allocator);
+            const input = try readAllStdin(allocator, io);
             defer allocator.free(input);
             try validator.apply(allocator, input, &stdout_writer.interface);
             try stdout_writer.interface.flush();
             return;
         }
         var in_buf: [4096]u8 = undefined;
-        var stdin_reader = std.fs.File.stdin().reader(&in_buf);
+        var stdin_file = std.Io.File.stdin();
+        var stdin_reader = stdin_file.reader(io, &in_buf);
         try pipeline.run(
             std.heap.page_allocator,
             &stdin_reader.interface,
@@ -89,14 +102,13 @@ pub fn main() !void {
     }
 
     // Wrapper mode: forward extra args as a child-process invocation.
-    // Build the slice from std.os.argv on the stack — no ArrayList growth
-    // and no iterator allocation. 32 args is well above any realistic
-    // `git <subcmd> <args...>` invocation.
+    // Build the slice from init.minimal.args on the stack — 32 args is well
+    // above any realistic `git <subcmd> <args...>` invocation.
     var argv_buf: [32][]const u8 = undefined;
-    const argv_count = std.os.argv.len - 1;
+    const argv_count = args.len - 1;
     if (argv_count > argv_buf.len) return error.TooManyArgs;
-    for (std.os.argv[1..], 0..) |arg, i| {
-        argv_buf[i] = std.mem.span(arg);
+    for (args[1..], 0..) |arg, i| {
+        argv_buf[i] = arg;
     }
 
     // Arena over the wrapper lifetime — filter loops allocate per-line and
@@ -105,22 +117,24 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const code = try runWrapper(allocator, argv_buf[0..argv_count], &stdout_writer.interface);
+    const code = try runWrapper(
+        allocator,
+        io,
+        environ,
+        argv_buf[0..argv_count],
+        &stdout_writer.interface,
+        &stderr_writer.interface,
+    );
     try stdout_writer.interface.flush();
+    try stderr_writer.interface.flush();
     if (code != 0) std.process.exit(code);
 }
 
-fn readAllStdin(allocator: std.mem.Allocator) ![]u8 {
-    var list: std.ArrayList(u8) = .empty;
-    defer list.deinit(allocator);
-    var chunk: [8192]u8 = undefined;
-    const stdin = std.fs.File.stdin();
-    while (true) {
-        const n = try stdin.read(&chunk);
-        if (n == 0) break;
-        try list.appendSlice(allocator, chunk[0..n]);
-    }
-    return list.toOwnedSlice(allocator);
+fn readAllStdin(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
+    var in_buf: [8192]u8 = undefined;
+    var stdin_file = std.Io.File.stdin();
+    var stdin_reader = stdin_file.reader(io, &in_buf);
+    return try stdin_reader.interface.allocRemaining(allocator, .unlimited);
 }
 
 // Maximum bytes captured from child stdout + stderr combined.
@@ -151,40 +165,52 @@ const KnownSubcommand = enum {
 
 fn runWrapper(
     allocator: std.mem.Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !u8 {
-    var child = std.process.Child.init(argv, allocator);
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-    try child.spawn();
+    // Spawn + sequential drain (stdout, then stderr). Avoids MultiReader to
+    // shave ~10 KB off the release binary. Deadlock risk if stderr exceeds
+    // the pipe buffer (~64 KB on Linux) before stdout is drained — acceptable
+    // for git/cargo/bun which emit small stderr (errors, progress lines).
+    // MAX_OUTPUT_BYTES cap still bounds total capture.
+    var child = std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .ignore,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    }) catch |err| return err;
+    defer child.kill(io);
 
-    // Concurrently drain both stdout and stderr into heap-backed ArrayLists.
-    // collectOutput uses std.Io.poll so neither pipe can deadlock the other.
-    var stdout_list: std.ArrayList(u8) = .empty;
-    defer stdout_list.deinit(allocator);
-    var stderr_list: std.ArrayList(u8) = .empty;
-    defer stderr_list.deinit(allocator);
-
-    child.collectOutput(allocator, &stdout_list, &stderr_list, MAX_OUTPUT_BYTES) catch |err| switch (err) {
-        // collectOutput signals cap exceeded via stream-too-long errors.
-        error.StdoutStreamTooLong, error.StderrStreamTooLong => {
-            _ = child.wait() catch {};
-            const msg = "smll: child output exceeded 2 MiB cap\n";
-            std.fs.File.stderr().writeAll(msg) catch {};
+    var stdout_buf: [4096]u8 = undefined;
+    var stdout_reader = child.stdout.?.reader(io, &stdout_buf);
+    const stdout_slice = stdout_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
+        error.StreamTooLong => {
+            const msg = "smll: child stdout exceeded 2 MiB cap\n";
+            stderr_writer.writeAll(msg) catch {};
             return 1;
         },
         else => return err,
     };
 
-    const term = try child.wait();
-    const exit_code: u8 = switch (term) {
-        .Exited => |c| c,
-        .Signal, .Stopped, .Unknown => 1,
+    var err_drain_buf: [4096]u8 = undefined;
+    var stderr_reader = child.stderr.?.reader(io, &err_drain_buf);
+    const stderr_slice = stderr_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
+        error.StreamTooLong => {
+            const msg = "smll: child stderr exceeded 2 MiB cap\n";
+            stderr_writer.writeAll(msg) catch {};
+            return 1;
+        },
+        else => return err,
     };
 
-    const stdout_slice = stdout_list.items;
-    const stderr_slice = stderr_list.items;
+    const term = try child.wait(io);
+    const exit_code: u8 = switch (term) {
+        .exited => |c| c,
+        .signal, .stopped, .unknown => 1,
+    };
 
     // Argv guard: only dispatch through the formatter switch when the outer
     // command is literally "git".  Any other outer command (e.g. "cargo")
@@ -192,7 +218,7 @@ fn runWrapper(
     // KnownSubcommand.
     const outer_cmd = argv[0];
     // Strip any directory prefix: "git", "/usr/bin/git", etc. all match.
-    const cmd_basename = if (std.mem.lastIndexOfScalar(u8, outer_cmd, '/')) |idx|
+    const cmd_basename = if (std.mem.findScalarLast(u8, outer_cmd, '/')) |idx|
         outer_cmd[idx + 1 ..]
     else
         outer_cmd;
@@ -205,13 +231,13 @@ fn runWrapper(
         if (rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else {
             try writer.writeAll(stdout_slice);
         }
-        try std.fs.File.stderr().writeAll(stderr_slice);
+        try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
 
@@ -224,15 +250,15 @@ fn runWrapper(
         if (tree.matches(stdout_slice)) {
             tree.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-            try std.fs.File.stderr().writeAll(stderr_slice);
+            try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
         if (std.mem.eql(u8, cmd_basename, "tree")) {
             try writer.writeAll(stdout_slice);
-            try std.fs.File.stderr().writeAll(stderr_slice);
+            try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
         // bun: fall through to columnar opt-in check below.
@@ -250,13 +276,12 @@ fn runWrapper(
     const is_go_test = std.mem.eql(u8, cmd_basename, "go") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
     if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
-        const compact = std.posix.getenv("SMLL_COMPACT") orelse "";
-        const enabled = compact.len > 0 and compact[0] == '1';
+        const enabled = envFlagOn(environ, "SMLL_COMPACT");
         if (enabled) {
             if (is_pytest and pytest.matches(stdout_slice)) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
-                    try std.fs.File.stderr().writeAll(stderr_slice);
+                    try stderr_writer.writeAll(stderr_slice);
                     return 1;
                 };
                 return exit_code;
@@ -264,7 +289,7 @@ fn runWrapper(
             if (is_cargo_test and (cargo_test.matches(stdout_slice) or cargo_test.matches(stderr_slice))) {
                 cargo_test.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
-                    try std.fs.File.stderr().writeAll(stderr_slice);
+                    try stderr_writer.writeAll(stderr_slice);
                     return 1;
                 };
                 return exit_code;
@@ -272,7 +297,7 @@ fn runWrapper(
             if (is_jest and jest.matches(stdout_slice)) {
                 jest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
-                    try std.fs.File.stderr().writeAll(stderr_slice);
+                    try stderr_writer.writeAll(stderr_slice);
                     return 1;
                 };
                 return exit_code;
@@ -280,7 +305,7 @@ fn runWrapper(
             if (is_tsc and tsc.matches(stdout_slice)) {
                 tsc.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
-                    try std.fs.File.stderr().writeAll(stderr_slice);
+                    try stderr_writer.writeAll(stderr_slice);
                     return 1;
                 };
                 return exit_code;
@@ -288,31 +313,30 @@ fn runWrapper(
             if (is_go_test and (go_test.matches(stdout_slice) or go_test.matches(stderr_slice))) {
                 go_test.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
-                    try std.fs.File.stderr().writeAll(stderr_slice);
+                    try stderr_writer.writeAll(stderr_slice);
                     return 1;
                 };
                 return exit_code;
             }
         }
         try writer.writeAll(stdout_slice);
-        try std.fs.File.stderr().writeAll(stderr_slice);
+        try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
 
     // ls wrapper — OPT-IN LOSSY compaction (filenames only) under SMLL_COMPACT=1.
     if (std.mem.eql(u8, cmd_basename, "ls")) {
-        const compact = std.posix.getenv("SMLL_COMPACT") orelse "";
-        const enabled = compact.len > 0 and compact[0] == '1';
+        const enabled = envFlagOn(environ, "SMLL_COMPACT");
         if (enabled and ls_compact.matches(stdout_slice)) {
             ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else {
             try writer.writeAll(stdout_slice);
         }
-        try std.fs.File.stderr().writeAll(stderr_slice);
+        try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
 
@@ -333,8 +357,7 @@ fn runWrapper(
         std.mem.eql(u8, cmd_basename, "brew") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
-        const compact = std.posix.getenv("SMLL_COMPACT") orelse "";
-        const enabled = compact.len > 0 and compact[0] == '1';
+        const enabled = envFlagOn(environ, "SMLL_COMPACT");
         // docker logs <container> — line dedup (before docker ps table dispatch).
         const is_docker_logs = std.mem.eql(u8, cmd_basename, "docker") and
             argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
@@ -350,13 +373,13 @@ fn runWrapper(
         if (enabled and (is_docker_logs or is_kubectl_logs)) {
             docker_logs.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else if (enabled and is_npm_install and npm_install.matches(stdout_slice)) {
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else if (enabled and is_npm_install and npm_install.matches(stderr_slice)) {
@@ -364,39 +387,39 @@ fn runWrapper(
             // when stdout doesn't match but stderr does.
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
             return exit_code;
         } else if (enabled and std.mem.eql(u8, cmd_basename, "docker") and docker_compact.matches(stdout_slice)) {
             docker_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else if (enabled and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
             kubectl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else if (enabled and columnar.matches(stdout_slice)) {
             columnar.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         } else {
             try writer.writeAll(stdout_slice);
         }
-        try std.fs.File.stderr().writeAll(stderr_slice);
+        try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
 
     if (!std.mem.eql(u8, cmd_basename, "git") or argv.len < 2) {
         // Non-git outer command: passthrough both streams verbatim.
         try writer.writeAll(stdout_slice);
-        try std.fs.File.stderr().writeAll(stderr_slice);
+        try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
 
@@ -409,117 +432,116 @@ fn runWrapper(
             git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 // Formatter-error policy: emit raw stdout as fail-open, exit non-zero.
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .diff => {
             git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .log => {
-            const compact_env = std.posix.getenv("SMLL_COMPACT") orelse "";
-            const compact = compact_env.len > 0 and compact_env[0] == '1';
-            const result = if (compact)
+            const compact = envFlagOn(environ, "SMLL_COMPACT");
+            const result2 = if (compact)
                 git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer)
             else
                 git_log.apply(allocator, stdout_slice, stderr_slice, writer);
-            result catch {
+            result2 catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .show => {
             git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .add => {
             git_add.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .commit => {
             git_commit.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .push => {
             git_push.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .pull => {
             git_pull.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .fetch => {
             git_fetch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .merge => {
             git_merge.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .rebase => {
             git_rebase.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .checkout => {
             git_checkout.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .branch => {
             git_branch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .stash => {
             git_stash.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .blame => {
             git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
-                try std.fs.File.stderr().writeAll(stderr_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .unknown => {
             try writer.writeAll(stdout_slice);
-            try std.fs.File.stderr().writeAll(stderr_slice);
+            try stderr_writer.writeAll(stderr_slice);
         },
     }
 

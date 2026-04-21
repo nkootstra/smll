@@ -36,8 +36,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
                 std.mem.startsWith(u8, line, "Resolving") or
                 std.mem.startsWith(u8, line, "Total ") or
                 std.mem.startsWith(u8, line, "Delta ")) continue;
-            if (std.mem.indexOf(u8, line, "-> FETCH_HEAD") != null) continue;
-            const trimmed = std.mem.trimLeft(u8, line, " \t");
+            if (std.mem.find(u8, line, "-> FETCH_HEAD") != null) continue;
+            const trimmed = std.mem.trimStart(u8, line, " \t");
             if (util.isRefUpdateLine(trimmed)) {
                 try util.writeRefUpdateLine(trimmed, writer, '<');
             }
@@ -45,7 +45,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     }
 
     if (stdout.len > 0) {
-        if (std.mem.indexOf(u8, stdout, "Already up to date.") != null) {
+        if (std.mem.find(u8, stdout, "Already up to date.") != null) {
             try writer.writeAll("@ up-to-date\n");
             return;
         }
@@ -118,42 +118,42 @@ test "apply: fast-forward emits @ fast-forward line" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ fast-forward") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ fast-forward") != null);
 }
 
 test "apply: fast-forward emits incoming < ref row" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "< 43fe7da..2cee6f5") != null);
+    try std.testing.expect(std.mem.find(u8, out, "< 43fe7da..2cee6f5") != null);
 }
 
 test "apply: fast-forward preserves SHA range" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "43fe7da..2cee6f5") != null);
+    try std.testing.expect(std.mem.find(u8, out, "43fe7da..2cee6f5") != null);
 }
 
 test "apply: already up-to-date emits @ up-to-date" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, uptodate_stdout_fixture, uptodate_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ up-to-date\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ up-to-date\n") != null);
 }
 
 test "apply: drops From-remote header" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "From ") == null);
+    try std.testing.expect(std.mem.find(u8, out, "From ") == null);
 }
 
 test "apply: drops FETCH_HEAD lines" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "FETCH_HEAD") == null);
+    try std.testing.expect(std.mem.find(u8, out, "FETCH_HEAD") == null);
 }
 
 test "apply: stderr-only (no merge stdout) produces valid output" {
@@ -161,7 +161,7 @@ test "apply: stderr-only (no merge stdout) produces valid output" {
     const stderr = "From github.com:foo/bar.git\n   abc1234..def5678  main -> origin/main\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "< abc1234..def5678") != null);
+    try std.testing.expect(std.mem.find(u8, out, "< abc1234..def5678") != null);
 }
 
 test "apply: R3 gate — ff fixture (combined) ≤ 80% of raw" {
@@ -201,7 +201,7 @@ test "apply: merge-commit case emits @ merge-commit" {
     const stderr_in = "From github.com:foo/bar.git\n   abc1234..def5678  main -> origin/main\n";
     const out = try applyToString(allocator, stdout_in, stderr_in);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "@ merge-commit") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ merge-commit") != null);
 }
 
 test "pipe-mode: matches returns false for fixture output" {

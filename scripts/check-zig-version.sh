@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REQUIRED="0.15.2"
+REQUIRED="0.16.0"
 ACTUAL="$(zig version)"
 
 if [ "$ACTUAL" != "$REQUIRED" ]; then

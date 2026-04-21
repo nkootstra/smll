@@ -20,8 +20,8 @@ pub fn matches(input: []const u8) bool {
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         if (!std.mem.startsWith(u8, line, "NAME")) return false;
-        return std.mem.indexOf(u8, line, "READY") != null and
-            std.mem.indexOf(u8, line, "STATUS") != null;
+        return std.mem.find(u8, line, "READY") != null and
+            std.mem.find(u8, line, "STATUS") != null;
     }
     return false;
 }
@@ -33,8 +33,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
     var lines = std.mem.splitScalar(u8, stdout, '\n');
     const header = lines.next() orelse return;
-    const ready_col = std.mem.indexOf(u8, header, "READY") orelse return;
-    const status_col = std.mem.indexOf(u8, header, "STATUS") orelse return;
+    const ready_col = std.mem.find(u8, header, "READY") orelse return;
+    const status_col = std.mem.find(u8, header, "STATUS") orelse return;
 
     // Pass 1: count rows + classify.
     var pass1 = lines;
@@ -87,7 +87,7 @@ fn isHealthyRunning(line: []const u8, ready_col: usize, status_col: usize) bool 
 
 /// "a/b" where a == b (and non-empty, non-"0/0").
 fn readyIsFull(ready: []const u8) bool {
-    const slash = std.mem.indexOfScalar(u8, ready, '/') orelse return false;
+    const slash = std.mem.findScalar(u8, ready, '/') orelse return false;
     const left = ready[0..slash];
     const right = ready[slash + 1 ..];
     if (left.len == 0 or right.len == 0) return false;
@@ -148,11 +148,11 @@ test "apply: fixture all-running produces count + names" {
     const got = out.written();
     try std.testing.expect(std.mem.startsWith(u8, got, "[k8s] 9 running:"));
     try std.testing.expect(std.mem.endsWith(u8, got, "\n"));
-    try std.testing.expect(std.mem.indexOf(u8, got, "api-server-6f8b9c4d7-x2k8m") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "redis-master-0") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "cert-manager-5dc8f9b-abcde") != null);
+    try std.testing.expect(std.mem.find(u8, got, "api-server-6f8b9c4d7-x2k8m") != null);
+    try std.testing.expect(std.mem.find(u8, got, "redis-master-0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cert-manager-5dc8f9b-abcde") != null);
     // No status annotations when all healthy.
-    try std.testing.expect(std.mem.indexOf(u8, got, "(Running)") == null);
+    try std.testing.expect(std.mem.find(u8, got, "(Running)") == null);
 }
 
 test "apply: mixed state annotates unhealthy pods" {
@@ -168,9 +168,9 @@ test "apply: mixed state annotates unhealthy pods" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.startsWith(u8, got, "[k8s] 3 mixed:"));
-    try std.testing.expect(std.mem.indexOf(u8, got, "pod-ok ") != null or std.mem.endsWith(u8, got, "pod-ok\n"));
-    try std.testing.expect(std.mem.indexOf(u8, got, "pod-bad(0/1,CrashLoopBackOff)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "pod-pend(0/1,Pending)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "pod-ok ") != null or std.mem.endsWith(u8, got, "pod-ok\n"));
+    try std.testing.expect(std.mem.find(u8, got, "pod-bad(0/1,CrashLoopBackOff)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "pod-pend(0/1,Pending)") != null);
 }
 
 test "apply: zero rows produces [k8s] 0 none:" {

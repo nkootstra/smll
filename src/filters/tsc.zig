@@ -18,18 +18,18 @@ const Writer = std.Io.Writer;
 // Detection: input contains "error TS" OR ends with "Found " + "error" summary.
 
 pub fn matches(input: []const u8) bool {
-    if (std.mem.indexOf(u8, input, "error TS") != null) return true;
-    if (std.mem.indexOf(u8, input, "Found 0 errors") != null) return true;
+    if (std.mem.find(u8, input, "error TS") != null) return true;
+    if (std.mem.find(u8, input, "Found 0 errors") != null) return true;
     // Multi-error summary
-    if (std.mem.indexOf(u8, input, " errors in ") != null and
-        std.mem.indexOf(u8, input, "Found ") != null) return true;
+    if (std.mem.find(u8, input, " errors in ") != null and
+        std.mem.find(u8, input, "Found ") != null) return true;
     return false;
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
-    var scratch = std.ArrayList(u8){};
+    var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
     var kept_lines: usize = 0;
@@ -72,10 +72,10 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 /// actionable content.
 fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !bool {
     const marker = " - error TS";
-    const idx = std.mem.indexOf(u8, line, marker) orelse {
+    const idx = std.mem.find(u8, line, marker) orelse {
         // Some tsc modes emit `error TS` without the leading path (rare).
         // Fall back to raw line to preserve info.
-        if (std.mem.indexOf(u8, line, "error TS") != null) {
+        if (std.mem.find(u8, line, "error TS") != null) {
             try out.appendSlice(allocator, line);
             try out.append(allocator, '\n');
             return true;
@@ -96,7 +96,7 @@ fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayL
 
 fn isFoundSummary(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "Found ") and
-        std.mem.indexOf(u8, line, "error") != null;
+        std.mem.find(u8, line, "error") != null;
 }
 
 test "matches: error TS line" {
@@ -119,19 +119,19 @@ test "apply: fixture compresses errors to locations + codes" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     // Transformed form: path:L:C TSnnnn (message dropped).
-    try std.testing.expect(std.mem.indexOf(u8, got, "src/api/client.ts:42:5 TS2322") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "src/api/client.ts:58:12 TS2339") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "src/components/Button.tsx:15:7 TS2345") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "src/utils/format.ts:8:3 TS7006") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "src/utils/format.ts:14:10 TS2304") != null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Found 5 errors in 3 files.") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:42:5 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:58:12 TS2339") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/components/Button.tsx:15:7 TS2345") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:8:3 TS7006") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:14:10 TS2304") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Found 5 errors in 3 files.") != null);
     // Message text dropped.
-    try std.testing.expect(std.mem.indexOf(u8, got, "is not assignable") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "- error TS") == null);
+    try std.testing.expect(std.mem.find(u8, got, "is not assignable") == null);
+    try std.testing.expect(std.mem.find(u8, got, "- error TS") == null);
     // Caret and code-context lines dropped.
-    try std.testing.expect(std.mem.indexOf(u8, got, "~~~~~~") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "return response;") == null);
-    try std.testing.expect(std.mem.indexOf(u8, got, "Errors  Files") == null);
+    try std.testing.expect(std.mem.find(u8, got, "~~~~~~") == null);
+    try std.testing.expect(std.mem.find(u8, got, "return response;") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Errors  Files") == null);
 }
 
 test "apply: no errors emits 'no type errors'" {
@@ -141,7 +141,7 @@ test "apply: no errors emits 'no type errors'" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     // "Found 0 errors" is kept as a positive signal rather than collapsed.
-    try std.testing.expect(std.mem.indexOf(u8, got, "Found 0 errors") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Found 0 errors") != null);
 }
 
 test "apply: strips ANSI" {
@@ -149,8 +149,8 @@ test "apply: strips ANSI" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expect(std.mem.indexOf(u8, out.written(), "\x1b") == null);
-    try std.testing.expect(std.mem.indexOf(u8, out.written(), "src/a.ts:1:1 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "\x1b") == null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "src/a.ts:1:1 TS2322") != null);
 }
 
 test "apply: malformed error line falls back to raw" {
@@ -159,5 +159,5 @@ test "apply: malformed error line falls back to raw" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expect(std.mem.indexOf(u8, out.written(), "error TS9999") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "error TS9999") != null);
 }
