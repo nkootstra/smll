@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Lossless by
 default, opt-in lossy filters when you're willing to trade detail for tokens.
 
-- 145 KB release binary
+- ~180 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -14,7 +14,7 @@ default, opt-in lossy filters when you're willing to trade detail for tokens.
 ```sh
 git clone https://github.com/nielskootstra/smll.git
 cd smll
-zig build release           # zig 0.15.2+
+zig build release           # zig 0.16.0+
 cp zig-out/release/smll /usr/local/bin/
 ```
 
@@ -67,8 +67,8 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 150 KB. No network
-calls, no analytics, no config files.
+**Small, no deps, no telemetry.** The binary stays under 180 KB (Linux x86_64
+release). No network calls, no analytics, no config files.
 
 ## Development
 
@@ -77,4 +77,4 @@ zig build test              # runs ~260 unit + 90 integration tests
 zig build release           # produces zig-out/release/smll
 ```
 
-Tested on Zig 0.15.2, macOS + Linux.
+Tested on Zig 0.16.0, macOS + Linux.
