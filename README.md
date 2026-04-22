@@ -12,11 +12,20 @@ default, opt-in lossy filters when you're willing to trade detail for tokens.
 ## Install
 
 ```sh
-git clone https://github.com/nielskootstra/smll.git
-cd smll
-zig build release           # zig 0.16.0+
-cp zig-out/release/smll /usr/local/bin/
+brew install nkootstra/smll/smll
 ```
+
+Or two-step:
+
+```sh
+brew tap nkootstra/smll
+brew install smll
+```
+
+Prebuilt bottles ship for `aarch64-apple-darwin`, `x86_64-linux-gnu`, and
+`aarch64-linux-gnu`. On any other platform (notably macOS Intel), Homebrew
+builds from source via `zig` — the formula declares it as a `:build`
+dependency. See [Build from source](#build-from-source) for the manual path.
 
 ## Usage
 
@@ -69,6 +78,17 @@ smaller competitor collapses to a count.
 
 **Small, no deps, no telemetry.** The binary stays under 180 KB (Linux x86_64
 release). No network calls, no analytics, no config files.
+
+## Build from source
+
+Required for contributors and for platforms without a prebuilt bottle.
+
+```sh
+git clone https://github.com/nkootstra/smll.git
+cd smll
+zig build release           # zig 0.16.0+
+cp zig-out/release/smll /usr/local/bin/
+```
 
 ## Development
 

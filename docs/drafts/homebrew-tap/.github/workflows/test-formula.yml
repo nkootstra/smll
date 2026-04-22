@@ -1,0 +1,32 @@
+name: test-formula
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: brew audit --strict
+        run: |
+          set -euo pipefail
+          brew audit --strict --online Formula/smll.rb
+      - name: brew install --build-from-source
+        run: |
+          set -euo pipefail
+          brew install --build-from-source --verbose ./Formula/smll.rb
+      - name: brew test
+        run: brew test smll
+      - name: brew uninstall
+        run: brew uninstall smll
