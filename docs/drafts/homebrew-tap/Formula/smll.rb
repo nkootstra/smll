@@ -3,10 +3,9 @@ class Smll < Formula
   homepage "https://github.com/nkootstra/smll"
   license "MIT"
 
-  # Anchor: version (bump-formula.py rewrites the next line)
-  version "0.0.0"
-
   # Source fallback for platforms without a prebuilt bottle (e.g. macOS Intel).
+  # Version is inferred from the tag in the source URL; brew audit --strict
+  # rejects a redundant top-level `version` declaration for GitHub-tag URLs.
   # Anchor: source-url (bump-formula.py rewrites the next line)
   url "https://github.com/nkootstra/smll/archive/refs/tags/v0.0.0.tar.gz"
   # Anchor: source-sha256 (bump-formula.py rewrites the next line)

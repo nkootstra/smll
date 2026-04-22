@@ -18,15 +18,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@98cfa07b984a61682e6cd3a0833fad2006cc84ba # master @ 2026-04-22
+      - name: Link checkout into Homebrew tap directory
+        run: |
+          set -euo pipefail
+          tap_parent="$(brew --repository)/Library/Taps/nkootstra"
+          mkdir -p "$tap_parent"
+          ln -s "$(pwd)" "$tap_parent/homebrew-smll"
+          brew tap
       - name: brew audit --strict
-        run: |
-          set -euo pipefail
-          brew audit --strict --online Formula/smll.rb
-      - name: brew install --build-from-source
-        run: |
-          set -euo pipefail
-          brew install --build-from-source --verbose ./Formula/smll.rb
+        run: brew audit --strict --online nkootstra/smll/smll
+      - name: brew install
+        run: brew install --verbose nkootstra/smll/smll
       - name: brew test
-        run: brew test smll
+        run: brew test nkootstra/smll/smll
       - name: brew uninstall
-        run: brew uninstall smll
+        run: brew uninstall nkootstra/smll/smll

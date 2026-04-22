@@ -20,7 +20,6 @@ import pathlib
 import re
 import sys
 
-VERSION_RE = re.compile(r'^(\s*version\s+")([^"]+)(")\s*$', re.MULTILINE)
 URL_RE = re.compile(r'^(\s*url\s+")([^"]+)(")\s*$', re.MULTILINE)
 SHA_RE = re.compile(r'^(\s*sha256\s+")([a-f0-9]{64})(")\s*$', re.MULTILINE)
 
@@ -89,8 +88,9 @@ def main() -> "None":
 
     text = path.read_text()
 
-    # Version
-    text = sub_after_anchor(text, "version", VERSION_RE, version)
+    # Note: no top-level `version` declaration in the formula — brew audit --strict
+    # rejects it as redundant with the version inferred from the source-URL tag.
+    # The URLs below carry the version substring, so URL + sha256 updates are enough.
 
     # URLs: source archive + three binary releases. All share the version substring.
     source_url = f"https://github.com/nkootstra/smll/archive/refs/tags/v{version}.tar.gz"
