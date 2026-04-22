@@ -1,0 +1,243 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify tag + version
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          echo "tag=${tag}"
+          echo "version=${version}"
+
+          # R5: tag must be annotated and GitHub-verified (signed by a key registered with GitHub).
+          ref_type=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.type')
+          if [ "${ref_type}" != "tag" ]; then
+            echo "::error::Tag ${tag} is a lightweight tag; annotated + signed tags are required"
+            exit 1
+          fi
+          tag_sha=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')
+          verified=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.verification.verified')
+          if [ "${verified}" != "true" ]; then
+            reason=$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.verification.reason')
+            echo "::error::Tag ${tag} signature not verified by GitHub (reason: ${reason})"
+            exit 1
+          fi
+
+          # zon.version must match the tag (catches tag-without-bump mistakes).
+          zon_version=$(grep -E '^\s*\.version\s*=' build.zig.zon | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ "${zon_version}" != "${version}" ]; then
+            echo "::error::build.zig.zon .version=${zon_version} != tag ${version}"
+            exit 1
+          fi
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+  build-macos:
+    needs: preflight
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+          cache-size-limit: 512
+          cache-key: release-aarch64-apple-darwin
+      - name: Confirm Zig version
+        run: bash scripts/check-zig-version.sh
+      - name: Build release
+        run: zig build release
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${{ needs.preflight.outputs.version }}"
+          name="smll-${version}-aarch64-apple-darwin"
+          tar -C zig-out/release -czf "${name}.tar.gz" smll
+          shasum -a 256 "${name}.tar.gz"
+          size=$(wc -c < "${name}.tar.gz")
+          echo "tarball size: ${size} bytes"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smll-aarch64-apple-darwin
+          path: smll-*-aarch64-apple-darwin.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  build-linux:
+    needs: preflight
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-linux-gnu, aarch64-linux-gnu]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+          cache-size-limit: 512
+          cache-key: release-${{ matrix.target }}
+      - name: Confirm Zig version
+        run: bash scripts/check-zig-version.sh
+      - name: Build release (cross)
+        run: zig build release -Dtarget=${{ matrix.target }}
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${{ needs.preflight.outputs.version }}"
+          name="smll-${version}-${{ matrix.target }}"
+          tar -C zig-out/release -czf "${name}.tar.gz" smll
+          shasum -a 256 "${name}.tar.gz"
+          size=$(wc -c < "${name}.tar.gz")
+          echo "tarball size: ${size} bytes"
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smll-${{ matrix.target }}
+          path: smll-*-${{ matrix.target }}.tar.gz
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    needs: [preflight, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.preflight.outputs.version }}
+      sha256_macos_arm64: ${{ steps.hashes.outputs.sha256_macos_arm64 }}
+      sha256_linux_x64: ${{ steps.hashes.outputs.sha256_linux_x64 }}
+      sha256_linux_arm64: ${{ steps.hashes.outputs.sha256_linux_arm64 }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Compute per-platform SHA256s
+        id: hashes
+        run: |
+          set -euo pipefail
+          version="${{ needs.preflight.outputs.version }}"
+          cd dist
+          ls -la
+
+          for triple in aarch64-apple-darwin x86_64-linux-gnu aarch64-linux-gnu; do
+            f="smll-${version}-${triple}.tar.gz"
+            if [ ! -f "${f}" ]; then
+              echo "::error::missing ${f}"
+              exit 1
+            fi
+          done
+
+          sha_mac=$(shasum -a 256 "smll-${version}-aarch64-apple-darwin.tar.gz" | awk '{print $1}')
+          sha_lx=$(shasum -a 256  "smll-${version}-x86_64-linux-gnu.tar.gz"    | awk '{print $1}')
+          sha_la=$(shasum -a 256  "smll-${version}-aarch64-linux-gnu.tar.gz"   | awk '{print $1}')
+
+          echo "macOS arm64  sha256: ${sha_mac}"
+          echo "Linux x86_64 sha256: ${sha_lx}"
+          echo "Linux arm64  sha256: ${sha_la}"
+
+          # Smoke-test envelopes (warn-only, never gate release).
+          size_mac=$(wc -c < "smll-${version}-aarch64-apple-darwin.tar.gz")
+          size_lx=$(wc -c  < "smll-${version}-x86_64-linux-gnu.tar.gz")
+          size_la=$(wc -c  < "smll-${version}-aarch64-linux-gnu.tar.gz")
+          echo "tarball sizes (bytes): mac=${size_mac} linux-x64=${size_lx} linux-arm64=${size_la}"
+
+          echo "sha256_macos_arm64=${sha_mac}" >> "${GITHUB_OUTPUT}"
+          echo "sha256_linux_x64=${sha_lx}"    >> "${GITHUB_OUTPUT}"
+          echo "sha256_linux_arm64=${sha_la}"  >> "${GITHUB_OUTPUT}"
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          name: smll ${{ needs.preflight.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/smll-${{ needs.preflight.outputs.version }}-aarch64-apple-darwin.tar.gz
+            dist/smll-${{ needs.preflight.outputs.version }}-x86_64-linux-gnu.tar.gz
+            dist/smll-${{ needs.preflight.outputs.version }}-aarch64-linux-gnu.tar.gz
+          body: |
+            smll ${{ needs.preflight.outputs.version }}
+
+            Install via Homebrew:
+            ```
+            brew install nkootstra/smll/smll
+            ```
+
+            Prebuilt tarballs (SHA256 values below are the trust anchors the formula pins against):
+
+            | Platform | SHA256 |
+            |---|---|
+            | `aarch64-apple-darwin` | `${{ steps.hashes.outputs.sha256_macos_arm64 }}` |
+            | `x86_64-linux-gnu`     | `${{ steps.hashes.outputs.sha256_linux_x64 }}` |
+            | `aarch64-linux-gnu`    | `${{ steps.hashes.outputs.sha256_linux_arm64 }}` |
+
+  bump-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    # Skip pre-releases (e.g. v0.5.0-rc1) — only stable versions bump the formula.
+    if: ${{ !contains(needs.release.outputs.version, '-') }}
+    steps:
+      - name: Checkout smll (for bump script)
+        uses: actions/checkout@v4
+      - name: Checkout homebrew-smll
+        uses: actions/checkout@v4
+        with:
+          repository: nkootstra/homebrew-smll
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-smll
+      - name: Compute source archive SHA256
+        id: src
+        run: |
+          set -euo pipefail
+          version="${{ needs.release.outputs.version }}"
+          url="https://github.com/nkootstra/smll/archive/refs/tags/v${version}.tar.gz"
+          sha=$(curl -sSL --fail "${url}" | shasum -a 256 | awk '{print $1}')
+          echo "sha256: ${sha}"
+          echo "sha256=${sha}" >> "${GITHUB_OUTPUT}"
+      - name: Bump formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          SHA_SOURCE: ${{ steps.src.outputs.sha256 }}
+          SHA_MACOS_ARM64: ${{ needs.release.outputs.sha256_macos_arm64 }}
+          SHA_LINUX_X64: ${{ needs.release.outputs.sha256_linux_x64 }}
+          SHA_LINUX_ARM64: ${{ needs.release.outputs.sha256_linux_arm64 }}
+          FORMULA_PATH: homebrew-smll/Formula/smll.rb
+        run: python3 scripts/bump-formula.py
+      - name: Open bump PR
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          path: homebrew-smll
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          branch: bump-v${{ needs.release.outputs.version }}
+          delete-branch: true
+          commit-message: "smll ${{ needs.release.outputs.version }}"
+          title: "smll ${{ needs.release.outputs.version }}"
+          body: |
+            Automated bump from the smll release workflow.
+
+            Release: https://github.com/nkootstra/smll/releases/tag/v${{ needs.release.outputs.version }}
+
+            SHA256 (trust anchors):
+            - source archive:        `${{ steps.src.outputs.sha256 }}`
+            - aarch64-apple-darwin:  `${{ needs.release.outputs.sha256_macos_arm64 }}`
+            - x86_64-linux-gnu:      `${{ needs.release.outputs.sha256_linux_x64 }}`
+            - aarch64-linux-gnu:     `${{ needs.release.outputs.sha256_linux_arm64 }}`
