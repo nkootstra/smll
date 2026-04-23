@@ -34,6 +34,7 @@ const tsc = @import("tsc");
 const go_test = @import("go_test");
 const docker_logs = @import("docker_logs");
 const npm_install = @import("npm_install");
+const build_compact = @import("build_compact");
 const generic_compact = @import("generic_compact");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
@@ -472,6 +473,32 @@ fn runWrapper(
             try writer.writeAll(stdout_slice);
         }
         try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // Build-chatter wrapper: `make`, `cargo build`, `go build` — LOSSY
+    // compaction by default (v0.6). Collapses `Compiling X` / `cc -c X.o`
+    // / `go build: X` progress lines into a summary count; warnings and
+    // errors pass through verbatim. Stream-placement: cargo/go emit
+    // progress on stderr, make splits; the filter inspects both. Gate by
+    // `!SMLL_LOSSLESS`. `bun` is explicitly excluded.
+    const is_make = std.mem.eql(u8, cmd_basename, "make");
+    const is_cargo_build = std.mem.eql(u8, cmd_basename, "cargo") and
+        argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
+    const is_go_build = std.mem.eql(u8, cmd_basename, "go") and
+        argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
+    if (is_make or is_cargo_build or is_go_build) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
+            build_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
+        }
         return exit_code;
     }
 

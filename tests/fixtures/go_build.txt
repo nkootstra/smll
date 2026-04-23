@@ -1,0 +1,7 @@
+go build: compiling ./cmd/server
+go build: compiling ./internal/auth
+go build: compiling ./internal/handlers
+go build: compiling ./internal/store
+go build: compiling ./pkg/util
+internal/auth/token.go:42:9: declared and not used: claims
+go build: compiling ./pkg/metrics

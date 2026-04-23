@@ -917,6 +917,85 @@ EOF
     done
 } > "$OUT_DIR/curl_vvv_example.stdout.txt"
 
+# ── cargo_build.txt (large) ───────────────────────────────────────────────────
+# Synthetic `cargo build` output — 500 `   Compiling <crate> v<ver>` lines on
+# stderr with two warning/error blocks and a closing `Finished` line. The
+# build_compact filter collapses progress lines to a single `(N lines)` count
+# while preserving every warning/error body verbatim.
+{
+    crates=("" serde syn quote proc-macro2 unicode-ident futures tokio hyper
+            reqwest anyhow thiserror log env_logger clap clap_derive
+            once_cell lazy_static regex memchr)
+    for n in $(seq 1 500); do
+        crate="${crates[$(( (n - 1) % ${#crates[@]} ))]}"
+        ver="$(( (n - 1) % 20 + 1 )).$(( (n - 1) % 20 )).$(( (n - 1) % 5 ))"
+        printf '   Compiling %s v%s\n' "$crate" "$ver"
+        if (( n == 100 )); then
+            printf 'warning: unused import: `std::collections::HashMap`\n'
+            printf ' --> src/lib.rs:3:5\n'
+            printf '  |\n'
+            printf '3 | use std::collections::HashMap;\n'
+            printf '  |     ^^^^^^^^^^^^^^^^^^^^^^^^^\n'
+        fi
+        if (( n == 250 )); then
+            printf 'warning: variable does not need to be mutable\n'
+            printf ' --> src/core.rs:77:9\n'
+            printf '  |\n'
+            printf '77 |     let mut tally = 0;\n'
+            printf '  |         ----^^^^^\n'
+        fi
+        if (( n == 400 )); then
+            printf 'error[E0308]: mismatched types\n'
+            printf ' --> src/main.rs:17:5\n'
+            printf '  |\n'
+            printf '17 |     return x;\n'
+            printf '  |     ^^^^^^^^ expected `()`, found integer\n'
+        fi
+    done
+    printf '    Finished dev [unoptimized + debuginfo] target(s) in 45.23s\n'
+} > "$OUT_DIR/cargo_build.txt"
+
+# ── make_build.txt (large) ────────────────────────────────────────────────────
+# Synthetic `make` output — ~500 `cc -c ...` lines (stdout) with two inline
+# warnings and a closing LINK line. Real make output splits progress across
+# stdout and stderr; the filter's virtual-stream folding handles both cases.
+{
+    for n in $(seq 1 500); do
+        ver=$(( (n - 1) % 7 + 1 ))
+        printf 'cc -c -Wall -O2 -Iinclude -DVERSION=%d src/mod_%03d.c -o build/mod_%03d.o\n' \
+            "$ver" "$n" "$n"
+        if (( n == 150 )); then
+            printf 'src/mod_150.c:32:12: warning: unused variable '\''tmp'\'' [-Wunused-variable]\n'
+            printf '   32 |     int tmp = 0;\n'
+            printf '      |         ^~~\n'
+        fi
+        if (( n == 350 )); then
+            printf 'src/mod_350.c:18:9: warning: implicit declaration of function '\''do_thing'\'' [-Wimplicit-function-declaration]\n'
+            printf '   18 |     do_thing();\n'
+            printf '      |     ^~~~~~~~\n'
+        fi
+    done
+    printf 'LINK build/app\n'
+} > "$OUT_DIR/make_build.txt"
+
+# ── go_build.txt (large) ──────────────────────────────────────────────────────
+# Synthetic `go build` output — 500 `go build: compiling ...` lines on stderr
+# with two inline compiler errors. Real go build emits progress to stderr by
+# convention.
+{
+    paths=("" "./cmd/server" "./internal/auth" "./internal/handlers"
+           "./internal/store" "./pkg/util" "./pkg/metrics" "./pkg/log"
+           "./internal/db" "./pkg/cache")
+    for n in $(seq 1 500); do
+        path="${paths[$(( (n - 1) % ${#paths[@]} ))]}"
+        printf 'go build: compiling %s/pkg_%03d\n' "$path" "$n"
+        if (( n == 250 )); then
+            printf 'internal/auth/token.go:42:9: error: declared and not used: claims\n'
+            printf 'internal/auth/token.go:51:2: error: cannot use invalid (type untyped int) as type string in argument to fmt.Println\n'
+        fi
+    done
+} > "$OUT_DIR/go_build.txt"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 4: Summary
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -961,6 +1040,13 @@ echo ""
 echo "Generated v0.6 generic-compact fixtures in $OUT_DIR:"
 for f in generic_pip_install.txt generic_cargo_build_verbose.txt \
          generic_journalctl.txt generic_ps_auxww.txt; do
+    bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
+    printf '  %-32s  %8s bytes\n' "$f" "$bytes"
+done
+
+echo ""
+echo "Generated v0.6 build_compact fixtures in $OUT_DIR:"
+for f in cargo_build.txt make_build.txt go_build.txt; do
     bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
     printf '  %-32s  %8s bytes\n' "$f" "$bytes"
 done

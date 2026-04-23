@@ -1646,6 +1646,9 @@ test "generic-compact: dispatch invariant — bespoke commands never reach gener
         .{ .name = "cargo", .argv = &.{ "cargo", "test" } },
         .{ .name = "go", .argv = &.{ "go", "test" } },
         .{ .name = "curl", .argv = &.{ "curl", "-v" } },
+        .{ .name = "make", .argv = &.{"make"} },
+        .{ .name = "cargo", .argv = &.{ "cargo", "build" } },
+        .{ .name = "go", .argv = &.{ "go", "build" } },
         .{ .name = "ls", .argv = &.{"ls"} },
         .{ .name = "du", .argv = &.{"du"} },
         .{ .name = "docker", .argv = &.{"docker"} },
@@ -1956,4 +1959,194 @@ test "smoke: curl -v with SMLL_LOSSLESS=1 passes both streams through byte-ident
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, curl_small_stdout, result.stdout);
     try std.testing.expectEqualSlices(u8, curl_small_stderr, result.stderr);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 build_compact — shared filter for `cargo build`, `make`, `go build`.
+// cargo/go emit progress on stderr by convention; make splits across both.
+// setupFakeBuild supports routing a fixture to either stream so each tool's
+// real shape is preserved.
+// ---------------------------------------------------------------------------
+
+const cargo_build_fixture = @embedFile("fixture_cargo_build");
+const cargo_build_large = @embedFile("fixture_cargo_build_large");
+const make_build_fixture = @embedFile("fixture_make_build");
+const make_build_large = @embedFile("fixture_make_build_large");
+const go_build_fixture = @embedFile("fixture_go_build");
+const go_build_large = @embedFile("fixture_go_build_large");
+
+/// Fake build tool that emits a fixture on the given stream (stdout or stderr).
+/// cargo/go usually print progress to stderr; make usually prints to stdout.
+fn setupFakeBuild(
+    allocator: std.mem.Allocator,
+    tmp_dir: std.Io.Dir,
+    tool_name: []const u8,
+    fixture: []const u8,
+    on_stderr: bool,
+) ![]u8 {
+    const io = std.testing.io;
+    const fixture_name = try std.fmt.allocPrint(allocator, "{s}_build_fixture.txt", .{tool_name});
+    defer allocator.free(fixture_name);
+    try tmp_dir.writeFile(io, .{ .sub_path = fixture_name, .data = fixture });
+    const fixture_path = try tmp_dir.realPathFileAlloc(io, fixture_name, allocator);
+    defer allocator.free(fixture_path);
+
+    const redirect = if (on_stderr) " >&2" else "";
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\n/bin/cat {s}{s}\n",
+        .{ fixture_path, redirect },
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp_dir, tool_name, script);
+
+    return try tmp_dir.realPathFileAlloc(io, ".", allocator);
+}
+
+test "smoke: cargo build collapses Compiling lines on stderr (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Progress collapsed, summary emitted.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 7 files (cargo)") != null);
+    // No raw "   Compiling " lines survive.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "   Compiling ") == null);
+    // Warning block preserved verbatim.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable: `tmp`") != null);
+    // Finished line preserved.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Finished dev") != null);
+}
+
+test "smoke: cargo build large fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_large, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const reduction = (cargo_build_large.len - result.stdout.len) * 100 / cargo_build_large.len;
+    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 files (cargo)") != null);
+    // Warnings survived.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused import") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: variable does not need to be mutable") != null);
+}
+
+test "smoke: make collapses cc/LINK lines on stdout" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "make", make_build_fixture, false);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"make"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // 4 cc lines + 1 LINK line = 5 progress.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 5 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cc -c -Wall") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "LINK build/app") == null);
+    // Warning survived.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'tmp'") != null);
+}
+
+test "smoke: make large fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "make", make_build_large, false);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"make"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const reduction = (make_build_large.len - result.stdout.len) * 100 / make_build_large.len;
+    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 501 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'tmp'") != null);
+}
+
+test "smoke: go build collapses `go build:` lines on stderr" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "go", go_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "go", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 6 files (go)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "go build: compiling") == null);
+    // The "declared and not used" line has no error:/warning: prefix, so it
+    // classifies as .other and passes through verbatim.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "declared and not used: claims") != null);
+}
+
+test "smoke: go build large fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "go", go_build_large, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "go", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const reduction = (go_build_large.len - result.stdout.len) * 100 / go_build_large.len;
+    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 files (go)") != null);
+    // Errors survived.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error: declared and not used") != null);
+}
+
+test "smoke: cargo build with SMLL_LOSSLESS=1 passes through byte-identical" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "cargo", "build" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Fixture was routed to stderr, so stdout is empty in lossless mode.
+    try std.testing.expectEqualSlices(u8, "", result.stdout);
+    try std.testing.expectEqualSlices(u8, cargo_build_fixture, result.stderr);
+}
+
+test "smoke: cargo without build subcommand doesn't dispatch to build_compact" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "check" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // No "Compiled" summary line — build arm didn't engage.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled ") == null);
 }
