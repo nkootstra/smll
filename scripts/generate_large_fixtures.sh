@@ -809,8 +809,11 @@ git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
 # directory-marker emission and whitespace-tolerance.
 {
     dirs=("src" "src/filters" "src/ui" "tests" "tests/fixtures" "docs" "vendor" "vendor/lib" "scripts" "benchmarks")
-    for d in "${dirs[@]}"; do
-        inode=$((2055000 + RANDOM % 999))
+    # Deterministic inodes — $RANDOM would churn the committed fixture on every
+    # regen. Use a simple positional formula instead.
+    for i in "${!dirs[@]}"; do
+        d="${dirs[$i]}"
+        inode=$((2055100 + i * 37))
         printf '%d    0 drwxr-xr-x   2 user     staff          64 Apr 23 12:34 ./%s\n' "$inode" "$d"
     done
     for n in $(seq 1 500); do
@@ -826,6 +829,26 @@ git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
         fi
     done
 } > "$OUT_DIR/find_ls.txt"
+
+# ── du_sh.txt (large) ─────────────────────────────────────────────────────────
+# Synthetic `du -sh` output over ~500 entries. Size column varies across K/M/G
+# with both integer and `du -h`-style single-decimal leads so rounding exercises
+# every branch. Deep path shapes mirror real monorepos.
+{
+    for n in $(seq 1 500); do
+        mod=$((n % 7))
+        path="./monorepo/pkg$((n % 20))/src/module_$((n % 40))/lib_$(printf '%03d' "$n").zig"
+        case "$mod" in
+            0) printf '%dK\t%s\n' "$(( (n * 17) % 999 + 1 ))" "$path" ;;
+            1) printf '%dM\t%s\n' "$(( (n * 31) % 900 + 100 ))" "$path" ;;
+            2) printf '%d.%dG\t%s\n' "$(( (n % 9) + 1 ))" "$(( (n * 3) % 10 ))" "$path" ;;
+            3) printf '%dM\t%s\n' "$(( (n * 13) % 90 + 10 ))" "$path" ;;
+            4) printf '%d.%dM\t%s\n' "$(( (n % 9) + 1 ))" "$(( (n * 7) % 10 ))" "$path" ;;
+            5) printf '%dG\t%s\n' "$(( (n % 19) + 1 ))" "$path" ;;
+            6) printf '%dK\t%s\n' "$(( (n * 41) % 99 + 1 ))" "$path" ;;
+        esac
+    done
+} > "$OUT_DIR/du_sh.txt"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 4: Summary

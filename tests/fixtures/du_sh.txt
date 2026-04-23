@@ -1,0 +1,6 @@
+234M	./src
+1.2G	./vendor
+17K	./tests
+5G	./node_modules
+82M	./build
+4.0K	./docs

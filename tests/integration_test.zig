@@ -1646,6 +1646,7 @@ test "generic-compact: dispatch invariant — bespoke commands never reach gener
         .{ .name = "cargo", .argv = &.{ "cargo", "test" } },
         .{ .name = "go", .argv = &.{ "go", "test" } },
         .{ .name = "ls", .argv = &.{"ls"} },
+        .{ .name = "du", .argv = &.{"du"} },
         .{ .name = "docker", .argv = &.{"docker"} },
         .{ .name = "kubectl", .argv = &.{"kubectl"} },
         .{ .name = "gh", .argv = &.{"gh"} },
@@ -1761,4 +1762,77 @@ test "smoke: find -ls with SMLL_LOSSLESS=1 passes through unchanged" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, find_ls_fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 du_compact — size rounding + -s sort.
+// ---------------------------------------------------------------------------
+
+const du_fixture =
+    "234M\t./src\n" ++
+    "1.2G\t./vendor\n" ++
+    "17K\t./tests\n" ++
+    "5G\t./node_modules\n" ++
+    "82M\t./build\n";
+
+test "smoke: du rounds sizes to 2 sig figs (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "du", du_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "du", "-h", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // 234M → 230M; paths preserved.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "230M\t./src") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "1.2G\t./vendor") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "17K\t./tests") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "82M\t./build") != null);
+    // Order preserved without -s.
+    const src_idx = std.mem.find(u8, result.stdout, "./src").?;
+    const vendor_idx = std.mem.find(u8, result.stdout, "./vendor").?;
+    try std.testing.expect(src_idx < vendor_idx);
+}
+
+test "smoke: du -sh sorts descending by byte size" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "du", du_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "du", "-sh", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Largest first: 5G node_modules, then 1.2G vendor, then 230M src, 82M build, 17K tests.
+    const nm_idx = std.mem.find(u8, result.stdout, "./node_modules").?;
+    const vendor_idx = std.mem.find(u8, result.stdout, "./vendor").?;
+    const src_idx = std.mem.find(u8, result.stdout, "./src").?;
+    const tests_idx = std.mem.find(u8, result.stdout, "./tests").?;
+    try std.testing.expect(nm_idx < vendor_idx);
+    try std.testing.expect(vendor_idx < src_idx);
+    try std.testing.expect(src_idx < tests_idx);
+}
+
+test "smoke: du with SMLL_LOSSLESS=1 passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "du", du_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "du", "-sh", "." },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, du_fixture, result.stdout);
 }

@@ -24,6 +24,7 @@ const columnar = @import("columnar");
 const docker_compact = @import("docker_compact");
 const ls_compact = @import("ls_compact");
 const find_compact = @import("find_compact");
+const du_compact = @import("du_compact");
 const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
@@ -338,6 +339,25 @@ fn runWrapper(
             }
         }
         try writer.writeAll(stdout_slice);
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // du wrapper — LOSSY compaction (2-sig-fig size rounding) by default (v0.6).
+    // When `-s` / `--summarize` is present, sort entries descending by byte size
+    // so the largest offenders come first. Set SMLL_LOSSLESS=1 for raw passthrough.
+    if (std.mem.eql(u8, cmd_basename, "du")) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and du_compact.matches(stdout_slice)) {
+            const sort_desc = du_compact.hasSummarizeFlag(argv);
+            du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
