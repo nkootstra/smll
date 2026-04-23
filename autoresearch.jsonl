@@ -1,1 +1,2 @@
 {"type":"config","name":"Fix RTK-equivalent issues in smll filters","metricName":"test_count","metricUnit":"","bestDirection":"higher"}
+{"run":1,"commit":"63ae855","metric":570,"metrics":{},"status":"keep","description":"Baseline: 570 tests passing before RTK issue fixes","timestamp":1776967491645,"segment":0,"confidence":null,"iterationTokens":217,"asi":{"hypothesis":"Baseline measurement of all tests passing"}}
