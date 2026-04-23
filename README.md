@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- ~220 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- ~240 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -55,22 +55,30 @@ SMLL_LOSSLESS=1 smll docker ps      # full columnar table preserved
 | Category | Commands | Default behavior |
 |---|---|---|
 | git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | noise strip |
-| search / listing | `rg`, `tree` | noise strip |
+| search / listing | `rg`, `tree`, `find` / `find -ls` | noise strip |
 | columnar tables | `docker ps`, `kubectl get`, `gh pr/issue list`, `ps`, `ls -l`, `bun pm ls` | column/padding collapse |
+| disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
+| network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs |
+| build drivers | `make`, `cargo build`, `go build` | collapse progress, keep warnings/errors |
 | test runners | `cargo test`, `pytest`, `jest` / `vitest`, `go test -v` | drop PASS, keep FAIL + evidence |
 | type checker | `tsc` — compresses each error to `path:L:C TSnnnn` | locations-only |
 | logs | `docker logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |
 | package managers | `npm install` / `npm ci` — keep WARN + summary, drop notice/funding | drop noise, keep actionable |
+| fallback | any unknown command whose stdout exceeds 64 KiB | ANSI strip + blank-collapse + RLE |
 
-Anything not in the list passes through untouched. `SMLL_LOSSLESS=1` bypasses
-every filter.
+Anything short and unknown passes through untouched. `SMLL_LOSSLESS=1`
+bypasses every filter.
 
 ## Design principles
 
-**Format-lossy, fact-preserving by default.** smll collapses format (padding,
-banners, passing-case chatter) but keeps every distinct fact the agent might
-act on. The default dispatch is safe to alias over raw tools for agent
-workflows.
+**Agent-first defaults.** Without any env var, smll runs every compression
+filter it has. The default is the densest supported output that preserves every
+actionable fact an agent's next step could depend on. `SMLL_LOSSLESS=1` opts
+out and restores byte-identical pass-through.
+
+**Format-lossy, fact-preserving.** smll collapses format (padding, banners,
+passing-case chatter) but keeps every distinct fact the agent might act on.
+Safe to alias over raw tools for agent workflows.
 
 **Actionable over minimal.** A 6-token "2 errors" wins a bytes benchmark but
 loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
@@ -79,6 +87,17 @@ smaller competitor collapses to a count.
 
 **Small, no deps, no telemetry.** The binary stays under 256 KB (Linux x86_64
 release). No network calls, no analytics, no config files.
+
+## Migrating from v0.5
+
+v0.6 inverts the env-var posture. Previously `SMLL_COMPACT=1` opted *in* to
+lossy compaction; now lossy is the default.
+
+- Remove `SMLL_COMPACT=1` from your shell rc — it is silently ignored.
+- If you relied on byte-identical output (`SMLL_COMPACT` unset), set
+  `SMLL_LOSSLESS=1` instead.
+- If you were already setting `SMLL_COMPACT=1` everywhere, you can delete it
+  and get the same behavior.
 
 ## Build from source
 
@@ -94,7 +113,7 @@ cp zig-out/release/smll /usr/local/bin/
 ## Development
 
 ```sh
-zig build test              # runs ~260 unit + 90 integration tests
+zig build test              # ~560 unit + integration tests
 zig build release           # produces zig-out/release/smll
 ```
 
