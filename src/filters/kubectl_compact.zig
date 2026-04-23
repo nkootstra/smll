@@ -2,7 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `kubectl get pods` (SMLL_COMPACT=1).
+// LOSSY compact filter for `kubectl get pods` — on by default (v0.6).
+// Set SMLL_LOSSLESS=1 to bypass.
 //
 // Drops: READY, RESTARTS, AGE. Keeps: pod names + state sigil.
 // Healthy pod (STATUS=Running, READY a/a): bare name.

@@ -63,7 +63,7 @@ const stash_list_fixture = @embedFile("fixture_git_stash_list");
 // git_blame fixtures (argv-only)
 const blame_simple_fixture = @embedFile("fixture_git_blame_simple");
 const blame_large_fixture = @embedFile("fixture_git_blame_large");
-// columnar fixtures (opt-in SMLL_COMPACT dispatch)
+// columnar fixtures (default-lossy dispatch; SMLL_LOSSLESS=1 opts out)
 const docker_ps_fixture = @embedFile("fixture_docker_ps");
 const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
 const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
@@ -1220,7 +1220,7 @@ test "broken pipe mid-stream returns non-zero exit without panic" {
 }
 
 // ---------------------------------------------------------------------------
-// Columnar filter dispatch (SMLL_COMPACT opt-in)
+// Columnar filter dispatch (default-lossy; SMLL_LOSSLESS=1 opts out)
 // ---------------------------------------------------------------------------
 
 fn runSmllWrapperEnv(
@@ -1276,19 +1276,14 @@ fn setupFakeTool(
     return try tmp_dir.realPathFileAlloc(io, ".", allocator);
 }
 
-test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
+test "columnar: kubectl compresses by default" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "kubectl", kubectl_pods_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"kubectl"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"kubectl"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1302,33 +1297,33 @@ test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "redis-master-0") != null);
 }
 
-test "columnar: kubectl without SMLL_COMPACT passes through unchanged" {
+test "columnar: kubectl with SMLL_LOSSLESS=1 passes through unchanged" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "kubectl", kubectl_pods_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"kubectl"}, &.{});
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"kubectl"},
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, kubectl_pods_fixture, result.stdout);
 }
 
-test "columnar: gh pr list with SMLL_COMPACT=1 preserves preamble" {
+test "columnar: gh pr list preserves preamble by default" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_pr_list_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"gh"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"gh"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1342,7 +1337,7 @@ test "columnar: gh pr list with SMLL_COMPACT=1 preserves preamble" {
     try std.testing.expect(result.stdout.len < gh_pr_list_fixture.len);
 }
 
-test "columnar: docker SMLL_COMPACT=0 stays passthrough" {
+test "columnar: docker with SMLL_COMPACT=0 is silently ignored (still compacts)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1358,30 +1353,66 @@ test "columnar: docker SMLL_COMPACT=0 stays passthrough" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    // SMLL_COMPACT=0 → gate is closed, byte-identical passthrough required.
-    try std.testing.expectEqualSlices(u8, docker_ps_fixture, result.stdout);
+    // v0.6: SMLL_COMPACT is silently ignored — default-lossy behavior stands.
+    // Output must be smaller than fixture (columnar compression ran).
+    try std.testing.expect(result.stdout.len < docker_ps_fixture.len);
+}
+
+test "columnar: docker with SMLL_COMPACT=1 is silently ignored (still compacts)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_ps_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"docker"},
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // v0.6: SMLL_COMPACT=1 legacy opt-in is silently ignored — same default-lossy result.
+    try std.testing.expect(result.stdout.len < docker_ps_fixture.len);
+}
+
+test "columnar: docker with SMLL_LOSSLESS=0 treated as unset (still compacts)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_ps_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"docker"},
+        &.{.{ "SMLL_LOSSLESS", "0" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // SMLL_LOSSLESS=0 must behave as if unset (envFlagOn returns false) — default compacts.
+    try std.testing.expect(result.stdout.len < docker_ps_fixture.len);
 }
 
 // ---------------------------------------------------------------------------
-// v0.9 new filters — end-to-end smoke tests (SMLL_COMPACT=1 wrapper mode).
+// v0.9 new filters — end-to-end smoke tests (default-lossy; SMLL_LOSSLESS=1 opts out).
 // Each drives a fake tool shim on PATH, asserts the compressed output retains
 // the actionable payload (failure markers / error codes / dedup counts /
-// migration warnings), and confirms gate-closed runs fall back to passthrough.
+// migration warnings).
 // ---------------------------------------------------------------------------
 
-test "smoke: jest SMLL_COMPACT=1 keeps FAIL + ● titles, drops PASS" {
+test "smoke: jest keeps FAIL + ● titles, drops PASS (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "jest", jest_failing_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"jest"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"jest"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1394,19 +1425,14 @@ test "smoke: jest SMLL_COMPACT=1 keeps FAIL + ● titles, drops PASS" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "PASS  src/utils/format.test.ts") == null);
 }
 
-test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
+test "smoke: tsc compresses errors to path:L:C TSnnnn (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "tsc", tsc_errors_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"tsc"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"tsc"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1419,19 +1445,14 @@ test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "~~~~~~") == null);
 }
 
-test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
+test "smoke: go test -v keeps --- FAIL + evidence, drops PASS (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "go", go_test_v_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{ "go", "test", "-v" },
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "go", "test", "-v" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1445,19 +1466,14 @@ test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "=== RUN   TestAdd") == null);
 }
 
-test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
+test "smoke: docker logs dedups consecutive identical lines (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_logs_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{ "docker", "logs", "myapp" },
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "logs", "myapp" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1469,19 +1485,14 @@ test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "shutting down gracefully") != null);
 }
 
-test "smoke: npm install SMLL_COMPACT=1 keeps WARN + summary, drops notice" {
+test "smoke: npm install keeps WARN + summary, drops notice (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "npm", npm_install_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{ "npm", "install" },
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "npm", "install" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);

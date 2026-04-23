@@ -45,7 +45,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try applyInner(stdout, writer);
 }
 
-/// SMLL_COMPACT=1 lossy v2: emit `<sha7> <subject>` one line per commit.
+/// v0.6 default for wrapper mode: emit `<sha7> <subject>` one line per commit.
 /// Drops date, author, body, merge parents. The hash remains actionable
 /// (git show <sha7>, git cherry-pick <sha7>). Target ~2× reduction vs default.
 pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {

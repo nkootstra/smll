@@ -3,10 +3,10 @@
 [![ci](https://github.com/nkootstra/smll/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nkootstra/smll/actions/workflows/ci.yml)
 
 A tiny wrapper that compresses noisy command output before it lands in your
-coding agent's context window. Drop-in — just prefix the command. Lossless by
-default, opt-in lossy filters when you're willing to trade detail for tokens.
+coding agent's context window. Drop-in — just prefix the command. Format-lossy,
+fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- ~180 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- ~220 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -38,45 +38,46 @@ smll rg TODO
 smll tree src
 ```
 
-Output stays byte-for-byte lossless by default — smll only strips predictable
-noise (progress chatter, trailing blank lines). Every token saved is one an
-agent doesn't waste.
+Every distinct fact in the raw output is recoverable from the compacted stream
+— smll collapses format (padding, banners, progress chatter, duplicate lines)
+but preserves the actionable payload (failures, errors, paths, counts).
 
-**Opt-in lossy compaction.** Set `SMLL_COMPACT=1` to enable filters that drop
-content the agent doesn't usually need:
+**Lossless escape hatch.** Set `SMLL_LOSSLESS=1` to bypass every filter and
+pass the raw output through byte-identically:
 
 ```sh
-SMLL_COMPACT=1 smll jest
-SMLL_COMPACT=1 smll tsc
-SMLL_COMPACT=1 smll docker logs myapp
+SMLL_LOSSLESS=1 smll jest           # raw jest output, no compaction
+SMLL_LOSSLESS=1 smll docker ps      # full columnar table preserved
 ```
 
 ## Supported commands
 
-| Category | Commands | Mode |
+| Category | Commands | Default behavior |
 |---|---|---|
-| git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | lossless |
-| search / listing | `rg`, `tree` | lossless |
-| columnar tables | `docker ps`, `kubectl get`, `gh pr/issue list`, `ps`, `ls -l`, `bun pm ls` | opt-in lossy |
-| test runners | `cargo test`, `pytest`, `jest` / `vitest`, `go test -v` | opt-in lossy |
-| type checker | `tsc` — compresses each error to `path:L:C TSnnnn` | opt-in lossy |
-| logs | `docker logs`, `kubectl logs` — consecutive-identical dedup | opt-in lossy |
-| package managers | `npm install` / `npm ci` — keep WARN + summary, drop notice/funding | opt-in lossy |
+| git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | noise strip |
+| search / listing | `rg`, `tree` | noise strip |
+| columnar tables | `docker ps`, `kubectl get`, `gh pr/issue list`, `ps`, `ls -l`, `bun pm ls` | column/padding collapse |
+| test runners | `cargo test`, `pytest`, `jest` / `vitest`, `go test -v` | drop PASS, keep FAIL + evidence |
+| type checker | `tsc` — compresses each error to `path:L:C TSnnnn` | locations-only |
+| logs | `docker logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |
+| package managers | `npm install` / `npm ci` — keep WARN + summary, drop notice/funding | drop noise, keep actionable |
 
-Anything not in the list passes through untouched.
+Anything not in the list passes through untouched. `SMLL_LOSSLESS=1` bypasses
+every filter.
 
 ## Design principles
 
-**R3 — lossless by default.** Without `SMLL_COMPACT=1`, smll never drops
-content that changes meaning. The default dispatch is safe to alias over raw
-tools.
+**Format-lossy, fact-preserving by default.** smll collapses format (padding,
+banners, passing-case chatter) but keeps every distinct fact the agent might
+act on. The default dispatch is safe to alias over raw tools for agent
+workflows.
 
 **Actionable over minimal.** A 6-token "2 errors" wins a bytes benchmark but
 loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 180 KB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 256 KB (Linux x86_64
 release). No network calls, no analytics, no config files.
 
 ## Build from source

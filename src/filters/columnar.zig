@@ -2,7 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY columnar compaction (enabled via SMLL_COMPACT=1).
+// LOSSY columnar compaction — on by default (v0.6). Set
+// SMLL_LOSSLESS=1 to bypass.
 //
 // Target: docker ps, docker images, kubectl get, gh pr list — any format where
 // rows are whitespace-separated columns padded to visual width, and rows often

@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `cargo test` (SMLL_COMPACT=1).
+// LOSSY compact filter for `cargo test` — on by default (v0.6). Set
+// SMLL_LOSSLESS=1 to bypass.
 //
 // Keeps: failure markers, panic frames, compile errors/warnings, result summary.
 // Drops: "test X ... ok" pass lines, Compiling/Finished/Running progress,

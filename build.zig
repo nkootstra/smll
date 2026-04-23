@@ -753,7 +753,7 @@ pub fn build(b: *std.Build) void {
     integration_mod.addAnonymousImport("fixture_git_blame_large", .{
         .root_source_file = b.path("tests/fixtures/large/git_blame.txt"),
     });
-    // columnar fixtures (opt-in SMLL_COMPACT dispatch coverage)
+    // columnar fixtures (default-lossy dispatch; SMLL_LOSSLESS=1 opts out)
     integration_mod.addAnonymousImport("fixture_docker_ps", .{
         .root_source_file = b.path("tests/fixtures/docker_ps.txt"),
     });

@@ -2,7 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `docker ps` (enabled via SMLL_COMPACT=1).
+// LOSSY compact filter for `docker ps` — on by default (v0.6). Set
+// SMLL_LOSSLESS=1 to bypass.
 //
 // Design point: agents usually need container names and up/exit state to act.
 // Ports, IDs, images, and commands are recoverable via a follow-up

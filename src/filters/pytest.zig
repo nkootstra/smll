@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `pytest` (SMLL_COMPACT=1).
+// LOSSY compact filter for `pytest` — on by default (v0.6). Set
+// SMLL_LOSSLESS=1 to bypass.
 //
 // Keeps: FAILED/ERROR markers, assertion context, short test summary, session totals.
 // Drops: platform banner, plugin list, rootdir, configfile, passing progress dots,

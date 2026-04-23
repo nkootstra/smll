@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `docker logs` / `kubectl logs` (SMLL_COMPACT=1).
+// LOSSY compact filter for `docker logs` / `kubectl logs` — on by
+// default (v0.6). Set SMLL_LOSSLESS=1 to bypass.
 //
 // Collapses consecutive identical log lines (ignoring the leading ISO-8601
 // timestamp) into a single line + `(×N)` suffix. Strips ANSI escapes.
