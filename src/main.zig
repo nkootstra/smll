@@ -23,6 +23,7 @@ const ws_rle = @import("ws_rle");
 const columnar = @import("columnar");
 const docker_compact = @import("docker_compact");
 const ls_compact = @import("ls_compact");
+const find_compact = @import("find_compact");
 const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
@@ -52,6 +53,12 @@ test {
 fn envFlagOn(environ_map: *const std.process.Environ.Map, name: []const u8) bool {
     const v = environ_map.get(name) orelse return false;
     return v.len > 0 and v[0] == '1';
+}
+
+/// Returns true when `argv` contains an exact-match token equal to `arg`.
+fn hasArg(argv: []const []const u8, arg: []const u8) bool {
+    for (argv) |a| if (std.mem.eql(u8, a, arg)) return true;
+    return false;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -225,11 +232,21 @@ fn runWrapper(
         outer_cmd;
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
-    // via dirname RLE.  rg.matches() rejects pattern-mode output.
+    // via dirname RLE. `find -ls` goes through find_compact instead
+    // (columnar inode/mode/size/path → path-only). SMLL_LOSSLESS=1 bypasses
+    // both.
     if (std.mem.eql(u8, cmd_basename, "rg") or
         std.mem.eql(u8, cmd_basename, "find"))
     {
-        if (rg.matches(stdout_slice)) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        const is_find_ls = std.mem.eql(u8, cmd_basename, "find") and hasArg(argv, "-ls");
+        if (!lossless and is_find_ls and find_compact.matches(stdout_slice)) {
+            find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else if (rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);

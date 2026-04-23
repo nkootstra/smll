@@ -1683,3 +1683,82 @@ test "generic-compact: dispatch invariant — bespoke commands never reach gener
         };
     }
 }
+
+// ---------------------------------------------------------------------------
+// v0.6 find_compact — argv-keyed dispatch on `find -ls`.
+// ---------------------------------------------------------------------------
+
+const find_ls_fixture =
+    "2055938    0 drwxr-xr-x   2 user staff   64 Apr 23 12:34 ./src\n" ++
+    "2055939    8 -rw-r--r--   1 user staff  421 Apr 23 12:34 ./src/main.zig\n" ++
+    "2055940    8 -rw-r--r--   1 user staff  123 Apr 23 12:34 ./src/filter.zig\n" ++
+    "2055941    4 -rw-r--r--   1 user staff   45 Apr 23 12:34 ./README.md\n" ++
+    "2055942    0 drwxr-xr-x   2 user staff   64 Apr 23 12:34 ./tests\n";
+
+test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_ls_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", ".", "-ls" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < find_ls_fixture.len);
+    // Paths survive; directory marker appended.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./README.md") != null);
+    // Metadata gone.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Apr 23") == null);
+}
+
+test "smoke: find without -ls does NOT route through find_compact" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Vanilla find output — path-per-line, no metadata columns. Without
+    // `-ls` in argv, find_compact is skipped. rg.apply (dirname RLE) may
+    // compress the paths with its ':' sigil, but the filenames survive.
+    const find_paths_fixture =
+        "./src\n./src/main.zig\n./src/filter.zig\n./README.md\n";
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_paths_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Filenames survive (whether as full paths or rg-compressed form).
+    try std.testing.expect(std.mem.find(u8, result.stdout, "main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "filter.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "README.md") != null);
+    // find_compact's directory marker (trailing `/` on dirs after 10
+    // fields) must not appear — there are no 10-field lines here.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
+}
+
+test "smoke: find -ls with SMLL_LOSSLESS=1 passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_ls_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "find", ".", "-ls" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, find_ls_fixture, result.stdout);
+}

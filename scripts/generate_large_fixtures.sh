@@ -694,20 +694,12 @@ done
 git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
 
 # ── large git_push ─────────────────────────────────────────────────────────────
-# Push many commits (the large_scratch history) to a bare remote.
-LARGE_REMOTE=$(mktemp -d -t smll-large-remote-XXXXXX)
-trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR" "$CLONE2" "$BLAME_REPO" "$LARGE_SCRATCH" "$LARGE_REMOTE"' EXIT
-git init -q --bare "$LARGE_REMOTE"
-git -C "$LARGE_SCRATCH" remote add origin "$LARGE_REMOTE"
-
-# Push the large-rebase-branch (which has many commits) to get a rich push summary.
-git -C "$LARGE_SCRATCH" push --no-progress -u origin main \
-  > "$OUT_DIR/git_push.stdout.txt" \
-  2> "$OUT_DIR/git_push.stderr.txt"
-# Replace the absolute temp path for determinism.
-sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.stdout.txt"
-sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.stderr.txt"
-rm -f "$OUT_DIR/git_push.stdout.txt.bak" "$OUT_DIR/git_push.stderr.txt.bak"
+# NOTE: tests/fixtures/large/git_push.{stdout,stderr}.txt are HAND-MAINTAINED.
+# The test `apply: large fixture preserves all 10 refs` exercises a ten-ref
+# push shape (mixed new-branch / fast-forward / rejected / deleted rows) that
+# is hard to produce deterministically from a scratch repo. Regenerating it
+# here would collapse it to a single "main -> main" line and break the test.
+# If you need to update the fixture, edit those files directly.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 3b: v0.6 generic-compact calibration fixtures
@@ -810,6 +802,30 @@ rm -f "$OUT_DIR/git_push.stdout.txt.bak" "$OUT_DIR/git_push.stderr.txt.bak"
         printf 'postgres     -  0.0  0.8 345678 15432 ?        Ss   00:00   0:00 postgres: 15/main: writer process                                                                                    \n'
     done
 } > "$OUT_DIR/generic_ps_auxww.txt"
+
+# ── find_ls.txt (large) ───────────────────────────────────────────────────────
+# Synthetic `find -ls` output: GNU-style inode/blocks/mode/nlinks/user/group/
+# size/month/day/time-or-year/path. Path depth varies 1-4 to exercise
+# directory-marker emission and whitespace-tolerance.
+{
+    dirs=("src" "src/filters" "src/ui" "tests" "tests/fixtures" "docs" "vendor" "vendor/lib" "scripts" "benchmarks")
+    for d in "${dirs[@]}"; do
+        inode=$((2055000 + RANDOM % 999))
+        printf '%d    0 drwxr-xr-x   2 user     staff          64 Apr 23 12:34 ./%s\n' "$inode" "$d"
+    done
+    for n in $(seq 1 500); do
+        d_idx=$((n % 10))
+        d="${dirs[$d_idx]}"
+        inode=$((2055500 + n))
+        size=$((n * 37 % 9991 + 40))
+        # Alternate time-of-day and year-only columns to cover both find -ls shapes.
+        if (( n % 3 == 0 )); then
+            printf '%d    8 -rw-r--r--   1 user     staff    %8d Apr 23  2025 ./%s/file_%04d.zig\n' "$inode" "$size" "$d" "$n"
+        else
+            printf '%d    8 -rw-r--r--   1 user     staff    %8d Apr 23 12:34 ./%s/file_%04d.zig\n' "$inode" "$size" "$d" "$n"
+        fi
+    done
+} > "$OUT_DIR/find_ls.txt"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 4: Summary

@@ -1,0 +1,5 @@
+2055938    0 drwxr-xr-x   2 user     staff          64 Apr 23 12:34 ./src
+2055939    8 -rw-r--r--   1 user     staff         421 Apr 23 12:34 ./src/main.zig
+2055940    8 -rw-r--r--   1 user     staff         123 Apr 23 12:34 ./src/filter.zig
+2055941    4 -rw-r--r--   1 user     staff          45 Apr 23 12:34 ./README.md
+2055942    0 drwxr-xr-x   2 user     staff          64 Apr 23 12:34 ./tests

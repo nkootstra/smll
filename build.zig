@@ -299,6 +299,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/ls_la.txt"),
     });
 
+    const find_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/find_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    find_compact_mod.addAnonymousImport("fixture_find_ls", .{
+        .root_source_file = b.path("tests/fixtures/find_ls.txt"),
+    });
+
     const kubectl_compact_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/kubectl_compact.zig"),
         .target = target,
@@ -413,6 +422,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("columnar", columnar_mod);
     exe_mod.addImport("docker_compact", docker_compact_mod);
     exe_mod.addImport("ls_compact", ls_compact_mod);
+    exe_mod.addImport("find_compact", find_compact_mod);
     exe_mod.addImport("kubectl_compact", kubectl_compact_mod);
     exe_mod.addImport("cargo_test", cargo_test_mod);
     exe_mod.addImport("pytest", pytest_mod);
@@ -479,6 +489,7 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("columnar", columnar_mod);
     release_mod.addImport("docker_compact", docker_compact_mod);
     release_mod.addImport("ls_compact", ls_compact_mod);
+    release_mod.addImport("find_compact", find_compact_mod);
     release_mod.addImport("kubectl_compact", kubectl_compact_mod);
     release_mod.addImport("cargo_test", cargo_test_mod);
     release_mod.addImport("pytest", pytest_mod);
@@ -570,6 +581,9 @@ pub fn build(b: *std.Build) void {
 
     const ls_compact_tests = b.addTest(.{ .root_module = ls_compact_mod });
     const run_ls_compact_tests = b.addRunArtifact(ls_compact_tests);
+
+    const find_compact_tests = b.addTest(.{ .root_module = find_compact_mod });
+    const run_find_compact_tests = b.addRunArtifact(find_compact_tests);
 
     const kubectl_compact_tests = b.addTest(.{ .root_module = kubectl_compact_mod });
     const run_kubectl_compact_tests = b.addRunArtifact(kubectl_compact_tests);
@@ -822,6 +836,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_columnar_tests.step);
     test_step.dependOn(&run_docker_compact_tests.step);
     test_step.dependOn(&run_ls_compact_tests.step);
+    test_step.dependOn(&run_find_compact_tests.step);
     test_step.dependOn(&run_kubectl_compact_tests.step);
     test_step.dependOn(&run_cargo_test_tests.step);
     test_step.dependOn(&run_pytest_tests.step);
