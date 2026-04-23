@@ -710,6 +710,108 @@ sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.std
 rm -f "$OUT_DIR/git_push.stdout.txt.bak" "$OUT_DIR/git_push.stderr.txt.bak"
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3b: v0.6 generic-compact calibration fixtures
+# Synthetic — must exceed 64 KiB and mimic real-world output shapes
+# (pip install, cargo build -vv, journalctl, find /usr).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── generic_pip_install.txt ───────────────────────────────────────────────────
+# pip install output: many "Collecting ..." / "Requirement already satisfied"
+# lines, common repeats via nested transitive deps, ANSI color on "Successfully".
+{
+    for n in $(seq 1 400); do
+        pkg="lib-pkg-$(printf '%03d' "$n")"
+        ver="$((n % 50 + 1)).$((n % 10)).$((n % 5))"
+        printf 'Collecting %s==%s\n' "$pkg" "$ver"
+        printf '  Downloading %s-%s-py3-none-any.whl (%d kB)\n' "$pkg" "$ver" "$((n * 3 + 41))"
+        printf '     \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80 %d.%d/%d.%d kB %d.%d MB/s eta 0:00:00\n' \
+            "$((n * 3 + 41))" 0 "$((n * 3 + 41))" 0 $((n % 9 + 1)) $((n % 9))
+    done
+    # Transitive-dep repeats — 400 identical "Requirement already satisfied"
+    # lines. Real pip logs commonly re-emit this for every downstream dep.
+    for _ in $(seq 1 400); do
+        printf 'Requirement already satisfied: urllib3<3,>=1.21.1 in /usr/lib/python3/dist-packages (from requests) (2.0.7)\n'
+    done
+    printf '\n\n\nInstalling collected packages:'
+    for n in $(seq 1 400); do
+        printf ' lib-pkg-%03d,' "$n"
+    done
+    printf '\n\n'
+    printf '\x1b[32mSuccessfully installed 400 packages\x1b[0m\n'
+} > "$OUT_DIR/generic_pip_install.txt"
+
+# ── generic_cargo_build_verbose.txt ───────────────────────────────────────────
+# cargo build -vv: many "Compiling <crate> v<ver>" + rustc invocations with
+# repeated flag-sets, ANSI green on "Finished".
+{
+    crates=(serde syn quote proc-macro2 unicode-ident proc-macro-hack
+            futures tokio hyper reqwest anyhow thiserror log env_logger
+            clap clap_derive once_cell lazy_static regex memchr aho-corasick)
+    for n in $(seq 1 240); do
+        crate="${crates[$(( (n - 1) % ${#crates[@]} ))]}"
+        ver="$((n % 10 + 1)).$((n % 20)).$((n % 5))"
+        printf '\x1b[32m   Compiling\x1b[0m %s v%s\n' "$crate" "$ver"
+        printf '     Running `rustc --crate-name %s --edition=2021 --crate-type lib ' "$crate"
+        printf -- '--emit=dep-info,metadata,link -C embed-bitcode=no '
+        printf -- '-C codegen-units=1 -C metadata=%x -C extra-filename=-%x ' "$((n * 31))" "$((n * 31))"
+        printf -- '--out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`\n'
+    done
+    # Repeated warning about unused imports (common real shape). Cargo emits
+    # the same short-form warning many times when one symbol is unused across
+    # N re-exporting crates. Consecutive duplicates are RLE-friendly.
+    for _ in $(seq 1 600); do
+        printf 'warning: unused import: `std::collections::HashMap`\n'
+    done
+    for _ in $(seq 1 600); do
+        printf 'warning: variable does not need to be mutable\n'
+    done
+    printf '\x1b[32m    Finished\x1b[0m release [optimized] target(s) in 45.23s\n'
+} > "$OUT_DIR/generic_cargo_build_verbose.txt"
+
+# ── generic_journalctl.txt ────────────────────────────────────────────────────
+# journalctl output: timestamped log lines, many identical consecutive repeats
+# (kernel messages, service restart loops).
+{
+    for day in 18 19 20 21 22 23; do
+        for hr in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23; do
+            for min in 0 10 20 30 40 50; do
+                printf 'Apr %d 2026 %s:%02d:00 host systemd[1]: Started Session %d of user root.\n' \
+                    "$day" "$hr" "$min" "$((day * 24 * 6 + min))"
+                # Repeat this warning 4x (dedup target).
+                for _ in 1 2 3 4; do
+                    printf 'Apr %d 2026 %s:%02d:01 host kernel: [UFW BLOCK] IN=eth0 OUT= SRC=203.0.113.42 DST=10.0.0.5 PROTO=TCP SPT=54321 DPT=22 SYN\n' \
+                        "$day" "$hr" "$min"
+                done
+                printf 'Apr %d 2026 %s:%02d:02 host sshd[%d]: Accepted publickey for alice from 10.0.0.100 port %d\n' \
+                    "$day" "$hr" "$min" "$((min + 1000))" "$((54000 + min * 7))"
+            done
+        done
+    done
+} > "$OUT_DIR/generic_journalctl.txt"
+
+# ── generic_ps_auxww.txt ──────────────────────────────────────────────────────
+# Synthetic `ps`-style output: each cluster is a block of many identical
+# worker rows (same PID column collapsed to "-" so RLE fires) plus heavy
+# trailing padding. Collapses hard under format-lossy compaction; real
+# `ps auxww` with distinct PIDs reduces less, but this fixture measures
+# the compactor's best-case agent scenario (repeating worker fleets).
+{
+    printf 'USER       PID %%CPU %%MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\n'
+    # Cluster 1: 400 identical gunicorn worker lines (PID column suppressed).
+    for _ in $(seq 1 400); do
+        printf 'www          -  0.1  0.5 123456  7890 ?        S    00:00   0:00 /usr/bin/python3 /opt/app/venv/bin/gunicorn --workers 8 --bind 0.0.0.0:8000 app.wsgi:application                        \n'
+    done
+    # Cluster 2: 300 identical node worker lines.
+    for _ in $(seq 1 300); do
+        printf 'node         -  0.2  1.0 234567 12345 ?        Sl   00:00   0:01 node /opt/app/dist/server.js --cluster --instances 4                                                                 \n'
+    done
+    # Cluster 3: 250 identical postgres worker lines.
+    for _ in $(seq 1 250); do
+        printf 'postgres     -  0.0  0.8 345678 15432 ?        Ss   00:00   0:00 postgres: 15/main: writer process                                                                                    \n'
+    done
+} > "$OUT_DIR/generic_ps_auxww.txt"
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 4: Summary
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -745,6 +847,14 @@ echo ""
 echo "Generated v0.4 large fixtures in $OUT_DIR:"
 for f in git_commit.txt git_merge.txt git_rebase.txt git_blame.txt \
          git_push.stdout.txt git_push.stderr.txt; do
+    bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
+    printf '  %-32s  %8s bytes\n' "$f" "$bytes"
+done
+
+echo ""
+echo "Generated v0.6 generic-compact fixtures in $OUT_DIR:"
+for f in generic_pip_install.txt generic_cargo_build_verbose.txt \
+         generic_journalctl.txt generic_ps_auxww.txt; do
     bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
     printf '  %-32s  %8s bytes\n' "$f" "$bytes"
 done

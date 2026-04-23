@@ -31,6 +31,7 @@ const tsc = @import("tsc");
 const go_test = @import("go_test");
 const docker_logs = @import("docker_logs");
 const npm_install = @import("npm_install");
+const generic_compact = @import("generic_compact");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
@@ -418,8 +419,19 @@ fn runWrapper(
     }
 
     if (!std.mem.eql(u8, cmd_basename, "git") or argv.len < 2) {
-        // Non-git outer command: passthrough both streams verbatim.
-        try writer.writeAll(stdout_slice);
+        // Non-git outer command: size-gated generic compactor on stdout
+        // when no bespoke arm claimed it AND output exceeds threshold.
+        // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and generic_compact.matches(stdout_slice)) {
+            generic_compact.apply(allocator, stdout_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return if (exit_code != 0) exit_code else 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }

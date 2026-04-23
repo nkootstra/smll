@@ -1504,3 +1504,182 @@ test "smoke: npm install keeps WARN + summary, drops notice (default)" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "npm notice") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "looking for funding") == null);
 }
+
+// ---------------------------------------------------------------------------
+// v0.6 generic compactor — dispatch and threshold behavior.
+// Generic compactor fires only when (a) no bespoke arm claimed the command
+// and (b) stdout exceeds 64 KiB. Its distinctive marker is ASCII "  (x<N>)"
+// appended to RLE-collapsed lines (bespoke docker_logs uses unicode "(×").
+// ---------------------------------------------------------------------------
+
+fn buildLargeRepeatedPayload(
+    allocator: std.mem.Allocator,
+    line: []const u8,
+    total_bytes: usize,
+) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    while (buf.items.len < total_bytes) {
+        try buf.appendSlice(allocator, line);
+        try buf.append(allocator, '\n');
+    }
+    return buf.toOwnedSlice(allocator);
+}
+
+test "generic-compact: unknown command over 64 KiB triggers generic compactor (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // 100 KiB of identical lines — unknown basename "xxunknownxx" has no
+    // bespoke arm, so the generic compactor must fire and RLE them.
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 100 * 1024);
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"xxunknownxx"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Generic compactor ran: output is dramatically smaller + carries ASCII (xN) marker.
+    try std.testing.expect(result.stdout.len < payload.len / 10);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "  (x") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "agent-log entry ok") != null);
+}
+
+test "generic-compact: unknown command with SMLL_LOSSLESS=1 bypasses compactor" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 100 * 1024);
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"xxunknownxx"},
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // SMLL_LOSSLESS=1 bypasses: byte-identical passthrough.
+    try std.testing.expectEqualSlices(u8, payload, result.stdout);
+}
+
+test "generic-compact: unknown command under 64 KiB passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // 32 KiB of identical lines — below the 64 KiB threshold, so matches()
+    // returns false and the pipeline is skipped even though content is RLE-ready.
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 32 * 1024);
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"xxunknownxx"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Below threshold → passthrough, byte-identical.
+    try std.testing.expectEqualSlices(u8, payload, result.stdout);
+}
+
+test "generic-compact: known bespoke command (jest) does NOT reach generic compactor" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // 100 KiB of identical lines through a fake "jest" — bespoke arm must
+    // claim the command. The key invariant: the generic ASCII (xN) marker
+    // must NOT appear, which would mean generic fired. Whether the bespoke
+    // filter shrinks this specific payload is not the point (jest.matches()
+    // only triggers on Test-Suites banners), but the jest arm still claims
+    // the command and returns before the generic compactor block runs.
+    const payload = try buildLargeRepeatedPayload(
+        allocator,
+        "PASS  src/utils/format.test.ts (2.3s)",
+        100 * 1024,
+    );
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "jest", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"jest"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Generic marker must not appear — that is the dispatch invariant.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "  (x") == null);
+}
+
+test "generic-compact: dispatch invariant — bespoke commands never reach generic compactor" {
+    const allocator = std.testing.allocator;
+
+    // Every (basename, argv) combination covered by a bespoke v0.4/v0.5/v0.6
+    // dispatch arm in src/main.zig. If any of these leaks to the generic
+    // compactor on a 100 KiB identical-line fixture, the ASCII (xN) marker
+    // would appear (generic compactor's distinctive RLE output). Bare
+    // `cargo` and `go` are intentionally NOT bespoke — they only route to
+    // bespoke arms when argv[1] == "test", which is why this is keyed on
+    // full argv rather than basename alone.
+    const Invocation = struct { name: []const u8, argv: []const []const u8 };
+    const cases = [_]Invocation{
+        .{ .name = "rg", .argv = &.{"rg"} },
+        .{ .name = "find", .argv = &.{"find"} },
+        .{ .name = "tree", .argv = &.{"tree"} },
+        .{ .name = "bun", .argv = &.{"bun"} },
+        .{ .name = "pytest", .argv = &.{"pytest"} },
+        .{ .name = "jest", .argv = &.{"jest"} },
+        .{ .name = "vitest", .argv = &.{"vitest"} },
+        .{ .name = "tsc", .argv = &.{"tsc"} },
+        .{ .name = "cargo", .argv = &.{ "cargo", "test" } },
+        .{ .name = "go", .argv = &.{ "go", "test" } },
+        .{ .name = "ls", .argv = &.{"ls"} },
+        .{ .name = "docker", .argv = &.{"docker"} },
+        .{ .name = "kubectl", .argv = &.{"kubectl"} },
+        .{ .name = "gh", .argv = &.{"gh"} },
+        .{ .name = "ps", .argv = &.{"ps"} },
+        .{ .name = "systemctl", .argv = &.{"systemctl"} },
+        .{ .name = "lsof", .argv = &.{"lsof"} },
+        .{ .name = "npm", .argv = &.{"npm"} },
+        .{ .name = "pnpm", .argv = &.{"pnpm"} },
+        .{ .name = "yarn", .argv = &.{"yarn"} },
+        .{ .name = "brew", .argv = &.{"brew"} },
+    };
+
+    // Pick a payload that no bespoke filter will interpret as actionable.
+    // 100 KiB of a generic log line, consecutive identical → trivially
+    // RLE-collapsible IF generic ran. No "FAIL", no "error TS", no "---".
+    const payload = try buildLargeRepeatedPayload(allocator, "log entry ok", 100 * 1024);
+    defer allocator.free(payload);
+
+    for (cases) |case| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const bin_dir = try setupFakeTool(allocator, tmp.dir, case.name, payload);
+        defer allocator.free(bin_dir);
+
+        var result = try runSmllWrapperEnv(allocator, bin_dir, case.argv, &.{});
+        defer result.deinit(allocator);
+
+        // Generic marker must not appear for any bespoke command.
+        std.testing.expect(std.mem.find(u8, result.stdout, "  (x") == null) catch |err| {
+            std.debug.print(
+                "dispatch invariant violated: command='{s}' reached generic compactor\n",
+                .{case.name},
+            );
+            return err;
+        };
+    }
+}
