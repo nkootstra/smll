@@ -314,6 +314,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
     });
 
+    const curl_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/curl_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
     const kubectl_compact_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/kubectl_compact.zig"),
         .target = target,
@@ -430,6 +436,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("ls_compact", ls_compact_mod);
     exe_mod.addImport("find_compact", find_compact_mod);
     exe_mod.addImport("du_compact", du_compact_mod);
+    exe_mod.addImport("curl_compact", curl_compact_mod);
     exe_mod.addImport("kubectl_compact", kubectl_compact_mod);
     exe_mod.addImport("cargo_test", cargo_test_mod);
     exe_mod.addImport("pytest", pytest_mod);
@@ -498,6 +505,7 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("ls_compact", ls_compact_mod);
     release_mod.addImport("find_compact", find_compact_mod);
     release_mod.addImport("du_compact", du_compact_mod);
+    release_mod.addImport("curl_compact", curl_compact_mod);
     release_mod.addImport("kubectl_compact", kubectl_compact_mod);
     release_mod.addImport("cargo_test", cargo_test_mod);
     release_mod.addImport("pytest", pytest_mod);
@@ -595,6 +603,9 @@ pub fn build(b: *std.Build) void {
 
     const du_compact_tests = b.addTest(.{ .root_module = du_compact_mod });
     const run_du_compact_tests = b.addRunArtifact(du_compact_tests);
+
+    const curl_compact_tests = b.addTest(.{ .root_module = curl_compact_mod });
+    const run_curl_compact_tests = b.addRunArtifact(curl_compact_tests);
 
     const kubectl_compact_tests = b.addTest(.{ .root_module = kubectl_compact_mod });
     const run_kubectl_compact_tests = b.addRunArtifact(kubectl_compact_tests);
@@ -818,6 +829,20 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/npm_install.txt"),
     });
 
+    // v0.6 curl_compact fixtures — stdout + stderr pairs.
+    integration_mod.addAnonymousImport("fixture_curl_v_example_stderr", .{
+        .root_source_file = b.path("tests/fixtures/curl_v_example.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_curl_v_example_stdout", .{
+        .root_source_file = b.path("tests/fixtures/curl_v_example.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_curl_vvv_example_stderr", .{
+        .root_source_file = b.path("tests/fixtures/large/curl_vvv_example.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_curl_vvv_example_stdout", .{
+        .root_source_file = b.path("tests/fixtures/large/curl_vvv_example.stdout.txt"),
+    });
+
     const integration_tests = b.addTest(.{ .root_module = integration_mod });
     const run_integration_tests = b.addRunArtifact(integration_tests);
     run_integration_tests.step.dependOn(&exe.step);
@@ -849,6 +874,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ls_compact_tests.step);
     test_step.dependOn(&run_find_compact_tests.step);
     test_step.dependOn(&run_du_compact_tests.step);
+    test_step.dependOn(&run_curl_compact_tests.step);
     test_step.dependOn(&run_kubectl_compact_tests.step);
     test_step.dependOn(&run_cargo_test_tests.step);
     test_step.dependOn(&run_pytest_tests.step);

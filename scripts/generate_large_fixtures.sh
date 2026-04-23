@@ -850,6 +850,73 @@ git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
     done
 } > "$OUT_DIR/du_sh.txt"
 
+# ── curl_vvv_example.stderr.txt + curl_vvv_example.stdout.txt (large) ─────────
+# Synthetic `curl -vvv` output over a redirect chain + multiplexed HTTP/2
+# session. Stderr heavy on TLS/schannel/ALPN chatter + a PEM cert block to
+# exercise drop logic. Stdout carries a realistic JSON body.
+{
+    for n in $(seq 1 30); do
+        cat <<EOF
+*   Trying 10.0.0.$((n % 255 + 1)):443...
+* Connected to api.example.com (10.0.0.$((n % 255 + 1))) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/$n HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:0$((n % 10)) GMT
+< x-request-id: req-${n}
+<
+EOF
+    done
+    # One PEM cert block dump at the end to exercise the BEGIN/END drop path.
+    cat <<'EOF'
+* Server certificate chain:
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIUJYJn0qRkWZA5YDEmEHKG5tJX+q4wDQYJKoZIhvcNAQEL
+BQAwRTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExETAPBgNVBAoM
+CEV4YW1wbGUxDjAMBgNVBAMMBVJvb3QxMB4XDTI0MDEwMTAwMDAwMFoXDTM0MDEw
+MTAwMDAwMFowRTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExETAP
+BgNVBAoMCEV4YW1wbGUxDjAMBgNVBAMMBVJvb3QxMIICIjANBgkqhkiG9w0BAQEF
+AAOCAg8AMIICCgKCAgEAz4ftrMELxpz+fXhVfpCwJ5V4j+0H8wKLOoE4jJZP7vWj
+-----END CERTIFICATE-----
+EOF
+} > "$OUT_DIR/curl_vvv_example.stderr.txt"
+
+{
+    for n in $(seq 1 30); do
+        printf '{"id":%d,"name":"resource_%d","status":"ok"}\n' "$n" "$n"
+    done
+} > "$OUT_DIR/curl_vvv_example.stdout.txt"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 4: Summary
 # ═══════════════════════════════════════════════════════════════════════════════

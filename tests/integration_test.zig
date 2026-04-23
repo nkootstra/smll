@@ -1645,6 +1645,7 @@ test "generic-compact: dispatch invariant — bespoke commands never reach gener
         .{ .name = "tsc", .argv = &.{"tsc"} },
         .{ .name = "cargo", .argv = &.{ "cargo", "test" } },
         .{ .name = "go", .argv = &.{ "go", "test" } },
+        .{ .name = "curl", .argv = &.{ "curl", "-v" } },
         .{ .name = "ls", .argv = &.{"ls"} },
         .{ .name = "du", .argv = &.{"du"} },
         .{ .name = "docker", .argv = &.{"docker"} },
@@ -1835,4 +1836,124 @@ test "smoke: du with SMLL_LOSSLESS=1 passes through unchanged" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, du_fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 curl_compact — two-stream (stdout+stderr) verbose-flag dispatch.
+// ---------------------------------------------------------------------------
+
+const curl_small_stderr = @embedFile("fixture_curl_v_example_stderr");
+const curl_small_stdout = @embedFile("fixture_curl_v_example_stdout");
+const curl_large_stderr = @embedFile("fixture_curl_vvv_example_stderr");
+const curl_large_stdout = @embedFile("fixture_curl_vvv_example_stdout");
+
+/// Fake `curl` that emits stdout_fixture on stdout and stderr_fixture on
+/// stderr — mirrors curl's two-stream shape (body on stdout, trace on stderr).
+fn setupFakeCurl(
+    allocator: std.mem.Allocator,
+    tmp_dir: std.Io.Dir,
+    stdout_fixture: []const u8,
+    stderr_fixture: []const u8,
+) ![]u8 {
+    const io = std.testing.io;
+    try tmp_dir.writeFile(io, .{ .sub_path = "curl_stdout.txt", .data = stdout_fixture });
+    try tmp_dir.writeFile(io, .{ .sub_path = "curl_stderr.txt", .data = stderr_fixture });
+    const stdout_path = try tmp_dir.realPathFileAlloc(io, "curl_stdout.txt", allocator);
+    defer allocator.free(stdout_path);
+    const stderr_path = try tmp_dir.realPathFileAlloc(io, "curl_stderr.txt", allocator);
+    defer allocator.free(stderr_path);
+
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\n/bin/cat {s}\n/bin/cat {s} >&2\n",
+        .{ stdout_path, stderr_path },
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp_dir, "curl", script);
+
+    return try tmp_dir.realPathFileAlloc(io, ".", allocator);
+}
+
+test "smoke: curl -v drops TLS chatter, keeps headers + body (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_small_stdout, curl_small_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-v", "https://example.com" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Kept
+    try std.testing.expect(std.mem.find(u8, result.stdout, "< HTTP/2 200") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "> GET / HTTP/2") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Example Domain") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---") != null);
+    // Dropped
+    try std.testing.expect(std.mem.find(u8, result.stdout, "TLSv1.3") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "issuer:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "SSL certificate verify") == null);
+}
+
+test "smoke: curl large -vvv fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_large_stdout, curl_large_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-vvv", "https://api.example.com" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const raw_total = curl_large_stderr.len + curl_large_stdout.len;
+    const reduction = (raw_total - result.stdout.len) * 100 / raw_total;
+    try std.testing.expect(reduction >= 60);
+    // No cert material survives.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "BEGIN CERTIFICATE") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "MIIFaz") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
+    // Every request's status line survives.
+    try std.testing.expect(std.mem.count(u8, result.stdout, "< HTTP/2 200") == 30);
+}
+
+test "smoke: curl without -v passes through (no dispatch)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_small_stdout, curl_small_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "https://example.com" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // No headers/body separator — dispatch arm didn't engage.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---") == null);
+    // Body is on stdout verbatim.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Example Domain") != null);
+}
+
+test "smoke: curl -v with SMLL_LOSSLESS=1 passes both streams through byte-identical" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_small_stdout, curl_small_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "curl", "-v", "https://example.com" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, curl_small_stdout, result.stdout);
+    try std.testing.expectEqualSlices(u8, curl_small_stderr, result.stderr);
 }

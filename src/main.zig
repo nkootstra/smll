@@ -25,6 +25,7 @@ const docker_compact = @import("docker_compact");
 const ls_compact = @import("ls_compact");
 const find_compact = @import("find_compact");
 const du_compact = @import("du_compact");
+const curl_compact = @import("curl_compact");
 const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
@@ -340,6 +341,25 @@ fn runWrapper(
         }
         try writer.writeAll(stdout_slice);
         try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // curl -v / -vv / -vvv wrapper — LOSSY compaction by default (v0.6).
+    // Drops TLS handshake chatter and cert dumps from stderr; preserves
+    // status line, request/response headers, and body. Non-standard filter:
+    // matches() inspects STDERR, not stdout. Set SMLL_LOSSLESS=1 to bypass.
+    if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv)) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and curl_compact.matches(stderr_slice)) {
+            curl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
+        }
         return exit_code;
     }
 
