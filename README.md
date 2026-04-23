@@ -55,7 +55,8 @@ SMLL_LOSSLESS=1 smll docker ps      # full columnar table preserved
 | Category | Commands | Default behavior |
 |---|---|---|
 | git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | noise strip |
-| search / listing | `rg`, `tree`, `find` / `find -ls` | noise strip |
+| search / listing | `rg`, `tree` | noise strip |
+| filesystem walk | `find` / `find -ls` | strip metadata columns; collapse ≥3 paths/parent to count |
 | columnar tables | `docker ps`, `kubectl get`, `gh pr/issue list`, `ps`, `ls -l`, `bun pm ls` | column/padding collapse |
 | disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
 | network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs |

@@ -1712,10 +1712,11 @@ test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < find_ls_fixture.len);
-    // Paths survive; directory marker appended.
+    // 3 entries in "." (./src, ./README.md, ./tests) collapse to a count;
+    // 2 entries in "./src" (./src/main.zig, ./src/filter.zig) survive individually.
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./README.md") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/filter.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries)") != null);
     // Metadata gone.
     try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);

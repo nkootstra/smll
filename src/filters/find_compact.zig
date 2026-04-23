@@ -7,14 +7,17 @@ const Writer = std.Io.Writer;
 //
 // `find -ls` emits columns: inode, blocks, mode, nlink, user, group,
 // size, month, day, time/year, path. All but the path are dropped.
-// Directory marker (trailing "/") is added when the mode starts with
-// "d", mirroring `ls -F` conventions used by ls_compact.
+// Paths sharing a parent directory collapse to a single
+// "<dir>/ (N entries)" line when ≥3 share it; lone files (1-2 per
+// dir) are emitted individually. Directory-typed entries (mode starts
+// with 'd') get the trailing slash even when emitted standalone.
 //
 // Contract:
 //   • Lossy — inode, mode bits, ownership, size, timestamps gone.
-//   • Path list preserved in input order. Paths with embedded
-//     whitespace are preserved verbatim.
-//   • Typical reduction ~70-85% on GNU/BSD `find -ls` output.
+//     Paths under a parent dir collapse to a count when ≥3 share it.
+//   • Lone paths (≤2 per parent) preserved verbatim.
+//   • Typical reduction ~95% on GNU/BSD `find -ls` output of a
+//     populated directory tree.
 //
 // Detection (matches):
 //   • First non-empty line: leading digit(s), followed by at least 10
@@ -50,29 +53,81 @@ fn isFindLsLine(line: []const u8) bool {
     return extractPath(line) != null;
 }
 
+const Entry = struct {
+    path: []const u8,
+    parent: []const u8,
+    is_dir: bool,
+};
+
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    _ = allocator;
     _ = stderr;
     if (stdout.len == 0) return;
 
+    var entries: std.ArrayList(Entry) = .empty;
+    defer entries.deinit(allocator);
+
     var lines = std.mem.splitScalar(u8, stdout, '\n');
-    var first = true;
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         if (!isFindLsLine(line)) continue;
         const path = extractPath(line) orelse continue;
         if (path.len == 0) continue;
-        if (!first) try writer.writeByte('\n');
-        first = false;
-        try writer.writeAll(path);
-        // Directory marker: mode is field 3 (inode, blocks, mode). If
-        // mode starts with 'd', append '/'. extractMode returns the
-        // third whitespace-separated token.
-        if (extractMode(line)) |mode| {
-            if (mode.len > 0 and mode[0] == 'd') try writer.writeByte('/');
+        const is_dir = blk: {
+            if (extractMode(line)) |mode| {
+                break :blk (mode.len > 0 and mode[0] == 'd');
+            }
+            break :blk false;
+        };
+        try entries.append(allocator, .{
+            .path = path,
+            .parent = parentDir(path),
+            .is_dir = is_dir,
+        });
+    }
+
+    if (entries.items.len == 0) return;
+
+    std.sort.insertion(Entry, entries.items, {}, struct {
+        fn lessThan(_: void, a: Entry, b: Entry) bool {
+            const cmp = std.mem.order(u8, a.parent, b.parent);
+            if (cmp != .eq) return cmp == .lt;
+            return std.mem.order(u8, a.path, b.path) == .lt;
         }
+    }.lessThan);
+
+    var first = true;
+    var i: usize = 0;
+    while (i < entries.items.len) {
+        const parent = entries.items[i].parent;
+        var j = i + 1;
+        while (j < entries.items.len and std.mem.eql(u8, entries.items[j].parent, parent)) : (j += 1) {}
+        const count = j - i;
+        if (count >= 3) {
+            if (!first) try writer.writeByte('\n');
+            first = false;
+            try writer.writeAll(parent);
+            try writer.print("/ ({d} entries)", .{count});
+        } else {
+            for (entries.items[i..j]) |e| {
+                if (!first) try writer.writeByte('\n');
+                first = false;
+                try writer.writeAll(e.path);
+                if (e.is_dir) try writer.writeByte('/');
+            }
+        }
+        i = j;
     }
     if (!first) try writer.writeByte('\n');
+}
+
+/// Parent directory of a path. "./src/main.zig" → "./src",
+/// "./README.md" → ".", "/etc/hosts" → "/etc", "foo" → ".".
+fn parentDir(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
+        if (idx == 0) return "/";
+        return path[0..idx];
+    }
+    return ".";
 }
 
 /// Skip 10 whitespace-separated fields (inode, blocks, mode, nlink,
@@ -133,7 +188,7 @@ test "matches: mixed lines rejected" {
     try std.testing.expect(!matches(bad));
 }
 
-test "apply: GNU find -ls small fixture → path list" {
+test "apply: small input — all groups <3 → emit per-path sorted" {
     const input =
         "2055938    0 drwxr-xr-x   2 user staff 64 Apr 23 12:34 ./src\n" ++
         "2055939    8 -rw-r--r--   1 user staff 421 Apr 23 12:34 ./src/main.zig\n" ++
@@ -141,8 +196,10 @@ test "apply: GNU find -ls small fixture → path list" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
+    // Sort puts "." parent before "./src" parent; within "." group,
+    // "./README.md" < "./src" lexicographically.
     try std.testing.expectEqualStrings(
-        "./src/\n./src/main.zig\n./README.md\n",
+        "./README.md\n./src/\n./src/main.zig\n",
         out.written(),
     );
 }
@@ -170,6 +227,18 @@ test "apply: BSD-style indented output" {
     try std.testing.expectEqualStrings("./dir/\n", out.written());
 }
 
+test "apply: ≥3 entries in same parent collapse to count" {
+    const input =
+        "2055938 0 -rw-r--r-- 1 u s 1 Apr 1 00:00 ./a.txt\n" ++
+        "2055939 0 -rw-r--r-- 1 u s 1 Apr 1 00:00 ./b.txt\n" ++
+        "2055940 0 -rw-r--r-- 1 u s 1 Apr 1 00:00 ./c.txt\n" ++
+        "2055941 0 -rw-r--r-- 1 u s 1 Apr 1 00:00 ./d.txt\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expectEqualStrings("./ (4 entries)\n", out.written());
+}
+
 test "apply: small fixture reduces output and keeps paths" {
     const fixture = @embedFile("fixture_find_ls");
     var out = Writer.Allocating.init(std.testing.allocator);
@@ -177,13 +246,15 @@ test "apply: small fixture reduces output and keeps paths" {
     try apply(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < fixture.len);
+    // Fixture has 5 entries: 3 in "." (./src, ./README.md, ./tests) → collapse;
+    // 2 in "./src" (./src/main.zig, ./src/filter.zig) → emit individually.
     try std.testing.expect(std.mem.find(u8, got, "./src/main.zig") != null);
-    try std.testing.expect(std.mem.find(u8, got, "./src/") != null);
-    try std.testing.expect(std.mem.find(u8, got, "./README.md") != null);
+    try std.testing.expect(std.mem.find(u8, got, "./src/filter.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "./ (3 entries)") != null);
     try std.testing.expect(std.mem.find(u8, got, "user") == null);
 }
 
-test "apply: 60% reduction on synthetic fixture" {
+test "apply: large same-parent fixture collapses (≥95% reduction)" {
     const alloc = std.testing.allocator;
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(alloc);
@@ -200,6 +271,15 @@ test "apply: 60% reduction on synthetic fixture" {
     defer out.deinit();
     try apply(alloc, buf.items, &.{}, &out.writer);
     const got = out.written();
+    try std.testing.expectEqualStrings("./src/ (50 entries)\n", got);
     const reduction = (buf.items.len - got.len) * 100 / buf.items.len;
-    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(reduction >= 95);
+}
+
+test "parentDir basic cases" {
+    try std.testing.expectEqualStrings(".", parentDir("./README.md"));
+    try std.testing.expectEqualStrings("./src", parentDir("./src/main.zig"));
+    try std.testing.expectEqualStrings("/etc", parentDir("/etc/hosts"));
+    try std.testing.expectEqualStrings("/", parentDir("/etc"));
+    try std.testing.expectEqualStrings(".", parentDir("foo"));
 }
