@@ -92,7 +92,13 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
         if (!shouldKeep(trimmed)) continue;
-        try out.appendSlice(allocator, trimmed);
+        // Strip === padding from banner lines
+        const stripped = std.mem.trim(u8, trimmed, "= ");
+        if (stripped.len > 0) {
+            try out.appendSlice(allocator, stripped);
+        } else {
+            try out.appendSlice(allocator, trimmed);
+        }
         try out.append(allocator, '\n');
         kept.* += 1;
     }

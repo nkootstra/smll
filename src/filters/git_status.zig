@@ -46,6 +46,104 @@ const Section = enum {
 };
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    // Phase 1: generate standard output into a buffer
+    var buf = Writer.Allocating.init(allocator);
+    defer buf.deinit();
+    try applyInner(allocator, stdout, stderr, &buf.writer);
+
+    // Phase 2: group consecutive entries with the same sigil and parent dir
+    try groupDirectories(buf.written(), writer);
+}
+
+const DIR_GROUP_THRESHOLD: usize = 3;
+
+fn groupDirectories(output: []const u8, writer: *Writer) !void {
+    var all_lines: [4096][]const u8 = undefined;
+    var line_count: usize = 0;
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (line_count >= all_lines.len) break;
+        all_lines[line_count] = line;
+        line_count += 1;
+    }
+
+    var i: usize = 0;
+    while (i < line_count) {
+        const line = all_lines[i];
+        const parsed = parseSigilLine(line);
+        if (parsed == null) {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            i += 1;
+            continue;
+        }
+        const p = parsed.?;
+        const dir = parentDir(p.path);
+
+        if (dir.len == 0) {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            i += 1;
+            continue;
+        }
+
+        var run_end = i + 1;
+        while (run_end < line_count) {
+            const next_parsed = parseSigilLine(all_lines[run_end]) orelse break;
+            const next_dir = parentDir(next_parsed.path);
+            if (!std.mem.eql(u8, p.sigil, next_parsed.sigil) or
+                !std.mem.eql(u8, dir, next_dir)) break;
+            run_end += 1;
+        }
+        const run_len = run_end - i;
+
+        if (run_len >= DIR_GROUP_THRESHOLD) {
+            try writer.writeAll(p.sigil);
+            try writer.writeAll(" ");
+            try writer.writeAll(dir);
+            try writer.writeAll(" ×"); try writer.print("{d}\n", .{run_len});
+            i = run_end;
+        } else {
+            while (i < run_end) {
+                try writer.writeAll(all_lines[i]);
+                try writer.writeByte('\n');
+                i += 1;
+            }
+        }
+    }
+}
+
+const SigilLine = struct { sigil: []const u8, path: []const u8 };
+
+fn parseSigilLine(line: []const u8) ?SigilLine {
+    if (line.len < 3) return null;
+    if ((line[0] == 'A' or line[0] == 'S' or line[0] == 'D' or
+        line[0] == 'M' or line[0] == 'd' or line[0] == '?' or
+        line[0] == 'R') and line[1] == ' ')
+    {
+        return .{ .sigil = line[0..1], .path = line[2..] };
+    }
+    if (line.len >= 4 and line[2] == ' ') {
+        const s = line[0..2];
+        if (std.mem.eql(u8, s, "UU") or std.mem.eql(u8, s, "AU") or
+            std.mem.eql(u8, s, "UA") or std.mem.eql(u8, s, "DU") or
+            std.mem.eql(u8, s, "UD"))
+        {
+            return .{ .sigil = s, .path = line[3..] };
+        }
+    }
+    return null;
+}
+
+fn parentDir(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
+        return path[0 .. idx + 1];
+    }
+    return "";
+}
+
+fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
     const input = stdout;

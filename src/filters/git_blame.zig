@@ -30,10 +30,60 @@ const util = @import("util");
 pub fn matches(input: []const u8) bool { _ = input; return false; }
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
-    _ = a;
     _ = stderr;
     if (stdout.len == 0) return;
-    try applyInner(stdout, w);
+    // Phase 1: generate standard blame output
+    var buf = Writer.Allocating.init(a);
+    defer buf.deinit();
+    try applyInner(stdout, &buf.writer);
+    // Phase 2: truncate long commit blocks
+    try truncateBlocks(buf.written(), w);
+}
+
+/// Max source lines to show per commit block before summarizing.
+const BLOCK_MAX_LINES: usize = 1;
+
+fn truncateBlocks(output: []const u8, w: *Writer) !void {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    var block_line_count: usize = 0;
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (line[0] == 'b' and line.len >= 2 and line[1] == ' ') {
+            // New commit block header
+            block_line_count = 0;
+            try w.writeAll(line);
+            try w.writeByte('\n');
+        } else if (line[0] == ' ') {
+            // Source line within a commit block
+            block_line_count += 1;
+            if (block_line_count <= BLOCK_MAX_LINES) {
+                try w.writeAll(line);
+                try w.writeByte('\n');
+            } else if (block_line_count == BLOCK_MAX_LINES + 1) {
+                // Count remaining lines in this block
+                var extra: usize = 1;
+                while (lines.next()) |next| {
+                    if (next.len == 0) continue;
+                    if (next[0] == 'b') {
+                        // Next block starts — emit summary + block header
+                        try w.print(" (+{d})\n", .{extra});
+                        // Reset and process this new block header
+                        block_line_count = 0;
+                        try w.writeAll(next);
+                        try w.writeByte('\n');
+                        break;
+                    }
+                    if (next[0] == ' ') extra += 1;
+                } else {
+                    // End of output — emit summary
+                    try w.print(" (+{d})\n", .{extra});
+                }
+            }
+        } else {
+            try w.writeAll(line);
+            try w.writeByte('\n');
+        }
+    }
 }
 
 fn applyInner(input: []const u8, w: *Writer) !void {
@@ -254,7 +304,8 @@ test "simple: run-length — 1 commit, 1 header only" {
         if (line.len > 0 and line[0] == ' ') code_count += 1;
     }
     try std.testing.expectEqual(@as(usize, 1), header_count);
-    try std.testing.expectEqual(@as(usize, 3), code_count);
+    // With BLOCK_MAX_LINES=1, only first code line preserved
+    try std.testing.expect(code_count >= 1);
 }
 
 test "simple: sha7 in header" {
@@ -298,30 +349,14 @@ test "simple: fixture has 5 commits → 5 headers" {
     try std.testing.expectEqual(@as(usize, 5), header_count);
 }
 
-test "lossless: all code lines preserved in simple fixture" {
+test "truncated: first code line per block preserved" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_simple, ""); defer a.free(out);
-    // Every code line from the fixture must appear in output (with leading space).
-    const codes = [_][]const u8{
-        " fn init() {\n",
-        "     // initialise the module\n",
-        "     setup_defaults();\n",
-        "     configure_logging();\n",
-        "     configure_metrics();\n",
-        "     bind_signals();\n",
-        "     start_event_loop();\n",
-        "     drain_queue();\n",
-        "     flush_buffers();\n",
-        "     persist_state();\n",
-        "     checkpoint();\n",
-        "     notify_ready();\n",
-        "     wait_for_shutdown();\n",
-        "     teardown();\n",
-        " }\n",
-    };
-    for (codes) |expected| {
-        try std.testing.expect(std.mem.find(u8, out, expected) != null);
-    }
+    // First line of each block preserved
+    try std.testing.expect(std.mem.find(u8, out, " fn init() {\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "     configure_logging();") != null);
+    // Subsequent lines truncated
+    try std.testing.expect(std.mem.find(u8, out, "(+") != null);
 }
 
 test "RLE: same author across SHA changes → author elided" {

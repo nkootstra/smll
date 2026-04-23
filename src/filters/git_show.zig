@@ -30,11 +30,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     _ = stderr;
     const input = stdout;
     const diff_start = findDiffStart(input) orelse {
-        return git_log.apply(allocator, input, &.{}, writer);
+        return git_log.applyCompact(allocator, input, &.{}, writer);
     };
 
     const header_end = stripTrailingBlankLines(input[0..diff_start]);
-    try git_log.apply(allocator, input[0..header_end], &.{}, writer);
+    try git_log.applyCompact(allocator, input[0..header_end], &.{}, writer);
     try writer.writeAll("\n");
     try git_diff.apply(allocator, input[diff_start..], &.{}, writer);
 }
@@ -101,11 +101,12 @@ test "matches: empty input returns false" {
     try std.testing.expect(!matches(""));
 }
 
-test "apply: emits c sigil with sha7 on simple show" {
+test "apply: emits compact sha7 + subject header on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
+    // Compact format: sha7 + subject on one line
+    try std.testing.expect(std.mem.find(u8, out, "95cbeda feat: add a.txt with one line\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37") == null);
 }
 
@@ -118,11 +119,12 @@ test "apply: no Author/Date labels on simple show" {
     try std.testing.expect(std.mem.find(u8, out, "@example.com") == null);
 }
 
-test "apply: emits : sigil for subject on simple show" {
+test "apply: compact format omits subject/body sigils on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, ": feat: add a.txt with one line\n") != null);
+    // Subject is on the sha7 line, no separate : sigil line
+    try std.testing.expect(std.mem.find(u8, out, "feat: add a.txt with one line") != null);
 }
 
 test "apply: drops index line in diff section on simple show" {
@@ -151,25 +153,28 @@ test "apply: emits @ hunk sigil on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@0,0|1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@0\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "+line1") != null);
 }
 
-test "apply: emits : sigil for body and preserves content on body show" {
+test "apply: compact format drops body text on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, ": feat: extend a.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, ": This body explains why we added a second line.\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, ": It spans multiple lines and contains punctuation.\n") != null);
+    // Subject preserved in compact header
+    try std.testing.expect(std.mem.find(u8, out, "feat: extend a.txt") != null);
+    // Body is dropped in compact mode
+    try std.testing.expect(std.mem.find(u8, out, "This body explains") == null);
+    // Diff is still present
+    try std.testing.expect(std.mem.find(u8, out, "d a.txt") != null);
 }
 
 test "apply: emits @ hunk and + lines on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@1|1,2\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, " line1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1\n") != null);
+    // Context lines dropped; only + lines preserved
     try std.testing.expect(std.mem.find(u8, out, "+line2") != null);
 }
 

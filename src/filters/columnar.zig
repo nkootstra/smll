@@ -105,9 +105,14 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
                 f.len > 0 and
                 std.mem.eql(u8, f, prev_fields.items[field_idx]))
             {
-                try writer.writeByte(SIGIL);
+                // Elided field: emit nothing (gap between spaces signals "same")
             } else {
-                try writer.writeAll(f);
+                // For the last field, truncate absolute paths to basename
+                if (field_idx == cur_fields.items.len - 1) {
+                    try writeTruncatedLastField(writer, f);
+                } else {
+                    try writer.writeAll(f);
+                }
             }
         }
 
@@ -124,6 +129,38 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         cur_fields = tmp;
         have_prev = true;
     }
+}
+
+/// Truncate path portions in the last field to basename.
+/// "0:44.31 /Applications/Visual Studio Code.app/.../Electron" → "0:44.31 Electron"
+fn writeTruncatedLastField(writer: *Writer, field: []const u8) !void {
+    // Only truncate if the field starts with '/' (absolute command path)
+    // or if it contains a space followed by '/' (time + absolute path)
+    if (field.len > 0 and field[0] == '/') {
+        // Direct absolute path
+        if (std.mem.findScalarLast(u8, field, '/')) |last_slash| {
+            const tail = field[last_slash + 1 ..];
+            if (tail.len > 0) {
+                try writer.writeAll(tail);
+                return;
+            }
+        }
+    } else if (std.mem.indexOf(u8, field, " /")) |sp| {
+        // Prefix (like time) + absolute path: "0:44.31 /usr/bin/python3 args..."
+        const prefix = field[0 .. sp + 1]; // include the space
+        const path_part = field[sp + 1 ..];
+        try writer.writeAll(prefix);
+        if (std.mem.findScalarLast(u8, path_part, '/')) |last_slash| {
+            const tail = path_part[last_slash + 1 ..];
+            if (tail.len > 0) {
+                try writer.writeAll(tail);
+                return;
+            }
+        }
+        try writer.writeAll(path_part);
+        return;
+    }
+    try writer.writeAll(field);
 }
 
 fn splitFields(
@@ -232,7 +269,7 @@ test "encode: preamble passthrough then RLE" {
         \\
         \\H1 H2
         \\foo bar
-        \\~ baz
+        \\ baz
         \\
     , out);
 }
@@ -243,7 +280,7 @@ test "encode: repeated column elided" {
     const input = "H1   H2\nfoo   bar\nfoo   baz\n";
     const out = try applyToString(a, input);
     defer a.free(out);
-    try std.testing.expectEqualStrings("H1 H2\nfoo bar\n~ baz\n", out);
+    try std.testing.expectEqualStrings("H1 H2\nfoo bar\n baz\n", out);
 }
 
 test "encode: docker ps compresses" {

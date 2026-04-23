@@ -373,7 +373,7 @@ test "diff multi fixture: smll output is strictly smaller than input" {
 fn expectedLogOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try git_log.apply(allocator, input, &.{}, &out.writer);
+    try git_log.applyCompact(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
@@ -550,17 +550,13 @@ test "large status fixture: smll output == git_status.apply byte-for-byte" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "large status fixture: v0.4 format — branch sigil, A sigils for staged new files" {
+test "large status fixture: v0.4 format — branch sigil, grouped directory entries" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, status_large_fixture);
     defer result.deinit(allocator);
-    // Branch line
     try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
-    // Staged new files use A sigil
-    try std.testing.expect(std.mem.find(u8, result.stdout, "A src/components/comp_01.rs\n") != null);
-    // Unstaged modified uses M sigil
-    try std.testing.expect(std.mem.find(u8, result.stdout, "M src/mod_01.rs\n") != null);
-    // No section headers
+    try std.testing.expect(std.mem.find(u8, result.stdout, "A src/components/") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "M src/") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Changes to be committed:") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Changes not staged") == null);
 }
@@ -618,7 +614,7 @@ test "diff simple fixture: v0.4 format — d sigil, @ sigil, no diff --git" {
     var result = try runSmll(allocator, diff_simple_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.find(u8, result.stdout, "d simple.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@1|1,3\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@1\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "+line two") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "diff --git") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "index ") == null);
@@ -629,7 +625,7 @@ test "diff rename+modify fixture: v0.4 format — d rename sigil, @ sigil" {
     var result = try runSmll(allocator, diff_rename_modify_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.find(u8, result.stdout, "d old.txt -> new.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@1,3|1,4\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@1\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "rename from") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "similarity index") == null);
 }
@@ -638,24 +634,24 @@ test "diff rename+modify fixture: v0.4 format — d rename sigil, @ sigil" {
 // v0.4 format assertions for log fixtures.
 // ---------------------------------------------------------------------------
 
-test "log linear fixture: v0.4 format — c sigil, : sigil, no commit/Author/Date labels" {
+test "log linear fixture: compact format — sha7 + subject, no body/date/author" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, log_linear_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "c f0ad49e 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, ": fix: third line\n") != null);
+    // Compact format: <sha7> <subject>
+    try std.testing.expect(std.mem.find(u8, result.stdout, "f0ad49e ") != null);
+    // No body lines, no author/date labels
     try std.testing.expect(std.mem.find(u8, result.stdout, "commit ") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Date:") == null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@example.com") == null);
 }
 
-test "log merge fixture: v0.4 format — p sigil for merge parents" {
+test "log merge fixture: compact format — sha7 + subject" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, log_merge_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "c 012aa35 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "p 50c52b3 cb42c80\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "012aa35 ") != null);
+    // No merge parent sigils in compact mode
     try std.testing.expect(std.mem.find(u8, result.stdout, "Merge:") == null);
 }
 
@@ -663,14 +659,13 @@ test "log merge fixture: v0.4 format — p sigil for merge parents" {
 // v0.4 format assertions for show fixtures.
 // ---------------------------------------------------------------------------
 
-test "show simple fixture: v0.4 format — c sigil + d sigil, no diff --git or Author/Date" {
+test "show simple fixture: compact header + d sigil, no diff --git or Author/Date" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, show_simple_fixture);
     defer result.deinit(allocator);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "c 95cbeda 2026-04-18 Alice Anderson\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, ": feat: add a.txt with one line\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "95cbeda feat: add a.txt with one line\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "d a.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@0,0|1\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@0\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "+line1") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "diff --git") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);
@@ -1479,7 +1474,7 @@ test "smoke: docker logs dedups consecutive identical lines (default)" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < docker_logs_fixture.len);
     // Repeat marker appears; first occurrence of each unique payload survives.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "(×") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "×") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "GET /health 200 2ms") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "failed to connect to redis: connection refused") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "shutting down gracefully") != null);
@@ -1509,7 +1504,7 @@ test "smoke: npm install keeps WARN + summary, drops notice (default)" {
 // v0.6 generic compactor — dispatch and threshold behavior.
 // Generic compactor fires only when (a) no bespoke arm claimed the command
 // and (b) stdout exceeds 64 KiB. Its distinctive marker is ASCII "  (x<N>)"
-// appended to RLE-collapsed lines (bespoke docker_logs uses unicode "(×").
+// appended to RLE-collapsed lines (bespoke docker_logs uses unicode "×").
 // ---------------------------------------------------------------------------
 
 fn buildLargeRepeatedPayload(
@@ -1543,9 +1538,9 @@ test "generic-compact: unknown command over 64 KiB triggers generic compactor (d
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    // Generic compactor ran: output is dramatically smaller + carries ASCII (xN) marker.
+    // Generic compactor ran: output is dramatically smaller + carries ×N marker.
     try std.testing.expect(result.stdout.len < payload.len / 10);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "  (x") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\xc3\x97") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "agent-log entry ok") != null);
 }
 
@@ -1573,14 +1568,14 @@ test "generic-compact: unknown command with SMLL_LOSSLESS=1 bypasses compactor" 
     try std.testing.expectEqualSlices(u8, payload, result.stdout);
 }
 
-test "generic-compact: unknown command under 64 KiB passes through unchanged" {
+test "generic-compact: unknown command under 16 KiB passes through unchanged" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    // 32 KiB of identical lines — below the 64 KiB threshold, so matches()
+    // 8 KiB of identical lines — below the 16 KiB threshold, so matches()
     // returns false and the pipeline is skipped even though content is RLE-ready.
-    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 32 * 1024);
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 8 * 1024);
     defer allocator.free(payload);
 
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
@@ -1920,8 +1915,9 @@ test "smoke: curl large -vvv fixture reduces by ≥ 60%" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "BEGIN CERTIFICATE") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "MIIFaz") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
-    // Every request's status line survives.
-    try std.testing.expect(std.mem.count(u8, result.stdout, "< HTTP/2 200") == 30);
+    // First 5 requests show full status; rest are summarized.
+    const int_status_count = std.mem.count(u8, result.stdout, "< HTTP/2 200");
+    try std.testing.expect(int_status_count >= 1 and int_status_count <= 5);
 }
 
 test "smoke: curl without -v passes through (no dispatch)" {

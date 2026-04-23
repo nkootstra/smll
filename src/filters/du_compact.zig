@@ -73,11 +73,53 @@ pub fn apply(
         }
     }.lessThan);
 
-    for (rows.items, 0..) |row, i| {
-        if (i > 0) try writer.writeByte('\n');
-        try emitRoundedLine(writer, row);
+    // Emit top entries; summarize the rest
+    const TOP_N: usize = 10;
+    const emit_count = @min(rows.items.len, TOP_N);
+
+    // Find common path prefix among top entries
+    var prefix_len: usize = 0;
+    if (emit_count > 1) {
+        const first_path = rows.items[0].path;
+        prefix_len = first_path.len;
+        for (rows.items[1..emit_count]) |row| {
+            var j: usize = 0;
+            while (j < prefix_len and j < row.path.len and first_path[j] == row.path[j]) : (j += 1) {}
+            prefix_len = j;
+        }
+        // Snap to last '/' boundary
+        while (prefix_len > 0 and first_path[prefix_len - 1] != '/') : (prefix_len -= 1) {}
     }
-    if (rows.items.len > 0) try writer.writeByte('\n');
+
+    // Emit prefix header if stripping
+    if (prefix_len > 2) {
+        try writer.writeAll(rows.items[0].path[0..prefix_len]);
+        try writer.writeByte('\n');
+    }
+
+    for (rows.items[0..emit_count], 0..) |row, i| {
+        if (i > 0) try writer.writeByte('\n');
+        try writeRoundedNumber(writer, row.num);
+        if (row.unit != 0) try writer.writeByte(row.unit);
+        try writer.writeByte('\t');
+        if (prefix_len > 2) {
+            try writer.writeAll(row.path[prefix_len..]);
+        } else {
+            try writer.writeAll(row.path);
+        }
+    }
+    if (rows.items.len > TOP_N) {
+        // Calculate total size of remaining entries
+        var remaining_bytes: u64 = 0;
+        for (rows.items[TOP_N..]) |row| {
+            remaining_bytes += row.bytes;
+        }
+        try writer.writeByte('\n');
+        try emitHumanSize(writer, remaining_bytes);
+        try writer.print("\t(+{d})\n", .{rows.items.len - TOP_N});
+    } else if (rows.items.len > 0) {
+        try writer.writeByte('\n');
+    }
 }
 
 const Parsed = struct {
@@ -159,6 +201,21 @@ fn emitRoundedLine(writer: *Writer, row: Parsed) !void {
     }
     try writer.writeByte('\t');
     try writer.writeAll(row.path);
+}
+
+fn emitHumanSize(writer: *Writer, bytes: u64) !void {
+    const fb: f64 = @floatFromInt(bytes);
+    if (fb >= 1024.0 * 1024.0 * 1024.0 * 1024.0) {
+        try writer.print("{d:.1}T", .{fb / (1024.0 * 1024.0 * 1024.0 * 1024.0)});
+    } else if (fb >= 1024.0 * 1024.0 * 1024.0) {
+        try writer.print("{d:.1}G", .{fb / (1024.0 * 1024.0 * 1024.0)});
+    } else if (fb >= 1024.0 * 1024.0) {
+        try writer.print("{d:.1}M", .{fb / (1024.0 * 1024.0)});
+    } else if (fb >= 1024.0) {
+        try writer.print("{d:.1}K", .{fb / 1024.0});
+    } else {
+        try writer.print("{d}", .{bytes});
+    }
 }
 
 /// Round a written number to 2 significant figures.

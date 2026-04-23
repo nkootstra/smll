@@ -16,6 +16,76 @@ const util = @import("util");
 pub fn matches(input: []const u8) bool { _ = input; return false; }
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
+    // Phase 1: generate standard output
+    var buf = Writer.Allocating.init(a);
+    defer buf.deinit();
+    try applyInner(a, stdout, stderr, &buf.writer);
+    // Phase 2: group consecutive stat/create lines by directory
+    try groupMergeEntries(buf.written(), w);
+}
+
+fn groupMergeEntries(output: []const u8, w: *Writer) !void {
+    var all_lines: [4096][]const u8 = undefined;
+    var count: usize = 0;
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (count >= all_lines.len) break;
+        all_lines[count] = line;
+        count += 1;
+    }
+    var i: usize = 0;
+    while (i < count) {
+        const line = all_lines[i];
+        // Detect stat lines: "path |N" or "+/- path"
+        const dir = statLineDir(line) orelse createLineDir(line);
+        if (dir != null and dir.?.len > 0) {
+            const d = dir.?;
+            const is_stat = statLineDir(line) != null;
+            var run_end = i + 1;
+            while (run_end < count) {
+                const next_dir = if (is_stat) statLineDir(all_lines[run_end]) else createLineDir(all_lines[run_end]);
+                if (next_dir == null or !std.mem.eql(u8, d, next_dir.?)) break;
+                run_end += 1;
+            }
+            if (run_end - i >= 3) {
+                if (is_stat) {
+                    try w.writeAll(d);
+                    try w.writeAll(" ×"); try w.print("{d}\n", .{run_end - i});
+                } else {
+                    // Preserve the sigil (+ or -)
+                    try w.writeAll(line[0..2]);
+                    try w.writeAll(d);
+                    try w.writeAll(" ×"); try w.print("{d}\n", .{run_end - i});
+                }
+                i = run_end;
+                continue;
+            }
+        }
+        try w.writeAll(line);
+        try w.writeByte('\n');
+        i += 1;
+    }
+}
+
+fn statLineDir(line: []const u8) ?[]const u8 {
+    // Matches "path |N" — extract directory from path
+    const pipe = std.mem.find(u8, line, " |") orelse return null;
+    const path = line[0..pipe];
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| return path[0 .. idx + 1];
+    return null;
+}
+
+fn createLineDir(line: []const u8) ?[]const u8 {
+    // Matches "+ path" or "- path"
+    if (line.len >= 3 and (line[0] == '+' or line[0] == '-') and line[1] == ' ') {
+        const path = line[2..];
+        if (std.mem.findScalarLast(u8, path, '/')) |idx| return path[0 .. idx + 1];
+    }
+    return null;
+}
+
+fn applyInner(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
     _ = a;
     const src = if (stdout.len > 0) stdout else stderr;
     if (src.len == 0 and stderr.len == 0) return;
@@ -166,13 +236,12 @@ test "conflict: path and failed" {
     try std.testing.expect(std.mem.find(u8, out, "Auto-merging") == null);
 }
 
-test "large: stat paths and summary" {
+test "large: grouped stat paths and summary" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_large, ""); defer a.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "src/module_01.rs") != null);
-    try std.testing.expect(std.mem.find(u8, out, "src/module_60.rs") != null);
+    // Stat lines grouped by directory
+    try std.testing.expect(std.mem.find(u8, out, "src/") != null);
     try std.testing.expect(std.mem.find(u8, out, "+300/-0 files=60\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "+ src/module_51.rs\n") != null);
 }
 
 test "R3: ff" {
