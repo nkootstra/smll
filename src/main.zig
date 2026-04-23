@@ -399,10 +399,17 @@ fn runWrapper(
     if (std.mem.eql(u8, cmd_basename, "ls")) {
         const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and ls_compact.matches(stdout_slice)) {
-            ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
-                return 1;
+            ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
+                // ParsedNothing: content was present but parser extracted nothing
+                // (e.g. eza/exa/lsd date format, non-English locale). Fall through
+                // to raw passthrough instead of returning empty/misleading output.
+                if (err == error.ParsedNothing) {
+                    try writer.writeAll(stdout_slice);
+                } else {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                }
             };
         } else {
             try writer.writeAll(stdout_slice);

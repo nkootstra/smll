@@ -10,6 +10,11 @@ const Writer = std.Io.Writer;
 // Keeps: filenames only, one per line, in original order. Directory vs file
 // distinction is marked with a trailing "/" on dirs, matching ls -F behavior.
 //
+// Safety: if stdout contains non-empty content lines but the parser extracts
+// zero filenames (e.g. eza/exa/lsd date format, non-English locale), returns
+// `error.ParsedNothing` so the caller can fall back to raw passthrough.
+// This prevents silently returning "(empty)" for non-empty directories.
+//
 // Contract:
 //   • Lossy — permissions, ownership, size, timestamps gone.
 //   • Filename list is preserved in order.
@@ -59,10 +64,15 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
     var lines = std.mem.splitScalar(u8, stdout, '\n');
     var first = true;
+    var had_content_lines = false;
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        if (isTotalLine(line)) continue;
+        if (isTotalLine(line)) {
+            had_content_lines = true;
+            continue;
+        }
         if (!isLsLongLine(line)) continue;
+        had_content_lines = true;
 
         const name = extractName(line) orelse continue;
         if (name.len == 0) continue;
@@ -71,6 +81,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll(name);
         if (line[0] == 'd') try writer.writeByte('/');
     }
+    // Safety net: if we saw content lines (total or mode-prefixed) but
+    // extracted zero filenames, the parser likely failed on an unexpected
+    // format (eza/exa/lsd, non-English locale). Signal the caller to fall
+    // back to raw passthrough instead of returning empty output.
+    if (first and had_content_lines) return error.ParsedNothing;
     if (!first) try writer.writeByte('\n');
 }
 
@@ -129,4 +144,40 @@ test "apply: filename with spaces preserved" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     try std.testing.expectEqualStrings("hello world.txt\n", out.written());
+}
+
+test "apply: eza day-first date format triggers ParsedNothing" {
+    // eza uses day-first dates: "22 Apr 14:30" vs POSIX "Apr 22 14:30".
+    // The extra field shifts the name column; extractName returns null for
+    // every line → ParsedNothing so caller can fall back.
+    const input = "total 8\n" ++
+        "drwxr-xr-x  - user 22 Apr 14:30 src\n" ++
+        "-rw-r--r--  1 user 22 Apr 14:30 README.md\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    const result = apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expectError(error.ParsedNothing, result);
+}
+
+test "apply: empty stdout produces no output (no ParsedNothing)" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, "", &.{}, &out.writer);
+    try std.testing.expectEqualStrings("", out.written());
+}
+
+test "apply: all file types handled" {
+    // Verify character device, block device, pipe, socket don't get dropped
+    const input = "crw-rw-rw- 1 root wheel 0 Apr 23 12:00 /dev/null\n" ++
+        "brw-r----- 1 root disk 8 Apr 23 12:00 /dev/sda\n" ++
+        "prw-r--r-- 1 user staff 0 Apr 23 12:00 mypipe\n" ++
+        "srwxrwxrwx 1 user staff 0 Apr 23 12:00 mysocket\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "/dev/null") != null);
+    try std.testing.expect(std.mem.find(u8, got, "/dev/sda") != null);
+    try std.testing.expect(std.mem.find(u8, got, "mypipe") != null);
+    try std.testing.expect(std.mem.find(u8, got, "mysocket") != null);
 }
