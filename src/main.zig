@@ -23,6 +23,9 @@ const ws_rle = @import("ws_rle");
 const columnar = @import("columnar");
 const docker_compact = @import("docker_compact");
 const ls_compact = @import("ls_compact");
+const find_compact = @import("find_compact");
+const du_compact = @import("du_compact");
+const curl_compact = @import("curl_compact");
 const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
@@ -31,6 +34,8 @@ const tsc = @import("tsc");
 const go_test = @import("go_test");
 const docker_logs = @import("docker_logs");
 const npm_install = @import("npm_install");
+const build_compact = @import("build_compact");
+const generic_compact = @import("generic_compact");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
@@ -51,6 +56,12 @@ test {
 fn envFlagOn(environ_map: *const std.process.Environ.Map, name: []const u8) bool {
     const v = environ_map.get(name) orelse return false;
     return v.len > 0 and v[0] == '1';
+}
+
+/// Returns true when `argv` contains an exact-match token equal to `arg`.
+fn hasArg(argv: []const []const u8, arg: []const u8) bool {
+    for (argv) |a| if (std.mem.eql(u8, a, arg)) return true;
+    return false;
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -224,11 +235,21 @@ fn runWrapper(
         outer_cmd;
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
-    // via dirname RLE.  rg.matches() rejects pattern-mode output.
+    // via dirname RLE. `find -ls` goes through find_compact instead
+    // (columnar inode/mode/size/path → path-only). SMLL_LOSSLESS=1 bypasses
+    // both.
     if (std.mem.eql(u8, cmd_basename, "rg") or
         std.mem.eql(u8, cmd_basename, "find"))
     {
-        if (rg.matches(stdout_slice)) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        const is_find_ls = std.mem.eql(u8, cmd_basename, "find") and hasArg(argv, "-ls");
+        if (!lossless and is_find_ls and find_compact.matches(stdout_slice)) {
+            find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else if (rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
@@ -264,9 +285,9 @@ fn runWrapper(
         // bun: fall through to columnar opt-in check below.
     }
 
-    // Test runners + type-checker — OPT-IN LOSSY compaction under SMLL_COMPACT=1.
+    // Test runners + type-checker — LOSSY compaction by default (v0.6).
     // Emits failures + summary only; "all tests passed\n" / "no type errors\n"
-    // on clean runs.
+    // on clean runs. Set SMLL_LOSSLESS=1 for raw passthrough.
     const is_pytest = std.mem.eql(u8, cmd_basename, "pytest");
     const is_cargo_test = std.mem.eql(u8, cmd_basename, "cargo") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
@@ -276,8 +297,8 @@ fn runWrapper(
     const is_go_test = std.mem.eql(u8, cmd_basename, "go") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
     if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
-        const enabled = envFlagOn(environ, "SMLL_COMPACT");
-        if (enabled) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless) {
             if (is_pytest and pytest.matches(stdout_slice)) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
@@ -324,10 +345,49 @@ fn runWrapper(
         return exit_code;
     }
 
-    // ls wrapper — OPT-IN LOSSY compaction (filenames only) under SMLL_COMPACT=1.
+    // curl -v / -vv / -vvv wrapper — LOSSY compaction by default (v0.6).
+    // Drops TLS handshake chatter and cert dumps from stderr; preserves
+    // status line, request/response headers, and body. Non-standard filter:
+    // matches() inspects STDERR, not stdout. Set SMLL_LOSSLESS=1 to bypass.
+    if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv)) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and curl_compact.matches(stderr_slice)) {
+            curl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // du wrapper — LOSSY compaction (2-sig-fig size rounding) by default (v0.6).
+    // When `-s` / `--summarize` is present, sort entries descending by byte size
+    // so the largest offenders come first. Set SMLL_LOSSLESS=1 for raw passthrough.
+    if (std.mem.eql(u8, cmd_basename, "du")) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and du_compact.matches(stdout_slice)) {
+            const sort_desc = du_compact.hasSummarizeFlag(argv);
+            du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // ls wrapper — LOSSY compaction (filenames only) by default (v0.6).
+    // Set SMLL_LOSSLESS=1 for raw passthrough.
     if (std.mem.eql(u8, cmd_basename, "ls")) {
-        const enabled = envFlagOn(environ, "SMLL_COMPACT");
-        if (enabled and ls_compact.matches(stdout_slice)) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and ls_compact.matches(stdout_slice)) {
             ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
@@ -340,10 +400,10 @@ fn runWrapper(
         return exit_code;
     }
 
-    // Columnar wrappers (docker, kubectl, gh) — OPT-IN LOSSY compaction.
-    // Default dispatch passes through (lossless R3 contract preserved).
-    // Under SMLL_COMPACT=1, docker routes through docker_compact (name-only
-    // summary); the rest fall through to the generic columnar RLE filter.
+    // Columnar wrappers (docker, kubectl, gh, …) — LOSSY compaction by default (v0.6).
+    // docker routes through docker_compact (name-only summary); the rest fall
+    // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
+    // passthrough.
     _ = &ws_rle; // kept in-tree as reference; see ws_rle.zig header comment
     if (std.mem.eql(u8, cmd_basename, "docker") or
         std.mem.eql(u8, cmd_basename, "kubectl") or
@@ -357,7 +417,7 @@ fn runWrapper(
         std.mem.eql(u8, cmd_basename, "brew") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
-        const enabled = envFlagOn(environ, "SMLL_COMPACT");
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         // docker logs <container> — line dedup (before docker ps table dispatch).
         const is_docker_logs = std.mem.eql(u8, cmd_basename, "docker") and
             argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
@@ -370,19 +430,19 @@ fn runWrapper(
             (std.mem.eql(u8, argv[1], "install") or
                 std.mem.eql(u8, argv[1], "i") or
                 std.mem.eql(u8, argv[1], "ci"));
-        if (enabled and (is_docker_logs or is_kubectl_logs)) {
+        if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             docker_logs.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (enabled and is_npm_install and npm_install.matches(stdout_slice)) {
+        } else if (!lossless and is_npm_install and npm_install.matches(stdout_slice)) {
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (enabled and is_npm_install and npm_install.matches(stderr_slice)) {
+        } else if (!lossless and is_npm_install and npm_install.matches(stderr_slice)) {
             // npm writes WARN/notice to stderr in many versions; dispatch off stderr
             // when stdout doesn't match but stderr does.
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
@@ -391,19 +451,19 @@ fn runWrapper(
                 return 1;
             };
             return exit_code;
-        } else if (enabled and std.mem.eql(u8, cmd_basename, "docker") and docker_compact.matches(stdout_slice)) {
+        } else if (!lossless and std.mem.eql(u8, cmd_basename, "docker") and docker_compact.matches(stdout_slice)) {
             docker_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (enabled and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
+        } else if (!lossless and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
             kubectl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (enabled and columnar.matches(stdout_slice)) {
+        } else if (!lossless and columnar.matches(stdout_slice)) {
             columnar.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
@@ -416,9 +476,46 @@ fn runWrapper(
         return exit_code;
     }
 
+    // Build-chatter wrapper: `make`, `cargo build`, `go build` — LOSSY
+    // compaction by default (v0.6). Collapses `Compiling X` / `cc -c X.o`
+    // / `go build: X` progress lines into a summary count; warnings and
+    // errors pass through verbatim. Stream-placement: cargo/go emit
+    // progress on stderr, make splits; the filter inspects both. Gate by
+    // `!SMLL_LOSSLESS`. `bun` is explicitly excluded.
+    const is_make = std.mem.eql(u8, cmd_basename, "make");
+    const is_cargo_build = std.mem.eql(u8, cmd_basename, "cargo") and
+        argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
+    const is_go_build = std.mem.eql(u8, cmd_basename, "go") and
+        argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
+    if (is_make or is_cargo_build or is_go_build) {
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
+            build_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
     if (!std.mem.eql(u8, cmd_basename, "git") or argv.len < 2) {
-        // Non-git outer command: passthrough both streams verbatim.
-        try writer.writeAll(stdout_slice);
+        // Non-git outer command: size-gated generic compactor on stdout
+        // when no bespoke arm claimed it AND output exceeds threshold.
+        // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
+        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        if (!lossless and generic_compact.matches(stdout_slice)) {
+            generic_compact.apply(allocator, stdout_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return if (exit_code != 0) exit_code else 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
@@ -444,11 +541,13 @@ fn runWrapper(
             };
         },
         .log => {
-            const compact = envFlagOn(environ, "SMLL_COMPACT");
-            const result2 = if (compact)
-                git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer)
+            // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the
+            // fuller bespoke formatter (keeps commit bodies).
+            const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+            const result2 = if (lossless)
+                git_log.apply(allocator, stdout_slice, stderr_slice, writer)
             else
-                git_log.apply(allocator, stdout_slice, stderr_slice, writer);
+                git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer);
             result2 catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);

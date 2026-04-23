@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for TypeScript compiler (`tsc`) (SMLL_COMPACT=1).
+// LOSSY compact filter for TypeScript compiler (`tsc`) — on by default
+// (v0.6). Set SMLL_LOSSLESS=1 to bypass.
 //
 // Locations-only compression: each error reduces to `path:L:C TSnnnn` — the
 // agent has enough info to jump-to-file; message text is dropped (costs ~15

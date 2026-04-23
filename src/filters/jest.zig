@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `jest` / `vitest` (SMLL_COMPACT=1).
+// LOSSY compact filter for `jest` / `vitest` — on by default (v0.6).
+// Set SMLL_LOSSLESS=1 to bypass.
 //
 // Keeps: FAIL-prefix file lines, `● ` failure titles, expect/assertion bodies,
 //        Error messages, stack frames (`at `), Test Suites:/Tests:/Test Files/

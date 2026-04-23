@@ -299,6 +299,27 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/ls_la.txt"),
     });
 
+    const find_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/find_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    find_compact_mod.addAnonymousImport("fixture_find_ls", .{
+        .root_source_file = b.path("tests/fixtures/find_ls.txt"),
+    });
+
+    const du_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/du_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const curl_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/curl_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
     const kubectl_compact_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/kubectl_compact.zig"),
         .target = target,
@@ -365,6 +386,12 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/npm_install.txt"),
     });
 
+    const build_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/build_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
     const detect_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/detect.zig"),
         .target = target,
@@ -377,6 +404,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
     });
 
+    const generic_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/generic_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
     cargo_test_mod.addImport("ansi", ansi_mod);
     pytest_mod.addImport("ansi", ansi_mod);
     jest_mod.addImport("ansi", ansi_mod);
@@ -384,6 +417,8 @@ pub fn build(b: *std.Build) void {
     go_test_mod.addImport("ansi", ansi_mod);
     docker_logs_mod.addImport("ansi", ansi_mod);
     npm_install_mod.addImport("ansi", ansi_mod);
+    generic_compact_mod.addImport("ansi", ansi_mod);
+    build_compact_mod.addImport("ansi", ansi_mod);
 
     const sigil_rle_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/sigil_rle.zig"),
@@ -406,6 +441,9 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("columnar", columnar_mod);
     exe_mod.addImport("docker_compact", docker_compact_mod);
     exe_mod.addImport("ls_compact", ls_compact_mod);
+    exe_mod.addImport("find_compact", find_compact_mod);
+    exe_mod.addImport("du_compact", du_compact_mod);
+    exe_mod.addImport("curl_compact", curl_compact_mod);
     exe_mod.addImport("kubectl_compact", kubectl_compact_mod);
     exe_mod.addImport("cargo_test", cargo_test_mod);
     exe_mod.addImport("pytest", pytest_mod);
@@ -414,6 +452,8 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("go_test", go_test_mod);
     exe_mod.addImport("docker_logs", docker_logs_mod);
     exe_mod.addImport("npm_install", npm_install_mod);
+    exe_mod.addImport("build_compact", build_compact_mod);
+    exe_mod.addImport("generic_compact", generic_compact_mod);
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
@@ -471,6 +511,9 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("columnar", columnar_mod);
     release_mod.addImport("docker_compact", docker_compact_mod);
     release_mod.addImport("ls_compact", ls_compact_mod);
+    release_mod.addImport("find_compact", find_compact_mod);
+    release_mod.addImport("du_compact", du_compact_mod);
+    release_mod.addImport("curl_compact", curl_compact_mod);
     release_mod.addImport("kubectl_compact", kubectl_compact_mod);
     release_mod.addImport("cargo_test", cargo_test_mod);
     release_mod.addImport("pytest", pytest_mod);
@@ -479,6 +522,8 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("go_test", go_test_mod);
     release_mod.addImport("docker_logs", docker_logs_mod);
     release_mod.addImport("npm_install", npm_install_mod);
+    release_mod.addImport("build_compact", build_compact_mod);
+    release_mod.addImport("generic_compact", generic_compact_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -562,6 +607,15 @@ pub fn build(b: *std.Build) void {
     const ls_compact_tests = b.addTest(.{ .root_module = ls_compact_mod });
     const run_ls_compact_tests = b.addRunArtifact(ls_compact_tests);
 
+    const find_compact_tests = b.addTest(.{ .root_module = find_compact_mod });
+    const run_find_compact_tests = b.addRunArtifact(find_compact_tests);
+
+    const du_compact_tests = b.addTest(.{ .root_module = du_compact_mod });
+    const run_du_compact_tests = b.addRunArtifact(du_compact_tests);
+
+    const curl_compact_tests = b.addTest(.{ .root_module = curl_compact_mod });
+    const run_curl_compact_tests = b.addRunArtifact(curl_compact_tests);
+
     const kubectl_compact_tests = b.addTest(.{ .root_module = kubectl_compact_mod });
     const run_kubectl_compact_tests = b.addRunArtifact(kubectl_compact_tests);
 
@@ -585,6 +639,12 @@ pub fn build(b: *std.Build) void {
 
     const npm_install_tests = b.addTest(.{ .root_module = npm_install_mod });
     const run_npm_install_tests = b.addRunArtifact(npm_install_tests);
+
+    const build_compact_tests = b.addTest(.{ .root_module = build_compact_mod });
+    const run_build_compact_tests = b.addRunArtifact(build_compact_tests);
+
+    const generic_compact_tests = b.addTest(.{ .root_module = generic_compact_mod });
+    const run_generic_compact_tests = b.addRunArtifact(generic_compact_tests);
 
     const ansi_tests = b.addTest(.{ .root_module = ansi_mod });
     const run_ansi_tests = b.addRunArtifact(ansi_tests);
@@ -753,7 +813,7 @@ pub fn build(b: *std.Build) void {
     integration_mod.addAnonymousImport("fixture_git_blame_large", .{
         .root_source_file = b.path("tests/fixtures/large/git_blame.txt"),
     });
-    // columnar fixtures (opt-in SMLL_COMPACT dispatch coverage)
+    // columnar fixtures (default-lossy dispatch; SMLL_LOSSLESS=1 opts out)
     integration_mod.addAnonymousImport("fixture_docker_ps", .{
         .root_source_file = b.path("tests/fixtures/docker_ps.txt"),
     });
@@ -779,6 +839,40 @@ pub fn build(b: *std.Build) void {
     });
     integration_mod.addAnonymousImport("fixture_npm_install", .{
         .root_source_file = b.path("tests/fixtures/npm_install.txt"),
+    });
+
+    // v0.6 build_compact fixtures — cargo build / make / go build.
+    integration_mod.addAnonymousImport("fixture_cargo_build", .{
+        .root_source_file = b.path("tests/fixtures/cargo_build.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_make_build", .{
+        .root_source_file = b.path("tests/fixtures/make_build.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_go_build", .{
+        .root_source_file = b.path("tests/fixtures/go_build.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_cargo_build_large", .{
+        .root_source_file = b.path("tests/fixtures/large/cargo_build.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_make_build_large", .{
+        .root_source_file = b.path("tests/fixtures/large/make_build.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_go_build_large", .{
+        .root_source_file = b.path("tests/fixtures/large/go_build.txt"),
+    });
+
+    // v0.6 curl_compact fixtures — stdout + stderr pairs.
+    integration_mod.addAnonymousImport("fixture_curl_v_example_stderr", .{
+        .root_source_file = b.path("tests/fixtures/curl_v_example.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_curl_v_example_stdout", .{
+        .root_source_file = b.path("tests/fixtures/curl_v_example.stdout.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_curl_vvv_example_stderr", .{
+        .root_source_file = b.path("tests/fixtures/large/curl_vvv_example.stderr.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_curl_vvv_example_stdout", .{
+        .root_source_file = b.path("tests/fixtures/large/curl_vvv_example.stdout.txt"),
     });
 
     const integration_tests = b.addTest(.{ .root_module = integration_mod });
@@ -810,6 +904,9 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_columnar_tests.step);
     test_step.dependOn(&run_docker_compact_tests.step);
     test_step.dependOn(&run_ls_compact_tests.step);
+    test_step.dependOn(&run_find_compact_tests.step);
+    test_step.dependOn(&run_du_compact_tests.step);
+    test_step.dependOn(&run_curl_compact_tests.step);
     test_step.dependOn(&run_kubectl_compact_tests.step);
     test_step.dependOn(&run_cargo_test_tests.step);
     test_step.dependOn(&run_pytest_tests.step);
@@ -818,6 +915,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_go_test_tests.step);
     test_step.dependOn(&run_docker_logs_tests.step);
     test_step.dependOn(&run_npm_install_tests.step);
+    test_step.dependOn(&run_build_compact_tests.step);
+    test_step.dependOn(&run_generic_compact_tests.step);
     test_step.dependOn(&run_ansi_tests.step);
     test_step.dependOn(&run_sigil_rle_tests.step);
     test_step.dependOn(&run_validator_tests.step);

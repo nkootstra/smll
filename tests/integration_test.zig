@@ -63,7 +63,7 @@ const stash_list_fixture = @embedFile("fixture_git_stash_list");
 // git_blame fixtures (argv-only)
 const blame_simple_fixture = @embedFile("fixture_git_blame_simple");
 const blame_large_fixture = @embedFile("fixture_git_blame_large");
-// columnar fixtures (opt-in SMLL_COMPACT dispatch)
+// columnar fixtures (default-lossy dispatch; SMLL_LOSSLESS=1 opts out)
 const docker_ps_fixture = @embedFile("fixture_docker_ps");
 const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
 const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
@@ -1220,7 +1220,7 @@ test "broken pipe mid-stream returns non-zero exit without panic" {
 }
 
 // ---------------------------------------------------------------------------
-// Columnar filter dispatch (SMLL_COMPACT opt-in)
+// Columnar filter dispatch (default-lossy; SMLL_LOSSLESS=1 opts out)
 // ---------------------------------------------------------------------------
 
 fn runSmllWrapperEnv(
@@ -1276,19 +1276,14 @@ fn setupFakeTool(
     return try tmp_dir.realPathFileAlloc(io, ".", allocator);
 }
 
-test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
+test "columnar: kubectl compresses by default" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "kubectl", kubectl_pods_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"kubectl"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"kubectl"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1302,33 +1297,33 @@ test "columnar: kubectl with SMLL_COMPACT=1 compresses" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "redis-master-0") != null);
 }
 
-test "columnar: kubectl without SMLL_COMPACT passes through unchanged" {
+test "columnar: kubectl with SMLL_LOSSLESS=1 passes through unchanged" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "kubectl", kubectl_pods_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"kubectl"}, &.{});
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"kubectl"},
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, kubectl_pods_fixture, result.stdout);
 }
 
-test "columnar: gh pr list with SMLL_COMPACT=1 preserves preamble" {
+test "columnar: gh pr list preserves preamble by default" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_pr_list_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"gh"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"gh"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1342,7 +1337,7 @@ test "columnar: gh pr list with SMLL_COMPACT=1 preserves preamble" {
     try std.testing.expect(result.stdout.len < gh_pr_list_fixture.len);
 }
 
-test "columnar: docker SMLL_COMPACT=0 stays passthrough" {
+test "columnar: docker with SMLL_COMPACT=0 is silently ignored (still compacts)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1358,30 +1353,66 @@ test "columnar: docker SMLL_COMPACT=0 stays passthrough" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    // SMLL_COMPACT=0 → gate is closed, byte-identical passthrough required.
-    try std.testing.expectEqualSlices(u8, docker_ps_fixture, result.stdout);
+    // v0.6: SMLL_COMPACT is silently ignored — default-lossy behavior stands.
+    // Output must be smaller than fixture (columnar compression ran).
+    try std.testing.expect(result.stdout.len < docker_ps_fixture.len);
+}
+
+test "columnar: docker with SMLL_COMPACT=1 is silently ignored (still compacts)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_ps_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"docker"},
+        &.{.{ "SMLL_COMPACT", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // v0.6: SMLL_COMPACT=1 legacy opt-in is silently ignored — same default-lossy result.
+    try std.testing.expect(result.stdout.len < docker_ps_fixture.len);
+}
+
+test "columnar: docker with SMLL_LOSSLESS=0 treated as unset (still compacts)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_ps_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"docker"},
+        &.{.{ "SMLL_LOSSLESS", "0" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // SMLL_LOSSLESS=0 must behave as if unset (envFlagOn returns false) — default compacts.
+    try std.testing.expect(result.stdout.len < docker_ps_fixture.len);
 }
 
 // ---------------------------------------------------------------------------
-// v0.9 new filters — end-to-end smoke tests (SMLL_COMPACT=1 wrapper mode).
+// v0.9 new filters — end-to-end smoke tests (default-lossy; SMLL_LOSSLESS=1 opts out).
 // Each drives a fake tool shim on PATH, asserts the compressed output retains
 // the actionable payload (failure markers / error codes / dedup counts /
-// migration warnings), and confirms gate-closed runs fall back to passthrough.
+// migration warnings).
 // ---------------------------------------------------------------------------
 
-test "smoke: jest SMLL_COMPACT=1 keeps FAIL + ● titles, drops PASS" {
+test "smoke: jest keeps FAIL + ● titles, drops PASS (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "jest", jest_failing_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"jest"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"jest"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1394,19 +1425,14 @@ test "smoke: jest SMLL_COMPACT=1 keeps FAIL + ● titles, drops PASS" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "PASS  src/utils/format.test.ts") == null);
 }
 
-test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
+test "smoke: tsc compresses errors to path:L:C TSnnnn (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "tsc", tsc_errors_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{"tsc"},
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"tsc"}, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1419,19 +1445,14 @@ test "smoke: tsc SMLL_COMPACT=1 compresses errors to path:L:C TSnnnn" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "~~~~~~") == null);
 }
 
-test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
+test "smoke: go test -v keeps --- FAIL + evidence, drops PASS (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "go", go_test_v_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{ "go", "test", "-v" },
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "go", "test", "-v" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1445,19 +1466,14 @@ test "smoke: go test -v SMLL_COMPACT=1 keeps --- FAIL + evidence, drops PASS" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "=== RUN   TestAdd") == null);
 }
 
-test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
+test "smoke: docker logs dedups consecutive identical lines (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_logs_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{ "docker", "logs", "myapp" },
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "logs", "myapp" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1469,19 +1485,14 @@ test "smoke: docker logs SMLL_COMPACT=1 dedups consecutive identical lines" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "shutting down gracefully") != null);
 }
 
-test "smoke: npm install SMLL_COMPACT=1 keeps WARN + summary, drops notice" {
+test "smoke: npm install keeps WARN + summary, drops notice (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "npm", npm_install_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(
-        allocator,
-        bin_dir,
-        &.{ "npm", "install" },
-        &.{.{ "SMLL_COMPACT", "1" }},
-    );
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "npm", "install" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1492,4 +1503,651 @@ test "smoke: npm install SMLL_COMPACT=1 keeps WARN + summary, drops notice" {
     // Upgrade-nag "npm notice" + funding prompts drop.
     try std.testing.expect(std.mem.find(u8, result.stdout, "npm notice") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "looking for funding") == null);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 generic compactor — dispatch and threshold behavior.
+// Generic compactor fires only when (a) no bespoke arm claimed the command
+// and (b) stdout exceeds 64 KiB. Its distinctive marker is ASCII "  (x<N>)"
+// appended to RLE-collapsed lines (bespoke docker_logs uses unicode "(×").
+// ---------------------------------------------------------------------------
+
+fn buildLargeRepeatedPayload(
+    allocator: std.mem.Allocator,
+    line: []const u8,
+    total_bytes: usize,
+) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    while (buf.items.len < total_bytes) {
+        try buf.appendSlice(allocator, line);
+        try buf.append(allocator, '\n');
+    }
+    return buf.toOwnedSlice(allocator);
+}
+
+test "generic-compact: unknown command over 64 KiB triggers generic compactor (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // 100 KiB of identical lines — unknown basename "xxunknownxx" has no
+    // bespoke arm, so the generic compactor must fire and RLE them.
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 100 * 1024);
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"xxunknownxx"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Generic compactor ran: output is dramatically smaller + carries ASCII (xN) marker.
+    try std.testing.expect(result.stdout.len < payload.len / 10);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "  (x") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "agent-log entry ok") != null);
+}
+
+test "generic-compact: unknown command with SMLL_LOSSLESS=1 bypasses compactor" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 100 * 1024);
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"xxunknownxx"},
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // SMLL_LOSSLESS=1 bypasses: byte-identical passthrough.
+    try std.testing.expectEqualSlices(u8, payload, result.stdout);
+}
+
+test "generic-compact: unknown command under 64 KiB passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // 32 KiB of identical lines — below the 64 KiB threshold, so matches()
+    // returns false and the pipeline is skipped even though content is RLE-ready.
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 32 * 1024);
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"xxunknownxx"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Below threshold → passthrough, byte-identical.
+    try std.testing.expectEqualSlices(u8, payload, result.stdout);
+}
+
+test "generic-compact: known bespoke command (jest) does NOT reach generic compactor" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // 100 KiB of identical lines through a fake "jest" — bespoke arm must
+    // claim the command. The key invariant: the generic ASCII (xN) marker
+    // must NOT appear, which would mean generic fired. Whether the bespoke
+    // filter shrinks this specific payload is not the point (jest.matches()
+    // only triggers on Test-Suites banners), but the jest arm still claims
+    // the command and returns before the generic compactor block runs.
+    const payload = try buildLargeRepeatedPayload(
+        allocator,
+        "PASS  src/utils/format.test.ts (2.3s)",
+        100 * 1024,
+    );
+    defer allocator.free(payload);
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "jest", payload);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"jest"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Generic marker must not appear — that is the dispatch invariant.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "  (x") == null);
+}
+
+test "generic-compact: dispatch invariant — bespoke commands never reach generic compactor" {
+    const allocator = std.testing.allocator;
+
+    // Every (basename, argv) combination covered by a bespoke v0.4/v0.5/v0.6
+    // dispatch arm in src/main.zig. If any of these leaks to the generic
+    // compactor on a 100 KiB identical-line fixture, the ASCII (xN) marker
+    // would appear (generic compactor's distinctive RLE output). Bare
+    // `cargo` and `go` are intentionally NOT bespoke — they only route to
+    // bespoke arms when argv[1] == "test", which is why this is keyed on
+    // full argv rather than basename alone.
+    const Invocation = struct { name: []const u8, argv: []const []const u8 };
+    const cases = [_]Invocation{
+        .{ .name = "rg", .argv = &.{"rg"} },
+        .{ .name = "find", .argv = &.{"find"} },
+        .{ .name = "tree", .argv = &.{"tree"} },
+        .{ .name = "bun", .argv = &.{"bun"} },
+        .{ .name = "pytest", .argv = &.{"pytest"} },
+        .{ .name = "jest", .argv = &.{"jest"} },
+        .{ .name = "vitest", .argv = &.{"vitest"} },
+        .{ .name = "tsc", .argv = &.{"tsc"} },
+        .{ .name = "cargo", .argv = &.{ "cargo", "test" } },
+        .{ .name = "go", .argv = &.{ "go", "test" } },
+        .{ .name = "curl", .argv = &.{ "curl", "-v" } },
+        .{ .name = "make", .argv = &.{"make"} },
+        .{ .name = "cargo", .argv = &.{ "cargo", "build" } },
+        .{ .name = "go", .argv = &.{ "go", "build" } },
+        .{ .name = "ls", .argv = &.{"ls"} },
+        .{ .name = "du", .argv = &.{"du"} },
+        .{ .name = "docker", .argv = &.{"docker"} },
+        .{ .name = "kubectl", .argv = &.{"kubectl"} },
+        .{ .name = "gh", .argv = &.{"gh"} },
+        .{ .name = "ps", .argv = &.{"ps"} },
+        .{ .name = "systemctl", .argv = &.{"systemctl"} },
+        .{ .name = "lsof", .argv = &.{"lsof"} },
+        .{ .name = "npm", .argv = &.{"npm"} },
+        .{ .name = "pnpm", .argv = &.{"pnpm"} },
+        .{ .name = "yarn", .argv = &.{"yarn"} },
+        .{ .name = "brew", .argv = &.{"brew"} },
+    };
+
+    // Pick a payload that no bespoke filter will interpret as actionable.
+    // 100 KiB of a generic log line, consecutive identical → trivially
+    // RLE-collapsible IF generic ran. No "FAIL", no "error TS", no "---".
+    const payload = try buildLargeRepeatedPayload(allocator, "log entry ok", 100 * 1024);
+    defer allocator.free(payload);
+
+    for (cases) |case| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const bin_dir = try setupFakeTool(allocator, tmp.dir, case.name, payload);
+        defer allocator.free(bin_dir);
+
+        var result = try runSmllWrapperEnv(allocator, bin_dir, case.argv, &.{});
+        defer result.deinit(allocator);
+
+        // Generic marker must not appear for any bespoke command.
+        std.testing.expect(std.mem.find(u8, result.stdout, "  (x") == null) catch |err| {
+            std.debug.print(
+                "dispatch invariant violated: command='{s}' reached generic compactor\n",
+                .{case.name},
+            );
+            return err;
+        };
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 find_compact — argv-keyed dispatch on `find -ls`.
+// ---------------------------------------------------------------------------
+
+const find_ls_fixture =
+    "2055938    0 drwxr-xr-x   2 user staff   64 Apr 23 12:34 ./src\n" ++
+    "2055939    8 -rw-r--r--   1 user staff  421 Apr 23 12:34 ./src/main.zig\n" ++
+    "2055940    8 -rw-r--r--   1 user staff  123 Apr 23 12:34 ./src/filter.zig\n" ++
+    "2055941    4 -rw-r--r--   1 user staff   45 Apr 23 12:34 ./README.md\n" ++
+    "2055942    0 drwxr-xr-x   2 user staff   64 Apr 23 12:34 ./tests\n";
+
+test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_ls_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", ".", "-ls" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < find_ls_fixture.len);
+    // 3 entries in "." (./src, ./README.md, ./tests) collapse to a count;
+    // 2 entries in "./src" (./src/main.zig, ./src/filter.zig) survive individually.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/filter.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries)") != null);
+    // Metadata gone.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Apr 23") == null);
+}
+
+test "smoke: find without -ls does NOT route through find_compact" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    // Vanilla find output — path-per-line, no metadata columns. Without
+    // `-ls` in argv, find_compact is skipped. rg.apply (dirname RLE) may
+    // compress the paths with its ':' sigil, but the filenames survive.
+    const find_paths_fixture =
+        "./src\n./src/main.zig\n./src/filter.zig\n./README.md\n";
+
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_paths_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Filenames survive (whether as full paths or rg-compressed form).
+    try std.testing.expect(std.mem.find(u8, result.stdout, "main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "filter.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "README.md") != null);
+    // find_compact's directory marker (trailing `/` on dirs after 10
+    // fields) must not appear — there are no 10-field lines here.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
+}
+
+test "smoke: find -ls with SMLL_LOSSLESS=1 passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_ls_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "find", ".", "-ls" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, find_ls_fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 du_compact — size rounding + -s sort.
+// ---------------------------------------------------------------------------
+
+const du_fixture =
+    "234M\t./src\n" ++
+    "1.2G\t./vendor\n" ++
+    "17K\t./tests\n" ++
+    "5G\t./node_modules\n" ++
+    "82M\t./build\n";
+
+test "smoke: du rounds sizes to 2 sig figs (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "du", du_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "du", "-h", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // 234M → 230M; paths preserved.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "230M\t./src") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "1.2G\t./vendor") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "17K\t./tests") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "82M\t./build") != null);
+    // Order preserved without -s.
+    const src_idx = std.mem.find(u8, result.stdout, "./src").?;
+    const vendor_idx = std.mem.find(u8, result.stdout, "./vendor").?;
+    try std.testing.expect(src_idx < vendor_idx);
+}
+
+test "smoke: du -sh sorts descending by byte size" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "du", du_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "du", "-sh", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Largest first: 5G node_modules, then 1.2G vendor, then 230M src, 82M build, 17K tests.
+    const nm_idx = std.mem.find(u8, result.stdout, "./node_modules").?;
+    const vendor_idx = std.mem.find(u8, result.stdout, "./vendor").?;
+    const src_idx = std.mem.find(u8, result.stdout, "./src").?;
+    const tests_idx = std.mem.find(u8, result.stdout, "./tests").?;
+    try std.testing.expect(nm_idx < vendor_idx);
+    try std.testing.expect(vendor_idx < src_idx);
+    try std.testing.expect(src_idx < tests_idx);
+}
+
+test "smoke: du with SMLL_LOSSLESS=1 passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "du", du_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "du", "-sh", "." },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, du_fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 curl_compact — two-stream (stdout+stderr) verbose-flag dispatch.
+// ---------------------------------------------------------------------------
+
+const curl_small_stderr = @embedFile("fixture_curl_v_example_stderr");
+const curl_small_stdout = @embedFile("fixture_curl_v_example_stdout");
+const curl_large_stderr = @embedFile("fixture_curl_vvv_example_stderr");
+const curl_large_stdout = @embedFile("fixture_curl_vvv_example_stdout");
+
+/// Fake `curl` that emits stdout_fixture on stdout and stderr_fixture on
+/// stderr — mirrors curl's two-stream shape (body on stdout, trace on stderr).
+fn setupFakeCurl(
+    allocator: std.mem.Allocator,
+    tmp_dir: std.Io.Dir,
+    stdout_fixture: []const u8,
+    stderr_fixture: []const u8,
+) ![]u8 {
+    const io = std.testing.io;
+    try tmp_dir.writeFile(io, .{ .sub_path = "curl_stdout.txt", .data = stdout_fixture });
+    try tmp_dir.writeFile(io, .{ .sub_path = "curl_stderr.txt", .data = stderr_fixture });
+    const stdout_path = try tmp_dir.realPathFileAlloc(io, "curl_stdout.txt", allocator);
+    defer allocator.free(stdout_path);
+    const stderr_path = try tmp_dir.realPathFileAlloc(io, "curl_stderr.txt", allocator);
+    defer allocator.free(stderr_path);
+
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\n/bin/cat {s}\n/bin/cat {s} >&2\n",
+        .{ stdout_path, stderr_path },
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp_dir, "curl", script);
+
+    return try tmp_dir.realPathFileAlloc(io, ".", allocator);
+}
+
+test "smoke: curl -v drops TLS chatter, keeps headers + body (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_small_stdout, curl_small_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-v", "https://example.com" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Kept
+    try std.testing.expect(std.mem.find(u8, result.stdout, "< HTTP/2 200") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "> GET / HTTP/2") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Example Domain") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---") != null);
+    // Dropped
+    try std.testing.expect(std.mem.find(u8, result.stdout, "TLSv1.3") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "issuer:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "SSL certificate verify") == null);
+}
+
+test "smoke: curl large -vvv fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_large_stdout, curl_large_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-vvv", "https://api.example.com" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const raw_total = curl_large_stderr.len + curl_large_stdout.len;
+    const reduction = (raw_total - result.stdout.len) * 100 / raw_total;
+    try std.testing.expect(reduction >= 60);
+    // No cert material survives.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "BEGIN CERTIFICATE") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "MIIFaz") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
+    // Every request's status line survives.
+    try std.testing.expect(std.mem.count(u8, result.stdout, "< HTTP/2 200") == 30);
+}
+
+test "smoke: curl without -v passes through (no dispatch)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_small_stdout, curl_small_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "https://example.com" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // No headers/body separator — dispatch arm didn't engage.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---") == null);
+    // Body is on stdout verbatim.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Example Domain") != null);
+}
+
+test "smoke: curl -v with SMLL_LOSSLESS=1 passes both streams through byte-identical" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeCurl(allocator, tmp.dir, curl_small_stdout, curl_small_stderr);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "curl", "-v", "https://example.com" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, curl_small_stdout, result.stdout);
+    try std.testing.expectEqualSlices(u8, curl_small_stderr, result.stderr);
+}
+
+// ---------------------------------------------------------------------------
+// v0.6 build_compact — shared filter for `cargo build`, `make`, `go build`.
+// cargo/go emit progress on stderr by convention; make splits across both.
+// setupFakeBuild supports routing a fixture to either stream so each tool's
+// real shape is preserved.
+// ---------------------------------------------------------------------------
+
+const cargo_build_fixture = @embedFile("fixture_cargo_build");
+const cargo_build_large = @embedFile("fixture_cargo_build_large");
+const make_build_fixture = @embedFile("fixture_make_build");
+const make_build_large = @embedFile("fixture_make_build_large");
+const go_build_fixture = @embedFile("fixture_go_build");
+const go_build_large = @embedFile("fixture_go_build_large");
+
+/// Fake build tool that emits a fixture on the given stream (stdout or stderr).
+/// cargo/go usually print progress to stderr; make usually prints to stdout.
+fn setupFakeBuild(
+    allocator: std.mem.Allocator,
+    tmp_dir: std.Io.Dir,
+    tool_name: []const u8,
+    fixture: []const u8,
+    on_stderr: bool,
+) ![]u8 {
+    const io = std.testing.io;
+    const fixture_name = try std.fmt.allocPrint(allocator, "{s}_build_fixture.txt", .{tool_name});
+    defer allocator.free(fixture_name);
+    try tmp_dir.writeFile(io, .{ .sub_path = fixture_name, .data = fixture });
+    const fixture_path = try tmp_dir.realPathFileAlloc(io, fixture_name, allocator);
+    defer allocator.free(fixture_path);
+
+    const redirect = if (on_stderr) " >&2" else "";
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\n/bin/cat {s}{s}\n",
+        .{ fixture_path, redirect },
+    );
+    defer allocator.free(script);
+    try writeFakeScript(tmp_dir, tool_name, script);
+
+    return try tmp_dir.realPathFileAlloc(io, ".", allocator);
+}
+
+test "smoke: cargo build collapses Compiling lines on stderr (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Progress collapsed, summary emitted.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 7 files (cargo)") != null);
+    // No raw "   Compiling " lines survive.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "   Compiling ") == null);
+    // Warning block preserved verbatim.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable: `tmp`") != null);
+    // Finished line preserved.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Finished dev") != null);
+}
+
+test "smoke: cargo build large fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_large, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const reduction = (cargo_build_large.len - result.stdout.len) * 100 / cargo_build_large.len;
+    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 files (cargo)") != null);
+    // Warnings survived.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused import") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: variable does not need to be mutable") != null);
+}
+
+test "smoke: make collapses cc/LINK lines on stdout" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "make", make_build_fixture, false);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"make"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // 4 cc lines + 1 LINK line = 5 progress.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 5 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cc -c -Wall") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "LINK build/app") == null);
+    // Warning survived.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'tmp'") != null);
+}
+
+test "smoke: make large fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "make", make_build_large, false);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"make"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const reduction = (make_build_large.len - result.stdout.len) * 100 / make_build_large.len;
+    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 501 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'tmp'") != null);
+}
+
+test "smoke: go build collapses `go build:` lines on stderr" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "go", go_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "go", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 6 files (go)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "go build: compiling") == null);
+    // The "declared and not used" line has no error:/warning: prefix, so it
+    // classifies as .other and passes through verbatim.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "declared and not used: claims") != null);
+}
+
+test "smoke: go build large fixture reduces by ≥ 60%" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "go", go_build_large, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "go", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    const reduction = (go_build_large.len - result.stdout.len) * 100 / go_build_large.len;
+    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 files (go)") != null);
+    // Errors survived.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error: declared and not used") != null);
+}
+
+test "smoke: cargo build with SMLL_LOSSLESS=1 passes through byte-identical" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "cargo", "build" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Fixture was routed to stderr, so stdout is empty in lossless mode.
+    try std.testing.expectEqualSlices(u8, "", result.stdout);
+    try std.testing.expectEqualSlices(u8, cargo_build_fixture, result.stderr);
+}
+
+test "smoke: cargo without build subcommand doesn't dispatch to build_compact" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "check" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // No "Compiled" summary line — build arm didn't engage.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled ") == null);
 }

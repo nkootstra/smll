@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `npm install` / `npm ci` (SMLL_COMPACT=1).
+// LOSSY compact filter for `npm install` / `npm ci` — on by default
+// (v0.6). Set SMLL_LOSSLESS=1 to bypass.
 //
 // Keeps: WARN/ERR!/error/deprecated lines, the install summary (added/removed/
 //        changed/up to date/audited), vulnerabilities lines.

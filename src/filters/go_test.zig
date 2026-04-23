@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `go test -v` (SMLL_COMPACT=1).
+// LOSSY compact filter for `go test -v` — on by default (v0.6). Set
+// SMLL_LOSSLESS=1 to bypass.
 //
 // Keeps: `--- FAIL:` lines, error context under a FAIL, `FAIL`/`ok` package
 //        summary, final `exit status` + `PASS`/`FAIL` marker.

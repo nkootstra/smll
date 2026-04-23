@@ -1,0 +1,1149 @@
+*   Trying 10.0.0.2:443...
+* Connected to api.example.com (10.0.0.2) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/1 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:01 GMT
+< x-request-id: req-1
+<
+*   Trying 10.0.0.3:443...
+* Connected to api.example.com (10.0.0.3) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/2 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:02 GMT
+< x-request-id: req-2
+<
+*   Trying 10.0.0.4:443...
+* Connected to api.example.com (10.0.0.4) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/3 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:03 GMT
+< x-request-id: req-3
+<
+*   Trying 10.0.0.5:443...
+* Connected to api.example.com (10.0.0.5) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/4 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:04 GMT
+< x-request-id: req-4
+<
+*   Trying 10.0.0.6:443...
+* Connected to api.example.com (10.0.0.6) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/5 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:05 GMT
+< x-request-id: req-5
+<
+*   Trying 10.0.0.7:443...
+* Connected to api.example.com (10.0.0.7) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/6 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:06 GMT
+< x-request-id: req-6
+<
+*   Trying 10.0.0.8:443...
+* Connected to api.example.com (10.0.0.8) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/7 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:07 GMT
+< x-request-id: req-7
+<
+*   Trying 10.0.0.9:443...
+* Connected to api.example.com (10.0.0.9) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/8 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:08 GMT
+< x-request-id: req-8
+<
+*   Trying 10.0.0.10:443...
+* Connected to api.example.com (10.0.0.10) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/9 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:09 GMT
+< x-request-id: req-9
+<
+*   Trying 10.0.0.11:443...
+* Connected to api.example.com (10.0.0.11) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/10 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:00 GMT
+< x-request-id: req-10
+<
+*   Trying 10.0.0.12:443...
+* Connected to api.example.com (10.0.0.12) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/11 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:01 GMT
+< x-request-id: req-11
+<
+*   Trying 10.0.0.13:443...
+* Connected to api.example.com (10.0.0.13) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/12 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:02 GMT
+< x-request-id: req-12
+<
+*   Trying 10.0.0.14:443...
+* Connected to api.example.com (10.0.0.14) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/13 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:03 GMT
+< x-request-id: req-13
+<
+*   Trying 10.0.0.15:443...
+* Connected to api.example.com (10.0.0.15) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/14 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:04 GMT
+< x-request-id: req-14
+<
+*   Trying 10.0.0.16:443...
+* Connected to api.example.com (10.0.0.16) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/15 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:05 GMT
+< x-request-id: req-15
+<
+*   Trying 10.0.0.17:443...
+* Connected to api.example.com (10.0.0.17) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/16 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:06 GMT
+< x-request-id: req-16
+<
+*   Trying 10.0.0.18:443...
+* Connected to api.example.com (10.0.0.18) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/17 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:07 GMT
+< x-request-id: req-17
+<
+*   Trying 10.0.0.19:443...
+* Connected to api.example.com (10.0.0.19) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/18 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:08 GMT
+< x-request-id: req-18
+<
+*   Trying 10.0.0.20:443...
+* Connected to api.example.com (10.0.0.20) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/19 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:09 GMT
+< x-request-id: req-19
+<
+*   Trying 10.0.0.21:443...
+* Connected to api.example.com (10.0.0.21) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/20 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:00 GMT
+< x-request-id: req-20
+<
+*   Trying 10.0.0.22:443...
+* Connected to api.example.com (10.0.0.22) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/21 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:01 GMT
+< x-request-id: req-21
+<
+*   Trying 10.0.0.23:443...
+* Connected to api.example.com (10.0.0.23) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/22 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:02 GMT
+< x-request-id: req-22
+<
+*   Trying 10.0.0.24:443...
+* Connected to api.example.com (10.0.0.24) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/23 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:03 GMT
+< x-request-id: req-23
+<
+*   Trying 10.0.0.25:443...
+* Connected to api.example.com (10.0.0.25) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/24 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:04 GMT
+< x-request-id: req-24
+<
+*   Trying 10.0.0.26:443...
+* Connected to api.example.com (10.0.0.26) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/25 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:05 GMT
+< x-request-id: req-25
+<
+*   Trying 10.0.0.27:443...
+* Connected to api.example.com (10.0.0.27) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/26 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:06 GMT
+< x-request-id: req-26
+<
+*   Trying 10.0.0.28:443...
+* Connected to api.example.com (10.0.0.28) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/27 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:07 GMT
+< x-request-id: req-27
+<
+*   Trying 10.0.0.29:443...
+* Connected to api.example.com (10.0.0.29) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/28 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:08 GMT
+< x-request-id: req-28
+<
+*   Trying 10.0.0.30:443...
+* Connected to api.example.com (10.0.0.30) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/29 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:09 GMT
+< x-request-id: req-29
+<
+*   Trying 10.0.0.31:443...
+* Connected to api.example.com (10.0.0.31) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/30 HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:00 GMT
+< x-request-id: req-30
+<
+* Server certificate chain:
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIUJYJn0qRkWZA5YDEmEHKG5tJX+q4wDQYJKoZIhvcNAQEL
+BQAwRTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExETAPBgNVBAoM
+CEV4YW1wbGUxDjAMBgNVBAMMBVJvb3QxMB4XDTI0MDEwMTAwMDAwMFoXDTM0MDEw
+MTAwMDAwMFowRTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExETAP
+BgNVBAoMCEV4YW1wbGUxDjAMBgNVBAMMBVJvb3QxMIICIjANBgkqhkiG9w0BAQEF
+AAOCAg8AMIICCgKCAgEAz4ftrMELxpz+fXhVfpCwJ5V4j+0H8wKLOoE4jJZP7vWj
+-----END CERTIFICATE-----

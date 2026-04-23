@@ -1,0 +1,31 @@
+*   Trying 93.184.216.34:443...
+* Connected to example.com (93.184.216.34) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "example.com" matched cert's "example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Using HTTP2, server supports multiplexing
+> GET / HTTP/2
+> Host: example.com
+> User-Agent: curl/8.0.1
+> accept: */*
+>
+< HTTP/2 200
+< content-type: text/html; charset=UTF-8
+< content-length: 1256
+< date: Mon, 22 Apr 2026 12:00:00 GMT
+<
+* Connection #0 to host example.com left intact

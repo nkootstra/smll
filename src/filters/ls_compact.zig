@@ -2,7 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// Opt-in LOSSY compact filter for `ls -l` / `ls -la` (enabled via SMLL_COMPACT=1).
+// LOSSY compact filter for `ls -l` / `ls -la` — on by default (v0.6).
+// Set SMLL_LOSSLESS=1 to bypass.
 //
 // Drops: permissions, link count, owner, group, size, date/time, the
 // leading "total N" line.

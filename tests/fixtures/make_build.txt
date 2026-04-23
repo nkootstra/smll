@@ -1,0 +1,8 @@
+cc -c -Wall -O2 -Iinclude src/foo.c -o build/foo.o
+cc -c -Wall -O2 -Iinclude src/bar.c -o build/bar.o
+cc -c -Wall -O2 -Iinclude src/baz.c -o build/baz.o
+src/baz.c:18:12: warning: unused variable 'tmp' [-Wunused-variable]
+   18 |     int tmp = 0;
+      |         ^~~
+cc -c -Wall -O2 -Iinclude src/qux.c -o build/qux.o
+LINK build/app

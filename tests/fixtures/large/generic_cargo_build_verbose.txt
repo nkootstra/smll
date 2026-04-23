@@ -1,0 +1,1681 @@
+[32m   Compiling[0m serde v2.1.1
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1f -C extra-filename=-1f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v3.2.2
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=3e -C extra-filename=-3e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v4.3.3
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=5d -C extra-filename=-5d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v5.4.4
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=7c -C extra-filename=-7c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v6.5.0
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=9b -C extra-filename=-9b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v7.6.1
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ba -C extra-filename=-ba --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v8.7.2
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=d9 -C extra-filename=-d9 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v9.8.3
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f8 -C extra-filename=-f8 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v10.9.4
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=117 -C extra-filename=-117 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v1.10.0
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=136 -C extra-filename=-136 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v2.11.1
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=155 -C extra-filename=-155 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v3.12.2
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=174 -C extra-filename=-174 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v4.13.3
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=193 -C extra-filename=-193 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v5.14.4
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b2 -C extra-filename=-1b2 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v6.15.0
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1d1 -C extra-filename=-1d1 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v7.16.1
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1f0 -C extra-filename=-1f0 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v8.17.2
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=20f -C extra-filename=-20f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v9.18.3
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=22e -C extra-filename=-22e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v10.19.4
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=24d -C extra-filename=-24d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v1.0.0
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=26c -C extra-filename=-26c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v2.1.1
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=28b -C extra-filename=-28b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v3.2.2
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=2aa -C extra-filename=-2aa --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v4.3.3
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=2c9 -C extra-filename=-2c9 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v5.4.4
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=2e8 -C extra-filename=-2e8 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v6.5.0
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=307 -C extra-filename=-307 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v7.6.1
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=326 -C extra-filename=-326 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v8.7.2
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=345 -C extra-filename=-345 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v9.8.3
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=364 -C extra-filename=-364 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v10.9.4
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=383 -C extra-filename=-383 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v1.10.0
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=3a2 -C extra-filename=-3a2 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v2.11.1
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=3c1 -C extra-filename=-3c1 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v3.12.2
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=3e0 -C extra-filename=-3e0 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v4.13.3
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=3ff -C extra-filename=-3ff --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v5.14.4
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=41e -C extra-filename=-41e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v6.15.0
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=43d -C extra-filename=-43d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v7.16.1
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=45c -C extra-filename=-45c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v8.17.2
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=47b -C extra-filename=-47b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v9.18.3
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=49a -C extra-filename=-49a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v10.19.4
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=4b9 -C extra-filename=-4b9 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v1.0.0
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=4d8 -C extra-filename=-4d8 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v2.1.1
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=4f7 -C extra-filename=-4f7 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v3.2.2
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=516 -C extra-filename=-516 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v4.3.3
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=535 -C extra-filename=-535 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v5.4.4
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=554 -C extra-filename=-554 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v6.5.0
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=573 -C extra-filename=-573 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v7.6.1
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=592 -C extra-filename=-592 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v8.7.2
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=5b1 -C extra-filename=-5b1 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v9.8.3
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=5d0 -C extra-filename=-5d0 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v10.9.4
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=5ef -C extra-filename=-5ef --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v1.10.0
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=60e -C extra-filename=-60e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v2.11.1
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=62d -C extra-filename=-62d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v3.12.2
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=64c -C extra-filename=-64c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v4.13.3
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=66b -C extra-filename=-66b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v5.14.4
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=68a -C extra-filename=-68a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v6.15.0
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=6a9 -C extra-filename=-6a9 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v7.16.1
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=6c8 -C extra-filename=-6c8 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v8.17.2
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=6e7 -C extra-filename=-6e7 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v9.18.3
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=706 -C extra-filename=-706 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v10.19.4
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=725 -C extra-filename=-725 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v1.0.0
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=744 -C extra-filename=-744 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v2.1.1
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=763 -C extra-filename=-763 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v3.2.2
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=782 -C extra-filename=-782 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v4.3.3
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=7a1 -C extra-filename=-7a1 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v5.4.4
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=7c0 -C extra-filename=-7c0 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v6.5.0
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=7df -C extra-filename=-7df --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v7.6.1
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=7fe -C extra-filename=-7fe --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v8.7.2
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=81d -C extra-filename=-81d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v9.8.3
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=83c -C extra-filename=-83c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v10.9.4
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=85b -C extra-filename=-85b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v1.10.0
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=87a -C extra-filename=-87a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v2.11.1
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=899 -C extra-filename=-899 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v3.12.2
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=8b8 -C extra-filename=-8b8 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v4.13.3
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=8d7 -C extra-filename=-8d7 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v5.14.4
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=8f6 -C extra-filename=-8f6 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v6.15.0
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=915 -C extra-filename=-915 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v7.16.1
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=934 -C extra-filename=-934 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v8.17.2
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=953 -C extra-filename=-953 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v9.18.3
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=972 -C extra-filename=-972 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v10.19.4
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=991 -C extra-filename=-991 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v1.0.0
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=9b0 -C extra-filename=-9b0 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v2.1.1
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=9cf -C extra-filename=-9cf --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v3.2.2
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=9ee -C extra-filename=-9ee --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v4.3.3
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=a0d -C extra-filename=-a0d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v5.4.4
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=a2c -C extra-filename=-a2c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v6.5.0
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=a4b -C extra-filename=-a4b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v7.6.1
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=a6a -C extra-filename=-a6a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v8.7.2
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=a89 -C extra-filename=-a89 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v9.8.3
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=aa8 -C extra-filename=-aa8 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v10.9.4
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ac7 -C extra-filename=-ac7 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v1.10.0
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ae6 -C extra-filename=-ae6 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v2.11.1
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=b05 -C extra-filename=-b05 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v3.12.2
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=b24 -C extra-filename=-b24 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v4.13.3
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=b43 -C extra-filename=-b43 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v5.14.4
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=b62 -C extra-filename=-b62 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v6.15.0
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=b81 -C extra-filename=-b81 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v7.16.1
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ba0 -C extra-filename=-ba0 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v8.17.2
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=bbf -C extra-filename=-bbf --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v9.18.3
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=bde -C extra-filename=-bde --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v10.19.4
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=bfd -C extra-filename=-bfd --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v1.0.0
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=c1c -C extra-filename=-c1c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v2.1.1
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=c3b -C extra-filename=-c3b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v3.2.2
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=c5a -C extra-filename=-c5a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v4.3.3
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=c79 -C extra-filename=-c79 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v5.4.4
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=c98 -C extra-filename=-c98 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v6.5.0
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=cb7 -C extra-filename=-cb7 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v7.6.1
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=cd6 -C extra-filename=-cd6 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v8.7.2
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=cf5 -C extra-filename=-cf5 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v9.8.3
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=d14 -C extra-filename=-d14 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v10.9.4
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=d33 -C extra-filename=-d33 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v1.10.0
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=d52 -C extra-filename=-d52 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v2.11.1
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=d71 -C extra-filename=-d71 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v3.12.2
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=d90 -C extra-filename=-d90 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v4.13.3
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=daf -C extra-filename=-daf --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v5.14.4
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=dce -C extra-filename=-dce --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v6.15.0
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ded -C extra-filename=-ded --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v7.16.1
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=e0c -C extra-filename=-e0c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v8.17.2
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=e2b -C extra-filename=-e2b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v9.18.3
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=e4a -C extra-filename=-e4a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v10.19.4
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=e69 -C extra-filename=-e69 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v1.0.0
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=e88 -C extra-filename=-e88 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v2.1.1
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ea7 -C extra-filename=-ea7 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v3.2.2
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ec6 -C extra-filename=-ec6 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v4.3.3
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ee5 -C extra-filename=-ee5 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v5.4.4
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f04 -C extra-filename=-f04 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v6.5.0
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f23 -C extra-filename=-f23 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v7.6.1
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f42 -C extra-filename=-f42 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v8.7.2
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f61 -C extra-filename=-f61 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v9.8.3
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f80 -C extra-filename=-f80 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v10.9.4
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=f9f -C extra-filename=-f9f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v1.10.0
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=fbe -C extra-filename=-fbe --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v2.11.1
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=fdd -C extra-filename=-fdd --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v3.12.2
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=ffc -C extra-filename=-ffc --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v4.13.3
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=101b -C extra-filename=-101b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v5.14.4
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=103a -C extra-filename=-103a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v6.15.0
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1059 -C extra-filename=-1059 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v7.16.1
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1078 -C extra-filename=-1078 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v8.17.2
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1097 -C extra-filename=-1097 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v9.18.3
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=10b6 -C extra-filename=-10b6 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v10.19.4
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=10d5 -C extra-filename=-10d5 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v1.0.0
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=10f4 -C extra-filename=-10f4 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v2.1.1
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1113 -C extra-filename=-1113 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v3.2.2
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1132 -C extra-filename=-1132 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v4.3.3
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1151 -C extra-filename=-1151 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v5.4.4
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1170 -C extra-filename=-1170 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v6.5.0
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=118f -C extra-filename=-118f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v7.6.1
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=11ae -C extra-filename=-11ae --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v8.7.2
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=11cd -C extra-filename=-11cd --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v9.8.3
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=11ec -C extra-filename=-11ec --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v10.9.4
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=120b -C extra-filename=-120b --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v1.10.0
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=122a -C extra-filename=-122a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v2.11.1
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1249 -C extra-filename=-1249 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v3.12.2
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1268 -C extra-filename=-1268 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v4.13.3
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1287 -C extra-filename=-1287 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v5.14.4
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=12a6 -C extra-filename=-12a6 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v6.15.0
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=12c5 -C extra-filename=-12c5 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v7.16.1
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=12e4 -C extra-filename=-12e4 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v8.17.2
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1303 -C extra-filename=-1303 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v9.18.3
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1322 -C extra-filename=-1322 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v10.19.4
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1341 -C extra-filename=-1341 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v1.0.0
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1360 -C extra-filename=-1360 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v2.1.1
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=137f -C extra-filename=-137f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v3.2.2
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=139e -C extra-filename=-139e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v4.3.3
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=13bd -C extra-filename=-13bd --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v5.4.4
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=13dc -C extra-filename=-13dc --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v6.5.0
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=13fb -C extra-filename=-13fb --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v7.6.1
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=141a -C extra-filename=-141a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v8.7.2
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1439 -C extra-filename=-1439 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v9.8.3
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1458 -C extra-filename=-1458 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v10.9.4
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1477 -C extra-filename=-1477 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v1.10.0
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1496 -C extra-filename=-1496 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v2.11.1
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=14b5 -C extra-filename=-14b5 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v3.12.2
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=14d4 -C extra-filename=-14d4 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v4.13.3
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=14f3 -C extra-filename=-14f3 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v5.14.4
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1512 -C extra-filename=-1512 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v6.15.0
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1531 -C extra-filename=-1531 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v7.16.1
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1550 -C extra-filename=-1550 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v8.17.2
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=156f -C extra-filename=-156f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v9.18.3
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=158e -C extra-filename=-158e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v10.19.4
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=15ad -C extra-filename=-15ad --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v1.0.0
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=15cc -C extra-filename=-15cc --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v2.1.1
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=15eb -C extra-filename=-15eb --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v3.2.2
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=160a -C extra-filename=-160a --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v4.3.3
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1629 -C extra-filename=-1629 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v5.4.4
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1648 -C extra-filename=-1648 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v6.5.0
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1667 -C extra-filename=-1667 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v7.6.1
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1686 -C extra-filename=-1686 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v8.7.2
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=16a5 -C extra-filename=-16a5 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v9.8.3
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=16c4 -C extra-filename=-16c4 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v10.9.4
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=16e3 -C extra-filename=-16e3 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v1.10.0
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1702 -C extra-filename=-1702 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v2.11.1
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1721 -C extra-filename=-1721 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v3.12.2
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1740 -C extra-filename=-1740 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v4.13.3
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=175f -C extra-filename=-175f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v5.14.4
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=177e -C extra-filename=-177e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v6.15.0
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=179d -C extra-filename=-179d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v7.16.1
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=17bc -C extra-filename=-17bc --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v8.17.2
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=17db -C extra-filename=-17db --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v9.18.3
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=17fa -C extra-filename=-17fa --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v10.19.4
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1819 -C extra-filename=-1819 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v1.0.0
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1838 -C extra-filename=-1838 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v2.1.1
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1857 -C extra-filename=-1857 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v3.2.2
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1876 -C extra-filename=-1876 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v4.3.3
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1895 -C extra-filename=-1895 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v5.4.4
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=18b4 -C extra-filename=-18b4 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v6.5.0
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=18d3 -C extra-filename=-18d3 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v7.6.1
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=18f2 -C extra-filename=-18f2 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v8.7.2
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1911 -C extra-filename=-1911 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v9.8.3
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1930 -C extra-filename=-1930 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v10.9.4
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=194f -C extra-filename=-194f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v1.10.0
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=196e -C extra-filename=-196e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v2.11.1
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=198d -C extra-filename=-198d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v3.12.2
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=19ac -C extra-filename=-19ac --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v4.13.3
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=19cb -C extra-filename=-19cb --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v5.14.4
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=19ea -C extra-filename=-19ea --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v6.15.0
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1a09 -C extra-filename=-1a09 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v7.16.1
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1a28 -C extra-filename=-1a28 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v8.17.2
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1a47 -C extra-filename=-1a47 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v9.18.3
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1a66 -C extra-filename=-1a66 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v10.19.4
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1a85 -C extra-filename=-1a85 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m reqwest v1.0.0
+     Running `rustc --crate-name reqwest --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1aa4 -C extra-filename=-1aa4 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m anyhow v2.1.1
+     Running `rustc --crate-name anyhow --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1ac3 -C extra-filename=-1ac3 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m thiserror v3.2.2
+     Running `rustc --crate-name thiserror --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1ae2 -C extra-filename=-1ae2 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m log v4.3.3
+     Running `rustc --crate-name log --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b01 -C extra-filename=-1b01 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m env_logger v5.4.4
+     Running `rustc --crate-name env_logger --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b20 -C extra-filename=-1b20 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap v6.5.0
+     Running `rustc --crate-name clap --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b3f -C extra-filename=-1b3f --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m clap_derive v7.6.1
+     Running `rustc --crate-name clap_derive --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b5e -C extra-filename=-1b5e --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m once_cell v8.7.2
+     Running `rustc --crate-name once_cell --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b7d -C extra-filename=-1b7d --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m lazy_static v9.8.3
+     Running `rustc --crate-name lazy_static --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1b9c -C extra-filename=-1b9c --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m regex v10.9.4
+     Running `rustc --crate-name regex --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1bbb -C extra-filename=-1bbb --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m memchr v1.10.0
+     Running `rustc --crate-name memchr --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1bda -C extra-filename=-1bda --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m aho-corasick v2.11.1
+     Running `rustc --crate-name aho-corasick --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1bf9 -C extra-filename=-1bf9 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m serde v3.12.2
+     Running `rustc --crate-name serde --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1c18 -C extra-filename=-1c18 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m syn v4.13.3
+     Running `rustc --crate-name syn --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1c37 -C extra-filename=-1c37 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m quote v5.14.4
+     Running `rustc --crate-name quote --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1c56 -C extra-filename=-1c56 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro2 v6.15.0
+     Running `rustc --crate-name proc-macro2 --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1c75 -C extra-filename=-1c75 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m unicode-ident v7.16.1
+     Running `rustc --crate-name unicode-ident --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1c94 -C extra-filename=-1c94 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m proc-macro-hack v8.17.2
+     Running `rustc --crate-name proc-macro-hack --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1cb3 -C extra-filename=-1cb3 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m futures v9.18.3
+     Running `rustc --crate-name futures --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1cd2 -C extra-filename=-1cd2 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m tokio v10.19.4
+     Running `rustc --crate-name tokio --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1cf1 -C extra-filename=-1cf1 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+[32m   Compiling[0m hyper v1.0.0
+     Running `rustc --crate-name hyper --edition=2021 --crate-type lib --emit=dep-info,metadata,link -C embed-bitcode=no -C codegen-units=1 -C metadata=1d10 -C extra-filename=-1d10 --out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: unused import: `std::collections::HashMap`
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+warning: variable does not need to be mutable
+[32m    Finished[0m release [optimized] target(s) in 45.23s

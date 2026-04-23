@@ -694,20 +694,307 @@ done
 git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
 
 # ── large git_push ─────────────────────────────────────────────────────────────
-# Push many commits (the large_scratch history) to a bare remote.
-LARGE_REMOTE=$(mktemp -d -t smll-large-remote-XXXXXX)
-trap 'rm -rf "$SCRATCH" "$SMALL_SCRATCH" "$REMOTE_DIR" "$CLONE2" "$BLAME_REPO" "$LARGE_SCRATCH" "$LARGE_REMOTE"' EXIT
-git init -q --bare "$LARGE_REMOTE"
-git -C "$LARGE_SCRATCH" remote add origin "$LARGE_REMOTE"
+# NOTE: tests/fixtures/large/git_push.{stdout,stderr}.txt are HAND-MAINTAINED.
+# The test `apply: large fixture preserves all 10 refs` exercises a ten-ref
+# push shape (mixed new-branch / fast-forward / rejected / deleted rows) that
+# is hard to produce deterministically from a scratch repo. Regenerating it
+# here would collapse it to a single "main -> main" line and break the test.
+# If you need to update the fixture, edit those files directly.
 
-# Push the large-rebase-branch (which has many commits) to get a rich push summary.
-git -C "$LARGE_SCRATCH" push --no-progress -u origin main \
-  > "$OUT_DIR/git_push.stdout.txt" \
-  2> "$OUT_DIR/git_push.stderr.txt"
-# Replace the absolute temp path for determinism.
-sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.stdout.txt"
-sed -i.bak "s|$LARGE_REMOTE|/smll-fixture-large-remote|g" "$OUT_DIR/git_push.stderr.txt"
-rm -f "$OUT_DIR/git_push.stdout.txt.bak" "$OUT_DIR/git_push.stderr.txt.bak"
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 3b: v0.6 generic-compact calibration fixtures
+# Synthetic — must exceed 64 KiB and mimic real-world output shapes
+# (pip install, cargo build -vv, journalctl, find /usr).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── generic_pip_install.txt ───────────────────────────────────────────────────
+# pip install output: many "Collecting ..." / "Requirement already satisfied"
+# lines, common repeats via nested transitive deps, ANSI color on "Successfully".
+{
+    for n in $(seq 1 400); do
+        pkg="lib-pkg-$(printf '%03d' "$n")"
+        ver="$((n % 50 + 1)).$((n % 10)).$((n % 5))"
+        printf 'Collecting %s==%s\n' "$pkg" "$ver"
+        printf '  Downloading %s-%s-py3-none-any.whl (%d kB)\n' "$pkg" "$ver" "$((n * 3 + 41))"
+        printf '     \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80 %d.%d/%d.%d kB %d.%d MB/s eta 0:00:00\n' \
+            "$((n * 3 + 41))" 0 "$((n * 3 + 41))" 0 $((n % 9 + 1)) $((n % 9))
+    done
+    # Transitive-dep repeats — 400 identical "Requirement already satisfied"
+    # lines. Real pip logs commonly re-emit this for every downstream dep.
+    for _ in $(seq 1 400); do
+        printf 'Requirement already satisfied: urllib3<3,>=1.21.1 in /usr/lib/python3/dist-packages (from requests) (2.0.7)\n'
+    done
+    printf '\n\n\nInstalling collected packages:'
+    for n in $(seq 1 400); do
+        printf ' lib-pkg-%03d,' "$n"
+    done
+    printf '\n\n'
+    printf '\x1b[32mSuccessfully installed 400 packages\x1b[0m\n'
+} > "$OUT_DIR/generic_pip_install.txt"
+
+# ── generic_cargo_build_verbose.txt ───────────────────────────────────────────
+# cargo build -vv: many "Compiling <crate> v<ver>" + rustc invocations with
+# repeated flag-sets, ANSI green on "Finished".
+{
+    crates=(serde syn quote proc-macro2 unicode-ident proc-macro-hack
+            futures tokio hyper reqwest anyhow thiserror log env_logger
+            clap clap_derive once_cell lazy_static regex memchr aho-corasick)
+    for n in $(seq 1 240); do
+        crate="${crates[$(( (n - 1) % ${#crates[@]} ))]}"
+        ver="$((n % 10 + 1)).$((n % 20)).$((n % 5))"
+        printf '\x1b[32m   Compiling\x1b[0m %s v%s\n' "$crate" "$ver"
+        printf '     Running `rustc --crate-name %s --edition=2021 --crate-type lib ' "$crate"
+        printf -- '--emit=dep-info,metadata,link -C embed-bitcode=no '
+        printf -- '-C codegen-units=1 -C metadata=%x -C extra-filename=-%x ' "$((n * 31))" "$((n * 31))"
+        printf -- '--out-dir /tmp/target/release/deps -L dependency=/tmp/target/release/deps`\n'
+    done
+    # Repeated warning about unused imports (common real shape). Cargo emits
+    # the same short-form warning many times when one symbol is unused across
+    # N re-exporting crates. Consecutive duplicates are RLE-friendly.
+    for _ in $(seq 1 600); do
+        printf 'warning: unused import: `std::collections::HashMap`\n'
+    done
+    for _ in $(seq 1 600); do
+        printf 'warning: variable does not need to be mutable\n'
+    done
+    printf '\x1b[32m    Finished\x1b[0m release [optimized] target(s) in 45.23s\n'
+} > "$OUT_DIR/generic_cargo_build_verbose.txt"
+
+# ── generic_journalctl.txt ────────────────────────────────────────────────────
+# journalctl output: timestamped log lines, many identical consecutive repeats
+# (kernel messages, service restart loops).
+{
+    for day in 18 19 20 21 22 23; do
+        for hr in 00 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23; do
+            for min in 0 10 20 30 40 50; do
+                printf 'Apr %d 2026 %s:%02d:00 host systemd[1]: Started Session %d of user root.\n' \
+                    "$day" "$hr" "$min" "$((day * 24 * 6 + min))"
+                # Repeat this warning 4x (dedup target).
+                for _ in 1 2 3 4; do
+                    printf 'Apr %d 2026 %s:%02d:01 host kernel: [UFW BLOCK] IN=eth0 OUT= SRC=203.0.113.42 DST=10.0.0.5 PROTO=TCP SPT=54321 DPT=22 SYN\n' \
+                        "$day" "$hr" "$min"
+                done
+                printf 'Apr %d 2026 %s:%02d:02 host sshd[%d]: Accepted publickey for alice from 10.0.0.100 port %d\n' \
+                    "$day" "$hr" "$min" "$((min + 1000))" "$((54000 + min * 7))"
+            done
+        done
+    done
+} > "$OUT_DIR/generic_journalctl.txt"
+
+# ── generic_ps_auxww.txt ──────────────────────────────────────────────────────
+# Synthetic `ps`-style output: each cluster is a block of many identical
+# worker rows (same PID column collapsed to "-" so RLE fires) plus heavy
+# trailing padding. Collapses hard under format-lossy compaction; real
+# `ps auxww` with distinct PIDs reduces less, but this fixture measures
+# the compactor's best-case agent scenario (repeating worker fleets).
+{
+    printf 'USER       PID %%CPU %%MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\n'
+    # Cluster 1: 400 identical gunicorn worker lines (PID column suppressed).
+    for _ in $(seq 1 400); do
+        printf 'www          -  0.1  0.5 123456  7890 ?        S    00:00   0:00 /usr/bin/python3 /opt/app/venv/bin/gunicorn --workers 8 --bind 0.0.0.0:8000 app.wsgi:application                        \n'
+    done
+    # Cluster 2: 300 identical node worker lines.
+    for _ in $(seq 1 300); do
+        printf 'node         -  0.2  1.0 234567 12345 ?        Sl   00:00   0:01 node /opt/app/dist/server.js --cluster --instances 4                                                                 \n'
+    done
+    # Cluster 3: 250 identical postgres worker lines.
+    for _ in $(seq 1 250); do
+        printf 'postgres     -  0.0  0.8 345678 15432 ?        Ss   00:00   0:00 postgres: 15/main: writer process                                                                                    \n'
+    done
+} > "$OUT_DIR/generic_ps_auxww.txt"
+
+# ── find_ls.txt (large) ───────────────────────────────────────────────────────
+# Synthetic `find -ls` output: GNU-style inode/blocks/mode/nlinks/user/group/
+# size/month/day/time-or-year/path. Path depth varies 1-4 to exercise
+# directory-marker emission and whitespace-tolerance.
+{
+    dirs=("src" "src/filters" "src/ui" "tests" "tests/fixtures" "docs" "vendor" "vendor/lib" "scripts" "benchmarks")
+    # Deterministic inodes — $RANDOM would churn the committed fixture on every
+    # regen. Use a simple positional formula instead.
+    for i in "${!dirs[@]}"; do
+        d="${dirs[$i]}"
+        inode=$((2055100 + i * 37))
+        printf '%d    0 drwxr-xr-x   2 user     staff          64 Apr 23 12:34 ./%s\n' "$inode" "$d"
+    done
+    for n in $(seq 1 500); do
+        d_idx=$((n % 10))
+        d="${dirs[$d_idx]}"
+        inode=$((2055500 + n))
+        size=$((n * 37 % 9991 + 40))
+        # Alternate time-of-day and year-only columns to cover both find -ls shapes.
+        if (( n % 3 == 0 )); then
+            printf '%d    8 -rw-r--r--   1 user     staff    %8d Apr 23  2025 ./%s/file_%04d.zig\n' "$inode" "$size" "$d" "$n"
+        else
+            printf '%d    8 -rw-r--r--   1 user     staff    %8d Apr 23 12:34 ./%s/file_%04d.zig\n' "$inode" "$size" "$d" "$n"
+        fi
+    done
+} > "$OUT_DIR/find_ls.txt"
+
+# ── du_sh.txt (large) ─────────────────────────────────────────────────────────
+# Synthetic `du -sh` output over ~500 entries. Size column varies across K/M/G
+# with both integer and `du -h`-style single-decimal leads so rounding exercises
+# every branch. Deep path shapes mirror real monorepos.
+{
+    for n in $(seq 1 500); do
+        mod=$((n % 7))
+        path="./monorepo/pkg$((n % 20))/src/module_$((n % 40))/lib_$(printf '%03d' "$n").zig"
+        case "$mod" in
+            0) printf '%dK\t%s\n' "$(( (n * 17) % 999 + 1 ))" "$path" ;;
+            1) printf '%dM\t%s\n' "$(( (n * 31) % 900 + 100 ))" "$path" ;;
+            2) printf '%d.%dG\t%s\n' "$(( (n % 9) + 1 ))" "$(( (n * 3) % 10 ))" "$path" ;;
+            3) printf '%dM\t%s\n' "$(( (n * 13) % 90 + 10 ))" "$path" ;;
+            4) printf '%d.%dM\t%s\n' "$(( (n % 9) + 1 ))" "$(( (n * 7) % 10 ))" "$path" ;;
+            5) printf '%dG\t%s\n' "$(( (n % 19) + 1 ))" "$path" ;;
+            6) printf '%dK\t%s\n' "$(( (n * 41) % 99 + 1 ))" "$path" ;;
+        esac
+    done
+} > "$OUT_DIR/du_sh.txt"
+
+# ── curl_vvv_example.stderr.txt + curl_vvv_example.stdout.txt (large) ─────────
+# Synthetic `curl -vvv` output over a redirect chain + multiplexed HTTP/2
+# session. Stderr heavy on TLS/schannel/ALPN chatter + a PEM cert block to
+# exercise drop logic. Stdout carries a realistic JSON body.
+{
+    for n in $(seq 1 30); do
+        cat <<EOF
+*   Trying 10.0.0.$((n % 255 + 1)):443...
+* Connected to api.example.com (10.0.0.$((n % 255 + 1))) port 443
+* ALPN: curl offers h2,http/1.1
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384
+* ALPN: server accepted h2
+* Server certificate:
+*   subject: CN=api.example.com
+*   start date: Jan  1 00:00:00 2024 GMT
+*   expire date: Apr  1 00:00:00 2024 GMT
+*   subjectAltName: host "api.example.com" matched cert's "api.example.com"
+*   issuer: C=US; O=Let's Encrypt; CN=R3
+*   SSL certificate verify ok.
+* Certificate level 0: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Certificate level 1: Public key type RSA (2048/112 Bits/secBits), signed using sha256WithRSAEncryption
+* Using HTTP2, server supports multiplexing
+* Connection state changed (HTTP/2 confirmed)
+* Copying HTTP/2 data in stream buffer to connection buffer after upgrade: len=0
+> GET /v1/resources/$n HTTP/2
+> Host: api.example.com
+> User-Agent: curl/8.0.1
+> accept: application/json
+> authorization: Bearer <<REDACTED>>
+>
+* Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
+< HTTP/2 200
+< content-type: application/json
+< content-length: 128
+< cache-control: no-store
+< date: Mon, 22 Apr 2026 12:00:0$((n % 10)) GMT
+< x-request-id: req-${n}
+<
+EOF
+    done
+    # One PEM cert block dump at the end to exercise the BEGIN/END drop path.
+    cat <<'EOF'
+* Server certificate chain:
+-----BEGIN CERTIFICATE-----
+MIIFazCCA1OgAwIBAgIUJYJn0qRkWZA5YDEmEHKG5tJX+q4wDQYJKoZIhvcNAQEL
+BQAwRTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExETAPBgNVBAoM
+CEV4YW1wbGUxDjAMBgNVBAMMBVJvb3QxMB4XDTI0MDEwMTAwMDAwMFoXDTM0MDEw
+MTAwMDAwMFowRTELMAkGA1UEBhMCVVMxEzARBgNVBAgMCkNhbGlmb3JuaWExETAP
+BgNVBAoMCEV4YW1wbGUxDjAMBgNVBAMMBVJvb3QxMIICIjANBgkqhkiG9w0BAQEF
+AAOCAg8AMIICCgKCAgEAz4ftrMELxpz+fXhVfpCwJ5V4j+0H8wKLOoE4jJZP7vWj
+-----END CERTIFICATE-----
+EOF
+} > "$OUT_DIR/curl_vvv_example.stderr.txt"
+
+{
+    for n in $(seq 1 30); do
+        printf '{"id":%d,"name":"resource_%d","status":"ok"}\n' "$n" "$n"
+    done
+} > "$OUT_DIR/curl_vvv_example.stdout.txt"
+
+# ── cargo_build.txt (large) ───────────────────────────────────────────────────
+# Synthetic `cargo build` output — 500 `   Compiling <crate> v<ver>` lines on
+# stderr with two warning/error blocks and a closing `Finished` line. The
+# build_compact filter collapses progress lines to a single `(N lines)` count
+# while preserving every warning/error body verbatim.
+{
+    crates=("" serde syn quote proc-macro2 unicode-ident futures tokio hyper
+            reqwest anyhow thiserror log env_logger clap clap_derive
+            once_cell lazy_static regex memchr)
+    for n in $(seq 1 500); do
+        crate="${crates[$(( (n - 1) % ${#crates[@]} ))]}"
+        ver="$(( (n - 1) % 20 + 1 )).$(( (n - 1) % 20 )).$(( (n - 1) % 5 ))"
+        printf '   Compiling %s v%s\n' "$crate" "$ver"
+        if (( n == 100 )); then
+            printf 'warning: unused import: `std::collections::HashMap`\n'
+            printf ' --> src/lib.rs:3:5\n'
+            printf '  |\n'
+            printf '3 | use std::collections::HashMap;\n'
+            printf '  |     ^^^^^^^^^^^^^^^^^^^^^^^^^\n'
+        fi
+        if (( n == 250 )); then
+            printf 'warning: variable does not need to be mutable\n'
+            printf ' --> src/core.rs:77:9\n'
+            printf '  |\n'
+            printf '77 |     let mut tally = 0;\n'
+            printf '  |         ----^^^^^\n'
+        fi
+        if (( n == 400 )); then
+            printf 'error[E0308]: mismatched types\n'
+            printf ' --> src/main.rs:17:5\n'
+            printf '  |\n'
+            printf '17 |     return x;\n'
+            printf '  |     ^^^^^^^^ expected `()`, found integer\n'
+        fi
+    done
+    printf '    Finished dev [unoptimized + debuginfo] target(s) in 45.23s\n'
+} > "$OUT_DIR/cargo_build.txt"
+
+# ── make_build.txt (large) ────────────────────────────────────────────────────
+# Synthetic `make` output — ~500 `cc -c ...` lines (stdout) with two inline
+# warnings and a closing LINK line. Real make output splits progress across
+# stdout and stderr; the filter's virtual-stream folding handles both cases.
+{
+    for n in $(seq 1 500); do
+        ver=$(( (n - 1) % 7 + 1 ))
+        printf 'cc -c -Wall -O2 -Iinclude -DVERSION=%d src/mod_%03d.c -o build/mod_%03d.o\n' \
+            "$ver" "$n" "$n"
+        if (( n == 150 )); then
+            printf 'src/mod_150.c:32:12: warning: unused variable '\''tmp'\'' [-Wunused-variable]\n'
+            printf '   32 |     int tmp = 0;\n'
+            printf '      |         ^~~\n'
+        fi
+        if (( n == 350 )); then
+            printf 'src/mod_350.c:18:9: warning: implicit declaration of function '\''do_thing'\'' [-Wimplicit-function-declaration]\n'
+            printf '   18 |     do_thing();\n'
+            printf '      |     ^~~~~~~~\n'
+        fi
+    done
+    printf 'LINK build/app\n'
+} > "$OUT_DIR/make_build.txt"
+
+# ── go_build.txt (large) ──────────────────────────────────────────────────────
+# Synthetic `go build` output — 500 `go build: compiling ...` lines on stderr
+# with two inline compiler errors. Real go build emits progress to stderr by
+# convention.
+{
+    paths=("" "./cmd/server" "./internal/auth" "./internal/handlers"
+           "./internal/store" "./pkg/util" "./pkg/metrics" "./pkg/log"
+           "./internal/db" "./pkg/cache")
+    for n in $(seq 1 500); do
+        path="${paths[$(( (n - 1) % ${#paths[@]} ))]}"
+        printf 'go build: compiling %s/pkg_%03d\n' "$path" "$n"
+        if (( n == 250 )); then
+            printf 'internal/auth/token.go:42:9: error: declared and not used: claims\n'
+            printf 'internal/auth/token.go:51:2: error: cannot use invalid (type untyped int) as type string in argument to fmt.Println\n'
+        fi
+    done
+} > "$OUT_DIR/go_build.txt"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 4: Summary
@@ -745,6 +1032,21 @@ echo ""
 echo "Generated v0.4 large fixtures in $OUT_DIR:"
 for f in git_commit.txt git_merge.txt git_rebase.txt git_blame.txt \
          git_push.stdout.txt git_push.stderr.txt; do
+    bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
+    printf '  %-32s  %8s bytes\n' "$f" "$bytes"
+done
+
+echo ""
+echo "Generated v0.6 generic-compact fixtures in $OUT_DIR:"
+for f in generic_pip_install.txt generic_cargo_build_verbose.txt \
+         generic_journalctl.txt generic_ps_auxww.txt; do
+    bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
+    printf '  %-32s  %8s bytes\n' "$f" "$bytes"
+done
+
+echo ""
+echo "Generated v0.6 build_compact fixtures in $OUT_DIR:"
+for f in cargo_build.txt make_build.txt go_build.txt; do
     bytes=$(wc -c < "$OUT_DIR/${f}" | tr -d ' ')
     printf '  %-32s  %8s bytes\n' "$f" "$bytes"
 done
