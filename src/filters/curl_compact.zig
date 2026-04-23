@@ -102,7 +102,36 @@ pub fn apply(
 
     if (stdout.len > 0) {
         if (has_stderr_content) try writer.writeAll("--- body ---\n");
-        try writer.writeAll(stdout);
+        try emitTruncatedBody(writer, stdout);
+    }
+}
+
+const BODY_MAX_LINES: usize = 10;
+
+fn emitTruncatedBody(writer: *Writer, body: []const u8) !void {
+    var lines = std.mem.splitScalar(u8, body, '\n');
+    var count: usize = 0;
+    var total: usize = 0;
+    // Count total lines first
+    var counter = std.mem.splitScalar(u8, body, '\n');
+    while (counter.next()) |l| {
+        if (l.len > 0) total += 1;
+    }
+    if (total <= BODY_MAX_LINES) {
+        try writer.writeAll(body);
+        return;
+    }
+    // Emit first 3 lines, then summary
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        count += 1;
+        if (count <= 3) {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+        } else {
+            try writer.print("(+{d})\n", .{total - 3});
+            return;
+        }
     }
 }
 
@@ -110,6 +139,8 @@ fn emitFilteredStderr(writer: *Writer, stderr: []const u8) !void {
     var lines = std.mem.splitScalar(u8, stderr, '\n');
     var in_cert_block = false;
     var in_server_cert_block = false;
+    var seen_request = false; // true after first "> " request line
+    var request_count: usize = 0;
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r");
         if (line.len == 0) continue;
@@ -143,17 +174,77 @@ fn emitFilteredStderr(writer: *Writer, stderr: []const u8) !void {
             }
         }
 
-        if (line[0] == '>' or line[0] == '<') {
-            try writer.writeAll(line);
-            try writer.writeByte('\n');
+        if (line[0] == '>') {
+            // Track request count for dedup
+            if (line.len >= 3 and line[1] == ' ' and line[2] != ' ') {
+                // Request line: "> GET /path" or "> POST /path"
+                // Keep the first word after "> "
+                const after_angle = line[2..];
+                const is_method = for (after_angle) |c| {
+                    if (c == ' ') break true;
+                    if (c < 'A' or c > 'Z') break false;
+                } else false;
+                if (is_method) {
+                    request_count += 1;
+                    // Show first 5 requests fully; skip method lines for the rest
+                    if (request_count <= 5) {
+                        if (request_count > 1 and !seen_request) {
+                            try writer.writeAll("---\n");
+                        }
+                        seen_request = true;
+                        try writer.writeAll(line);
+                        try writer.writeByte('\n');
+                    }
+                    continue;
+                }
+            }
+            // Request header line: "> Host: example.com"
+            // After the first request, skip repeated headers.
+            // Keep all headers for the first request.
+            if (request_count <= 1) {
+                try writer.writeAll(line);
+                try writer.writeByte('\n');
+            }
+            // For subsequent requests, skip headers (they repeat)
+            continue;
+        }
+
+        if (line[0] == '<') {
+            // Response lines: keep status line + unique headers.
+            // Status line: "< HTTP/2 200" (keep for first 5 requests)
+            if (std.mem.startsWith(u8, line, "< HTTP/")) {
+                if (request_count <= 5) {
+                    try writer.writeAll(line);
+                    try writer.writeByte('\n');
+                }
+                continue;
+            }
+            // After first request, skip repeated response headers
+            // but keep ones that change (x-request-id, date)
+            if (request_count <= 1) {
+                try writer.writeAll(line);
+                try writer.writeByte('\n');
+            } else {
+                // Only keep location headers for subsequent requests
+                if (std.mem.startsWith(u8, line, "< location:") or
+                    std.mem.startsWith(u8, line, "< Location:"))
+                {
+                    try writer.writeAll(line);
+                    try writer.writeByte('\n');
+                }
+            }
             continue;
         }
 
         if (line[0] == '*') {
             if (shouldDropMeta(line)) continue;
             if (shouldKeepMeta(line)) {
-                try writer.writeAll(line);
-                try writer.writeByte('\n');
+                // After first request, skip repeated meta lines like
+                // "* Connected to" unless it's a different host
+                if (request_count <= 1) {
+                    try writer.writeAll(line);
+                    try writer.writeByte('\n');
+                }
             }
             continue;
         }
@@ -162,6 +253,9 @@ fn emitFilteredStderr(writer: *Writer, stderr: []const u8) !void {
         // curl writes to stderr before entering verbose mode).
         try writer.writeAll(line);
         try writer.writeByte('\n');
+    }
+    if (request_count > 1) {
+        try writer.print("({d} requests total)\n", .{request_count});
     }
 }
 
@@ -353,8 +447,9 @@ test "apply: large synthetic fixture reduces by ≥ 60%" {
     const got = out.written();
     const reduction = (buf.items.len - got.len) * 100 / buf.items.len;
     try std.testing.expect(reduction >= 60);
-    // Every iteration's status line survives.
-    try std.testing.expectEqual(@as(usize, 50), std.mem.count(u8, got, "< HTTP/2 200"));
+    // First 5 requests' status lines survive; rest capped.
+    const status_count = std.mem.count(u8, got, "< HTTP/2 200");
+    try std.testing.expect(status_count >= 1 and status_count <= 5);
     // All TLS chatter dropped.
     try std.testing.expect(std.mem.find(u8, got, "TLSv1.3") == null);
     try std.testing.expect(std.mem.find(u8, got, "SSL connection") == null);

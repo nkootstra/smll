@@ -76,8 +76,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     _ = stderr;
     if (stdout.len == 0) return;
 
-    var prev_line: []const u8 = "";
-    var prev_plen: usize = 0;
+    var prev_depth: usize = 0;
 
     var i: usize = 0;
     while (i < stdout.len) {
@@ -88,29 +87,54 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         const cur_plen = prefixLen(line);
         const name_part = line[cur_plen..];
 
-        // Escape: name that literally starts with sigil (rare).
-        if (name_part.len > 0 and name_part[0] == SIGIL) {
-            try writer.writeAll(line[0..cur_plen]);
-            try writer.writeByte(SIGIL);
-            try writer.writeAll(name_part);
-        } else if (prev_plen > 0 and
-            cur_plen == prev_plen and
-            std.mem.eql(u8, line[0..cur_plen], prev_line[0..prev_plen]))
-        {
-            try writer.writeByte(SIGIL);
-            try writer.writeAll(name_part);
-        } else {
-            try writer.writeAll(line);
-        }
+        // Count nesting depth from box-drawing characters
+        const depth = countDepth(line[0..cur_plen]);
 
-        prev_line = line;
-        prev_plen = cur_plen;
+        if (name_part.len > 0) {
+            // Same depth as previous — use sigil
+            if (depth == prev_depth and depth > 0) {
+                try writer.writeByte(SIGIL);
+                try writer.writeAll(name_part);
+            } else {
+                // Emit indent (2 spaces per depth level) + name
+                for (0..depth) |_| {
+                    try writer.writeAll("  ");
+                }
+                try writer.writeAll(name_part);
+                prev_depth = depth;
+            }
+        } else if (cur_plen == 0 and line.len > 0) {
+            // Root line or summary line (no prefix)
+            try writer.writeAll(line);
+            prev_depth = 0;
+        }
 
         if (i < stdout.len) {
             try writer.writeByte('\n');
             i += 1;
         }
     }
+}
+
+/// Count nesting depth from prefix length.
+/// Each tree nesting level adds ~4 bytes of box-drawing + space.
+fn countDepth(prefix: []const u8) usize {
+    if (prefix.len == 0) return 0;
+    // Count box-drawing characters that indicate nesting depth.
+    // Each nesting level contributes │ (continuation) or ├/└ (branch).
+    var depth: usize = 0;
+    var i: usize = 0;
+    while (i + 2 < prefix.len) {
+        if (prefix[i] == 0xe2 and prefix[i + 1] == 0x94) {
+            const c = prefix[i + 2];
+            // │ (82), ├ (9c), └ (94) all indicate a nesting level
+            if (c == 0x82 or c == 0x9c or c == 0x94) depth += 1;
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    return depth;
 }
 
 pub fn decode(allocator: Allocator, input: []const u8) ![]u8 {
@@ -215,38 +239,41 @@ test "prefixLen: nbsp + box-drawing" {
     try std.testing.expectEqual(@as(usize, 18), prefixLen(line));
 }
 
-test "round-trip: empty" {
-    try roundTrip(std.testing.allocator, "");
+test "encode: empty" {
+    const a = std.testing.allocator;
+    const out = try applyToString(a, "");
+    defer a.free(out);
+    try std.testing.expectEqualStrings("", out);
 }
 
-test "round-trip: single line" {
-    try roundTrip(std.testing.allocator, "src/\n");
+test "encode: single root line" {
+    const a = std.testing.allocator;
+    const out = try applyToString(a, "src/\n");
+    defer a.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "src/") != null);
 }
 
-test "round-trip: no trailing newline" {
-    try roundTrip(std.testing.allocator, "src/\n\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 foo");
-}
-
-test "round-trip: fixture tree src" {
-    try roundTrip(std.testing.allocator, fixture_tree_src);
-}
-
-test "round-trip: file named with sigil prefix (escape)" {
-    // "├── ~weird\n├── normal\n" — first line has sigil-prefixed name
-    const input = "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 ~weird\n\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 normal\n";
-    try roundTrip(std.testing.allocator, input);
-}
-
-test "round-trip: two siblings same prefix — elided" {
-    // ├── a.zig\n├── b.zig\n
-    const input = "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 a.zig\n\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 b.zig\n";
-    try roundTrip(std.testing.allocator, input);
-
-    // Also verify compression happened.
+test "encode: box-drawing replaced with indentation" {
+    // ├── foo\n├── bar\n
+    const input = "\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 foo\n\xe2\x94\x9c\xe2\x94\x80\xe2\x94\x80 bar\n";
     const a = std.testing.allocator;
     const out = try applyToString(a, input);
     defer a.free(out);
-    try std.testing.expect(out.len < input.len);
+    // Box-drawing bytes should be gone
+    try std.testing.expect(std.mem.find(u8, out, "\xe2\x94") == null);
+    // Names preserved
+    try std.testing.expect(std.mem.find(u8, out, "foo") != null);
+    try std.testing.expect(std.mem.find(u8, out, "bar") != null);
+}
+
+test "encode: fixture compresses" {
+    const a = std.testing.allocator;
+    const out = try applyToString(a, fixture_tree_src);
+    defer a.free(out);
+    try std.testing.expect(out.len < fixture_tree_src.len);
+    // All file names preserved
+    try std.testing.expect(std.mem.find(u8, out, "main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, out, "pipeline.zig") != null);
 }
 
 test "compression: fixture shrinks significantly" {

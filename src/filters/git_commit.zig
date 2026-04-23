@@ -62,6 +62,58 @@ fn isHex7(s: []const u8) bool {
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    var buf = Writer.Allocating.init(allocator);
+    defer buf.deinit();
+    try applyInner(allocator, stdout, stderr, &buf.writer);
+    // Post-process: group consecutive +/- entries by directory
+    try groupFileEntries(buf.written(), writer);
+}
+
+fn groupFileEntries(output: []const u8, writer: *Writer) !void {
+    var all_lines: [4096][]const u8 = undefined;
+    var count: usize = 0;
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (count >= all_lines.len) break;
+        all_lines[count] = line;
+        count += 1;
+    }
+    var i: usize = 0;
+    while (i < count) {
+        const line = all_lines[i];
+        // Match "+ path" or "- path"
+        if (line.len >= 3 and (line[0] == '+' or line[0] == '-') and line[1] == ' ') {
+            const sigil = line[0..1];
+            const path = line[2..];
+            const dir = if (std.mem.findScalarLast(u8, path, '/')) |idx| path[0 .. idx + 1] else "";
+            if (dir.len > 0) {
+                var run_end = i + 1;
+                while (run_end < count) {
+                    const next = all_lines[run_end];
+                    if (next.len < 3 or next[0] != line[0] or next[1] != ' ') break;
+                    const next_path = next[2..];
+                    const next_dir = if (std.mem.findScalarLast(u8, next_path, '/')) |idx| next_path[0 .. idx + 1] else "";
+                    if (!std.mem.eql(u8, dir, next_dir)) break;
+                    run_end += 1;
+                }
+                if (run_end - i >= 3) {
+                    try writer.writeAll(sigil);
+                    try writer.writeAll(" ");
+                    try writer.writeAll(dir);
+                    try writer.writeAll(" ×"); try writer.print("{d}\n", .{run_end - i});
+                    i = run_end;
+                    continue;
+                }
+            }
+        }
+        try writer.writeAll(line);
+        try writer.writeByte('\n');
+        i += 1;
+    }
+}
+
+fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
     const input = stdout;
@@ -310,14 +362,12 @@ test "apply: delete mode produces - sigil" {
     try std.testing.expect(std.mem.find(u8, out, "+0/-3 files=1\n") != null);
 }
 
-test "apply: large fixture preserves all 100 create-mode paths" {
+test "apply: large fixture groups create-mode paths by directory" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, fixture_large);
     defer allocator.free(out);
-    // Check a sample of paths to confirm all preserved.
-    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/gen_001.rs\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/gen_050.rs\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/gen_100.rs\n") != null);
+    // Paths should be grouped by directory
+    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/") != null);
     try std.testing.expect(std.mem.find(u8, out, "+750/-0 files=150\n") != null);
 }
 

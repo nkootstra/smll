@@ -109,11 +109,13 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
                 if (split) |sp| {
                     const old_range = coords[0..sp];
                     const new_range = coords[sp + " +".len ..];
-                    // Strip leading '-' from old range
                     const old_clean = if (old_range.len > 0 and old_range[0] == '-') old_range[1..] else old_range;
-                    try writer.writeAll(old_clean);
-                    try writer.writeByte('|');
-                    try writer.writeAll(new_range);
+                    // Emit compact format: @<start_line> only (agents need location, not exact ranges)
+                    // Extract just the start line from old range (before comma)
+                    const comma = std.mem.indexOfScalar(u8, old_clean, ',');
+                    const start_line = if (comma) |c| old_clean[0..c] else old_clean;
+                    try writer.writeAll(start_line);
+                    _ = new_range;
                 } else {
                     // Malformed coords — emit verbatim
                     try writer.writeAll(coords);
@@ -147,6 +149,16 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
 
         // Everything else passes through verbatim:
         // new file mode, deleted file mode, +/- lines, context lines
+        // Context lines (leading space): keep max 1 before first change in hunk
+        if (line.len > 0 and line[0] == ' ') {
+            // Context line — skip if we've already seen a +/- in this hunk
+            // and already emitted 1 trailing context line.
+            // Simple policy: drop ALL context lines. The @ hunk header
+            // already has the function name for location context.
+            continue;
+        }
+        // Drop empty +/- lines (blank lines added/removed are noise)
+        if (line.len == 1 and (line[0] == '+' or line[0] == '-')) continue;
         if (!first_out) try writer.writeByte('\n');
         try writer.writeAll(line);
         first_out = false;
@@ -222,7 +234,7 @@ test "apply: emits @ sigil for hunk header on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@1|1,3\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1\n") != null);
     // Old @@ form is gone
     try std.testing.expect(std.mem.find(u8, out, "@@ -1 +1,3 @@") == null);
 }
@@ -235,11 +247,14 @@ test "apply: preserves every + line on simple" {
     try std.testing.expect(std.mem.find(u8, out, "+line three") != null);
 }
 
-test "apply: preserves context line on simple" {
+test "apply: drops context lines in lossy mode" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, " line one") != null);
+    // Context lines are dropped; only +/- and headers remain
+    try std.testing.expect(std.mem.find(u8, out, " line one") == null);
+    // But +/- lines are preserved
+    try std.testing.expect(std.mem.find(u8, out, "+") != null);
 }
 
 test "apply: emits d sigils for every file on multi" {
@@ -272,13 +287,15 @@ test "apply: preserves +/- content lines on multi" {
     try std.testing.expect(std.mem.find(u8, out, "+TWO") != null);
 }
 
-test "apply: preserves context lines on multi" {
+test "apply: drops context lines on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, " red") != null);
-    try std.testing.expect(std.mem.find(u8, out, " one") != null);
-    try std.testing.expect(std.mem.find(u8, out, " three") != null);
+    // Context lines dropped
+    try std.testing.expect(std.mem.find(u8, out, " red") == null);
+    try std.testing.expect(std.mem.find(u8, out, " one") == null);
+    // +/- lines preserved
+    try std.testing.expect(std.mem.find(u8, out, "+") != null or std.mem.find(u8, out, "-") != null);
 }
 
 test "apply: emits d rename sigil on rename fixture" {
@@ -311,7 +328,7 @@ test "apply: emits @ hunk header on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@1,3|1,4\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "+date") != null);
 }
 

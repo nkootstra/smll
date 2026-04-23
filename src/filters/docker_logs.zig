@@ -75,10 +75,30 @@ fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
     }
 }
 
-fn flushPending(writer: *Writer, line: []const u8, _: usize, count: usize) !void {
-    try writer.writeAll(line);
+fn flushPending(writer: *Writer, line: []const u8, payload_start: usize, count: usize) !void {
+    // Abbreviate the timestamp: show only HH:MM:SS instead of full ISO-8601
+    if (payload_start > 0) {
+        const ts = line[0..payload_start];
+        // Find 'T' separator in ISO timestamp "YYYY-MM-DDTHH:MM:SS..."
+        if (std.mem.indexOfScalar(u8, ts, 'T')) |t_pos| {
+            // Extract HH:MM:SS (8 chars after 'T')
+            const time_start = t_pos + 1;
+            if (time_start + 8 <= ts.len and ts[time_start + 2] == ':' and ts[time_start + 5] == ':') {
+                try writer.writeAll(ts[time_start .. time_start + 8]);
+                try writer.writeByte(' ');
+                try writer.writeAll(line[payload_start..]);
+            } else {
+                try writer.writeAll(line);
+            }
+        } else {
+            try writer.writeAll(line);
+        }
+    } else {
+        try writer.writeAll(line);
+    }
     if (count > 1) {
-        try writer.print(" (×{d})", .{count});
+        try writer.writeAll(" ×");
+        try writer.print("{d}", .{count});
     }
     try writer.writeByte('\n');
 }
@@ -129,9 +149,9 @@ test "apply: fixture collapses repeated health checks" {
     const got = out.written();
     try std.testing.expect(got.len < input.len);
     // Repeated GET /health collapsed.
-    try std.testing.expect(std.mem.find(u8, got, "(×5)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "×5") != null);
     // Repeated redis errors collapsed.
-    try std.testing.expect(std.mem.find(u8, got, "failed to connect to redis: connection refused (×4)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "failed to connect to redis: connection refused ×4") != null);
     // Unique lines preserved.
     try std.testing.expect(std.mem.find(u8, got, "starting server on :8080") != null);
     try std.testing.expect(std.mem.find(u8, got, "shutting down gracefully") != null);
@@ -151,7 +171,7 @@ test "apply: no duplicates passes through verbatim" {
     try std.testing.expect(std.mem.find(u8, got, "line a") != null);
     try std.testing.expect(std.mem.find(u8, got, "line b") != null);
     try std.testing.expect(std.mem.find(u8, got, "line c") != null);
-    try std.testing.expect(std.mem.find(u8, got, "(×") == null);
+    try std.testing.expect(std.mem.find(u8, got, "×") == null);
 }
 
 test "apply: non-consecutive duplicates are not collapsed" {
@@ -164,7 +184,7 @@ test "apply: non-consecutive duplicates are not collapsed" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "(×") == null);
+    try std.testing.expect(std.mem.find(u8, got, "×") == null);
 }
 
 test "apply: strips ANSI" {
@@ -174,7 +194,7 @@ test "apply: strips ANSI" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
-    try std.testing.expect(std.mem.find(u8, got, "ERROR boom (×2)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "ERROR boom ×2") != null);
 }
 
 test "apply: lines without timestamps still dedup by full text" {
@@ -182,6 +202,6 @@ test "apply: lines without timestamps still dedup by full text" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expect(std.mem.find(u8, out.written(), "loading (×3)") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "loading ×3") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "done") != null);
 }

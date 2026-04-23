@@ -39,6 +39,7 @@ pub fn matches(input: []const u8) bool {
     return false;
 }
 
+/// Default pipe-mode and wrapper-mode apply: verbose format with bodies.
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
