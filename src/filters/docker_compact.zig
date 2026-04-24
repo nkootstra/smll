@@ -55,7 +55,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         if (count == 0) break :blk "none";
         if (up_count == count) break :blk "up";
         if (up_count == 0) break :blk "none";
-        break :blk "mixed";
+        break :blk "m";
     };
 
     try writer.print("d{d}{s}", .{ count, state });

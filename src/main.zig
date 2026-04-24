@@ -230,7 +230,7 @@ fn runWrapper(
     var stdout_reader = child.stdout.?.reader(io, &stdout_buf);
     const stdout_slice = stdout_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
         error.StreamTooLong => {
-            const msg = "o>2M\n";
+            const msg = "2M+\n";
             stderr_writer.writeAll(msg) catch {};
             return 1;
         },
@@ -241,7 +241,7 @@ fn runWrapper(
     var stderr_reader = child.stderr.?.reader(io, &err_drain_buf);
     const stderr_slice = stderr_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
         error.StreamTooLong => {
-            const msg = "e>2M\n";
+            const msg = "2M+\n";
             stderr_writer.writeAll(msg) catch {};
             return 1;
         },
