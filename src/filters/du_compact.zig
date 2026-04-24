@@ -67,11 +67,19 @@ pub fn apply(
         try rows.append(allocator, parsed);
     }
 
-    std.mem.sort(Parsed, rows.items, {}, struct {
-        fn lessThan(_: void, a: Parsed, b: Parsed) bool {
-            return a.bytes > b.bytes;
+    // Insertion sort — du -s output has ≤O(100) entries; avoids pulling in
+    // the full pdqsort machinery from std.mem.sort.
+    {
+        var i: usize = 1;
+        while (i < rows.items.len) : (i += 1) {
+            const key = rows.items[i];
+            var j: usize = i;
+            while (j > 0 and rows.items[j - 1].bytes < key.bytes) : (j -= 1) {
+                rows.items[j] = rows.items[j - 1];
+            }
+            rows.items[j] = key;
         }
-    }.lessThan);
+    }
 
     // Emit top entries; summarize the rest
     const TOP_N: usize = 10;
@@ -234,15 +242,26 @@ fn emitHumanSize(writer: *Writer, bytes: u64) !void {
 }
 
 fn emitTenths(writer: *Writer, tenths: u64, unit: u8) !void {
-    // Emit "X.YU" without multiple print calls — just write digits directly.
+    // Write whole.fracU without any heap allocation.
     const whole = tenths / 10;
-    const frac = tenths % 10;
-    // Write whole part (may be multi-digit)
+    const frac = @as(u8, @intCast(tenths % 10));
+    // Write whole part using a small stack buffer (du sizes fit in u32 easily).
     var buf: [20]u8 = undefined;
-    const whole_str = std.fmt.bufPrint(&buf, "{d}", .{whole}) catch unreachable;
-    try writer.writeAll(whole_str);
+    var pos: usize = buf.len;
+    var n = whole;
+    if (n == 0) {
+        pos -= 1;
+        buf[pos] = '0';
+    } else {
+        while (n > 0) {
+            pos -= 1;
+            buf[pos] = '0' + @as(u8, @intCast(n % 10));
+            n /= 10;
+        }
+    }
+    try writer.writeAll(buf[pos..]);
     try writer.writeByte('.');
-    try writer.writeByte('0' + @as(u8, @intCast(frac)));
+    try writer.writeByte('0' + frac);
     try writer.writeByte(unit);
 }
 
