@@ -76,23 +76,9 @@ fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
 }
 
 fn flushPending(writer: *Writer, line: []const u8, payload_start: usize, count: usize) !void {
-    // Abbreviate the timestamp: show only HH:MM:SS instead of full ISO-8601
-    if (payload_start > 0) {
-        const ts = line[0..payload_start];
-        // Find 'T' separator in ISO timestamp "YYYY-MM-DDTHH:MM:SS..."
-        if (std.mem.indexOfScalar(u8, ts, 'T')) |t_pos| {
-            // Extract HH:MM:SS (8 chars after 'T')
-            const time_start = t_pos + 1;
-            if (time_start + 8 <= ts.len and ts[time_start + 2] == ':' and ts[time_start + 5] == ':') {
-                try writer.writeAll(ts[time_start .. time_start + 8]);
-                try writer.writeByte(' ');
-                try writer.writeAll(line[payload_start..]);
-            } else {
-                try writer.writeAll(line);
-            }
-        } else {
-            try writer.writeAll(line);
-        }
+    // Timestamp is usually low-value noise for agent actions; keep payload only.
+    if (payload_start > 0 and payload_start < line.len) {
+        try writer.writeAll(line[payload_start..]);
     } else {
         try writer.writeAll(line);
     }
