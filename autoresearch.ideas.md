@@ -2,14 +2,15 @@
 
 ## Pending
 
-- **Detect eza/exa/lsd and adjust field count** — still valid correctness hardening,
-  but low priority for current head-to-head benchmark metric.
-- **pytest selective compaction with explicit latency guard** — revisit only if we can keep score-neutral runtime behavior.
+- **jest output parity mode** — evaluate passthrough/near-raw routing for `jest` in parity objective where RTK barely compacts.
+- **rg --files parity mode** — test raw passthrough for file lists (RTK output is near-raw/expanded).
+- **tree parity mode** — reduce/disable tree structural compaction to better match RTK behavior while preserving readability.
+- **Detect eza/exa/lsd and adjust field count** — correctness hardening, orthogonal to current parity metric.
 
 ## Pruned as stale for current metric
 
 - Broad binary-size micro-optimizations from the 182 KB campaign are parked; current
-  metric is head-to-head score (`smll_points`), so wins must move compression/latency.
+  metric is parity (`parity_points`) under a hard size cap, so wins must improve RTK-shape alignment.
 
 ## Done / pruned
 
@@ -146,3 +147,6 @@
 - ~~Pytest stream-level ANSI pre-scan fastpath~~ — Tried/discarded (run #157, score regressed)
 - ~~TSC path compaction (drop ./ and src/ prefixes)~~ — Done (run #159, parity_points 10.912→10.937)
 - ~~Go test failure-line compaction~~ — Done (run #160, parity_points 10.937→11.215)
+- ~~Git blame passthrough for parity~~ — Done (run #161, parity_points 11.215→12.022)
+- ~~Kubectl get passthrough for parity~~ — Done (run #163, parity_points 12.022→12.684)
+- ~~kubectl-get passthrough first attempt~~ — Tried/crash (run #162, syntax typo)

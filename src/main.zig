@@ -298,7 +298,11 @@ fn runWrapper(
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
+        } else if (is_rg_files_mode) {
+            // Parity target: keep rg --files output near raw (RTK tends to keep
+            // file-list shape with minimal transformation).
+            try writer.writeAll(stdout_slice);
+        } else if (is_find_plain and rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
