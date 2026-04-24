@@ -21,6 +21,7 @@ const KEEP_NEEDLES = [_][]const u8{
     "failed",
     "error",
     "assert",
+    "AssertionError",
     "collected",
     "short test summary",
     "==== ",
@@ -105,6 +106,8 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 }
 
 fn shouldKeep(line: []const u8) bool {
+    if (std.mem.startsWith(u8, line, "________________")) return true;
+    if (std.mem.startsWith(u8, line, "def test_")) return true;
     for (KEEP_NEEDLES) |n| {
         if (std.mem.find(u8, line, n) != null) return true;
     }
