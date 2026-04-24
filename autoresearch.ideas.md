@@ -2,11 +2,17 @@
 
 ## Pending
 
-- **Detect eza/exa/lsd and adjust field count** — eza uses different field layouts
-  (no link count, day-first dates). Currently falls back via ParsedNothing + proactive
-  LC_ALL=C forces POSIX ls, but if the *binary itself* is eza (aliased to `ls`), the
-  output shape differs enough that parsing fails. Could detect eza by inspecting PATH
-  or binary name and applying a different field-count parser. Low priority.
+- **Detect eza/exa/lsd and adjust field count** — still valid correctness hardening,
+  but low priority for current head-to-head benchmark metric.
+- **tsc path compaction** — shorten `path:L:C TSxxxx` further (e.g., shared-dir prefix
+  factoring) while preserving jump-to-file usefulness.
+- **go test failure-line compaction** — keep failing assertion payload but trim repeated
+  boilerplate prefixes to challenge RTK's extreme count-only compression.
+
+## Pruned as stale for current metric
+
+- Broad binary-size micro-optimizations from the 182 KB campaign are parked; current
+  metric is head-to-head score (`smll_points`), so wins must move compression/latency.
 
 ## Done / pruned
 
@@ -131,3 +137,7 @@
 - ~~Build summary remove space before tool tag~~ — Tried/discarded (run #138, ±0 bytes)
 - ~~Shorten curl separators to --h--/--b--~~ — Tried/discarded (run #139, ±0 bytes)
 - ~~Reuse arg1 for git subcommand parse~~ — Done (run #140, -24 bytes)
+- ~~ANSI fastpath in tsc scan loop~~ — Tried/discarded (run #149, no score gain; slight latency regression)
+- ~~Compact npm deprecated warnings to package-focused lines~~ — Done (run #146, smll_points 16.5→17.5)
+- ~~Compact npm summary/vulnerability lines~~ — Done (run #147, smll_points 17.5→19.5)
+- ~~Drop timestamps in docker/kubectl log compact output~~ — Done (run #148, smll_points 19.5→20.5)
