@@ -198,11 +198,35 @@ fn runWrapper(
     // the pipe buffer (~64 KB on Linux) before stdout is drained — acceptable
     // for git/cargo/bun which emit small stderr (errors, progress lines).
     // MAX_OUTPUT_BYTES cap still bounds total capture.
+    //
+    // For `ls`: force LC_ALL=C + LANG=C so date fields always use the C-locale
+    // shape ("Apr 22") regardless of the user's system locale. Without this,
+    // non-English locales produce different date formats that shift the field
+    // count and cause extractName() to return null for every line.
+    var ls_env: std.process.Environ.Map = undefined;
+    var ls_env_inited = false;
+    defer if (ls_env_inited) ls_env.deinit();
+    const spawn_env: ?*const std.process.Environ.Map = blk: {
+        const outer_cmd_pre = argv[0];
+        const base_pre = if (std.mem.findScalarLast(u8, outer_cmd_pre, '/')) |idx|
+            outer_cmd_pre[idx + 1 ..]
+        else
+            outer_cmd_pre;
+        if (std.mem.eql(u8, base_pre, "ls")) {
+            ls_env = try environ.clone(allocator);
+            ls_env_inited = true;
+            try ls_env.put("LC_ALL", "C");
+            try ls_env.put("LANG", "C");
+            break :blk &ls_env;
+        }
+        break :blk null;
+    };
     var child = std.process.spawn(io, .{
         .argv = argv,
         .stdin = .ignore,
         .stdout = .pipe,
         .stderr = .pipe,
+        .environ_map = spawn_env,
     }) catch |err| return err;
     defer child.kill(io);
 
