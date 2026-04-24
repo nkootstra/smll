@@ -185,13 +185,23 @@ fn computeBytes(num: []const u8, unit: u8) ?u64 {
         'E' => 1024 * 1024 * 1024 * 1024 * 1024 * 1024,
         else => return null,
     };
-    const parsed = std.fmt.parseFloat(f64, num) catch return null;
-    if (parsed < 0) return null;
-    const scaled = parsed * @as(f64, @floatFromInt(multiplier));
-    if (scaled > @as(f64, @floatFromInt(std.math.maxInt(u64)))) {
-        return std.math.maxInt(u64);
-    }
-    return @intFromFloat(scaled);
+    // Parse integer and optional fractional part without pulling in f64 libs.
+    // du sizes are small decimals (e.g. "1.2", "234") — integer arithmetic suffices.
+    const dot = std.mem.indexOfScalar(u8, num, '.');
+    const int_part_str = if (dot) |d| num[0..d] else num;
+    const int_part = std.fmt.parseInt(u64, int_part_str, 10) catch return null;
+    // Fractional: at most one decimal digit matters for 2-sig-fig rounding.
+    // Represent the value as (int_part * 10 + frac_digit) / 10 * multiplier.
+    const frac_digit: u64 = if (dot) |d| blk: {
+        const frac = num[d + 1 ..];
+        if (frac.len == 0) break :blk 0;
+        const digit = frac[0];
+        if (digit < '0' or digit > '9') break :blk 0;
+        break :blk digit - '0';
+    } else 0;
+    // (int_part * 10 + frac_digit) * multiplier / 10
+    const tenths = int_part *| 10 +| frac_digit; // saturating add
+    return tenths *| (multiplier / 10) +| (tenths *| (multiplier % 10) / 10);
 }
 
 fn emitRoundedLine(writer: *Writer, row: Parsed) !void {
@@ -204,15 +214,20 @@ fn emitRoundedLine(writer: *Writer, row: Parsed) !void {
 }
 
 fn emitHumanSize(writer: *Writer, bytes: u64) !void {
-    const fb: f64 = @floatFromInt(bytes);
-    if (fb >= 1024.0 * 1024.0 * 1024.0 * 1024.0) {
-        try writer.print("{d:.1}T", .{fb / (1024.0 * 1024.0 * 1024.0 * 1024.0)});
-    } else if (fb >= 1024.0 * 1024.0 * 1024.0) {
-        try writer.print("{d:.1}G", .{fb / (1024.0 * 1024.0 * 1024.0)});
-    } else if (fb >= 1024.0 * 1024.0) {
-        try writer.print("{d:.1}M", .{fb / (1024.0 * 1024.0)});
-    } else if (fb >= 1024.0) {
-        try writer.print("{d:.1}K", .{fb / 1024.0});
+    // Integer-only human size — avoids pulling in f64 formatting tables.
+    // Uses one decimal place via (value * 10 / unit) trick.
+    if (bytes >= 1024 * 1024 * 1024 * 1024) {
+        const t = bytes / (1024 * 1024 * 1024 * 1024 / 10); // tenths of TiB
+        try writer.print("{d}.{d}T", .{ t / 10, t % 10 });
+    } else if (bytes >= 1024 * 1024 * 1024) {
+        const g = bytes / (1024 * 1024 * 1024 / 10);
+        try writer.print("{d}.{d}G", .{ g / 10, g % 10 });
+    } else if (bytes >= 1024 * 1024) {
+        const m = bytes / (1024 * 1024 / 10);
+        try writer.print("{d}.{d}M", .{ m / 10, m % 10 });
+    } else if (bytes >= 1024) {
+        const k = bytes / (1024 / 10); // tenths of KiB = bytes / 102
+        try writer.print("{d}.{d}K", .{ k / 10, k % 10 });
     } else {
         try writer.print("{d}", .{bytes});
     }
