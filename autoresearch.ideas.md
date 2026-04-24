@@ -127,3 +127,7 @@
 - ~~Remove colon in docker/k8s summary headers~~ — Done (run #134, -56 bytes)
 - ~~Docker state tokens up/mixed/none -> u/m/n~~ — Tried/discarded (run #135, +1136 bytes)
 - ~~Overflow diagnostics o>2M/e>2M -> o2M/e2M~~ — Tried/discarded (run #136, ±0 bytes)
+- ~~Remove docker/k8s leading tags entirely~~ — Tried/discarded (run #137, +1080 bytes)
+- ~~Build summary remove space before tool tag~~ — Tried/discarded (run #138, ±0 bytes)
+- ~~Shorten curl separators to --h--/--b--~~ — Tried/discarded (run #139, ±0 bytes)
+- ~~Reuse arg1 for git subcommand parse~~ — Done (run #140, -24 bytes)

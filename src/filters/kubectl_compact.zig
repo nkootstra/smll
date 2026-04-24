@@ -12,7 +12,7 @@ const Writer = std.Io.Writer;
 // Grammar:
 //   k <count> <agg>: name1 name2 name3(Pending) name4(CrashLoopBackOff) ...
 //
-// <agg>: "running" (all healthy) | "mixed" | "none"
+// <agg>: "r" (all healthy) | "m" | "n"
 //
 // Detection: first non-empty line starts with "NAME" AND contains "READY" AND "STATUS".
 
@@ -48,10 +48,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     }
 
     const agg: []const u8 = blk: {
-        if (count == 0) break :blk "none";
-        if (running_healthy == count) break :blk "running";
-        if (running_healthy == 0) break :blk "none";
-        break :blk "mixed";
+        if (count == 0) break :blk "n";
+        if (running_healthy == count) break :blk "r";
+        if (running_healthy == 0) break :blk "n";
+        break :blk "m";
     };
 
     try writer.print("k{d}{s}", .{ count, agg });
@@ -147,7 +147,7 @@ test "apply: fixture all-running produces count + names" {
     defer out.deinit();
     try apply(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.startsWith(u8, got, "k9running"));
+    try std.testing.expect(std.mem.startsWith(u8, got, "k9r"));
     try std.testing.expect(std.mem.endsWith(u8, got, "\n"));
     try std.testing.expect(std.mem.find(u8, got, "api-server-6f8b9c4d7-x2k8m") != null);
     try std.testing.expect(std.mem.find(u8, got, "redis-master-0") != null);
@@ -168,17 +168,17 @@ test "apply: mixed state annotates unhealthy pods" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.startsWith(u8, got, "k3mixed"));
+    try std.testing.expect(std.mem.startsWith(u8, got, "k3m"));
     try std.testing.expect(std.mem.find(u8, got, "pod-ok ") != null or std.mem.endsWith(u8, got, "pod-ok\n"));
     try std.testing.expect(std.mem.find(u8, got, "pod-bad(0/1,CrashLoopBackOff)") != null);
     try std.testing.expect(std.mem.find(u8, got, "pod-pend(0/1,Pending)") != null);
 }
 
-test "apply: zero rows produces k0none:" {
+test "apply: zero rows produces k0n:" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, "NAME   READY   STATUS   RESTARTS   AGE\n", &.{}, &out.writer);
-    try std.testing.expectEqualStrings("k0none\n", out.written());
+    try std.testing.expectEqualStrings("k0n\n", out.written());
 }
 
 test "apply: empty input produces nothing" {
