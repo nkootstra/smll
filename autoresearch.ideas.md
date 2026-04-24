@@ -2,8 +2,8 @@
 
 ## Pending
 
-- **jest output parity mode** — evaluate passthrough/near-raw routing for `jest` in parity objective where RTK barely compacts.
-- **find -ls / git diff / git show parity mode** — consider passthrough or milder formatting where RTK output is effectively raw/expanded.
+- **git status parity tuning** — nudge compact shape toward RTK (currently small but persistent delta).
+- **pytest/tsc fine-grained parity tuning** — only pursue if primary score moves meaningfully.
 - **Detect eza/exa/lsd and adjust field count** — correctness hardening, orthogonal to current parity metric.
 
 ## Pruned as stale for current metric
@@ -151,3 +151,9 @@
 - ~~kubectl-get passthrough first attempt~~ — Tried/crash (run #162, syntax typo)
 - ~~RG --files parity passthrough~~ — Done (run #164, parity_points 12.684→13.066)
 - ~~Tree parity passthrough~~ — Done (run #165, parity_points 13.066→13.494)
+- ~~Find -ls parity passthrough~~ — Tried/discarded (run #166, no primary gain)
+- ~~Git show parity passthrough~~ — Tried/discarded (run #167/#170, no primary gain)
+- ~~Jest/Vitest parity passthrough~~ — Done (run #168, parity_points 13.494→14.060)
+- ~~Git diff parity passthrough~~ — Done (run #169, parity_points 14.060→14.509)
+- ~~Docker ps summary-only parity mode~~ — Done (run #171, parity_points 14.509→14.550)
+- ~~TSC basename-only path compaction~~ — Done (run #172, parity_points 14.550→14.587)

@@ -15,6 +15,9 @@ const Writer = std.Io.Writer;
 // Detection: stdout contains "running " + "tests" line OR "test result:" line.
 
 const KEEP_NEEDLES = [_][]const u8{
+    "FAILED",
+    "failures:",
+    "thread '",
     "error[",
     "error:",
     "warning:",
@@ -67,48 +70,10 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         if (trimmed.len == 0) continue;
         if (!shouldKeep(trimmed)) continue;
 
-        if (std.mem.startsWith(u8, trimmed, "test result:")) {
-            try writeCompactResult(allocator, trimmed, out);
-        } else {
-            try out.appendSlice(allocator, trimmed);
-            try out.append(allocator, '\n');
-        }
+        try out.appendSlice(allocator, trimmed);
+        try out.append(allocator, '\n');
         kept.* += 1;
     }
-}
-
-fn writeCompactResult(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !void {
-    const passed = numberBefore(line, " passed") orelse "0";
-    const failed = numberBefore(line, " failed") orelse "0";
-    try out.appendSlice(allocator, "res ");
-    try out.appendSlice(allocator, passed);
-    try out.appendSlice(allocator, "p ");
-    try out.appendSlice(allocator, failed);
-    try out.appendSlice(allocator, "f");
-    if (std.mem.indexOf(u8, line, "finished in ")) |i| {
-        const dur = firstToken(line[i + "finished in ".len ..]);
-        if (dur.len > 0) {
-            try out.appendSlice(allocator, " ");
-            try out.appendSlice(allocator, dur);
-        }
-    }
-    try out.append(allocator, '\n');
-}
-
-fn numberBefore(line: []const u8, marker: []const u8) ?[]const u8 {
-    const idx = std.mem.indexOf(u8, line, marker) orelse return null;
-    if (idx == 0) return null;
-    var start = idx;
-    while (start > 0 and std.ascii.isDigit(line[start - 1])) start -= 1;
-    if (start == idx) return null;
-    return line[start..idx];
-}
-
-fn firstToken(s: []const u8) []const u8 {
-    const t = std.mem.trim(u8, s, " \t\r");
-    var i: usize = 0;
-    while (i < t.len and t[i] != ' ' and t[i] != '\t') : (i += 1) {}
-    return t[0..i];
 }
 
 fn shouldKeep(line: []const u8) bool {
@@ -177,7 +142,7 @@ test "apply: keeps failure context" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "---- tests::b stdout ----") != null);
     try std.testing.expect(std.mem.find(u8, got, "panicked at") != null);
-    try std.testing.expect(std.mem.find(u8, got, "res 1p 1f") != null);
+    try std.testing.expect(std.mem.find(u8, got, "test result: FAILED") != null);
     // Pass lines dropped.
     try std.testing.expect(std.mem.find(u8, got, "tests::a ... ok") == null);
 }
@@ -189,7 +154,7 @@ test "apply: strips ANSI from kept lines" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
-    try std.testing.expect(std.mem.find(u8, got, "res 0p 1f") != null);
+    try std.testing.expect(std.mem.find(u8, got, "test result: FAILED") != null);
 }
 
 test "apply: benchmark results preserved (cargo test --bench)" {
@@ -214,8 +179,8 @@ test "apply: benchmark results preserved (cargo test --bench)" {
     try std.testing.expect(std.mem.find(u8, got, "10 ns/iter") != null);
     try std.testing.expect(std.mem.find(u8, got, "bench_multiply") != null);
     try std.testing.expect(std.mem.find(u8, got, "15 ns/iter") != null);
-    // Summary kept in compact form.
-    try std.testing.expect(std.mem.find(u8, got, "res 0p 0f") != null);
+    // Summary kept.
+    try std.testing.expect(std.mem.find(u8, got, "test result: ok") != null);
     // Noise dropped.
     try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
     // Must NOT emit "all tests passed" when benchmark results are present.
@@ -238,7 +203,7 @@ test "apply: mixed unit tests + benchmarks" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "10 ns/iter") != null);
     try std.testing.expect(std.mem.find(u8, got, "15 ns/iter") != null);
-    try std.testing.expect(std.mem.find(u8, got, "res 1p 0f") != null);
+    try std.testing.expect(std.mem.find(u8, got, "test result:") != null);
     // Passing unit test line dropped.
     try std.testing.expect(std.mem.find(u8, got, "tests::add   ... ok") == null);
 }
