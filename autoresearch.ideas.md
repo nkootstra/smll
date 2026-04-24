@@ -3,7 +3,7 @@
 ## Pending
 
 - **git status parity tuning** — nudge compact shape toward RTK (currently small but persistent delta).
-- **pytest/tsc fine-grained parity tuning** — only pursue if primary score moves meaningfully.
+- **pytest fine-grained parity tuning** — only pursue if primary score moves meaningfully.
 - **Detect eza/exa/lsd and adjust field count** — correctness hardening, orthogonal to current parity metric.
 
 ## Pruned as stale for current metric
@@ -157,3 +157,4 @@
 - ~~Git diff parity passthrough~~ — Done (run #169, parity_points 14.060→14.509)
 - ~~Docker ps summary-only parity mode~~ — Done (run #171, parity_points 14.509→14.550)
 - ~~TSC basename-only path compaction~~ — Done (run #172, parity_points 14.550→14.587)
+- ~~Cargo test parity tuning (less aggressive compaction)~~ — Done (run #173, parity_points 14.587→14.777)
