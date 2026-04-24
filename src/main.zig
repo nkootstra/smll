@@ -637,8 +637,20 @@ fn runWrapper(
                 hasArg(argv, "--shortstat") or
                 hasArg(argv, "--name-only") or
                 hasArg(argv, "--name-status") or
-                hasArg(argv, "--compact-summary");
-            if (show_summary_mode) {
+                hasArg(argv, "--compact-summary") or
+                hasArg(argv, "--no-patch") or
+                hasArg(argv, "-s");
+            // Detect --format=X and --pretty=X (custom output shapes).
+            const show_custom_format = blk: {
+                for (argv) |a| {
+                    if (std.mem.startsWith(u8, a, "--format=") or
+                        std.mem.startsWith(u8, a, "--pretty=") or
+                        std.mem.eql(u8, a, "--format") or
+                        std.mem.eql(u8, a, "--pretty")) break :blk true;
+                }
+                break :blk false;
+            };
+            if (show_summary_mode or show_custom_format) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
             } else {
