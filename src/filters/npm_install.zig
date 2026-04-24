@@ -99,8 +99,61 @@ fn writeLine(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !v
         return;
     }
 
+    if (std.mem.startsWith(u8, line, "added ")) {
+        const added = numberAfter(line, "added ") orelse "?";
+        try out.appendSlice(allocator, "+");
+        try out.appendSlice(allocator, added);
+        if (numberAfter(line, "audited ")) |audited| {
+            try out.appendSlice(allocator, " aud");
+            try out.appendSlice(allocator, audited);
+        }
+        if (std.mem.indexOf(u8, line, " in ")) |i| {
+            const dur = firstToken(line[i + 4 ..]);
+            if (dur.len > 0) {
+                try out.appendSlice(allocator, " ");
+                try out.appendSlice(allocator, dur);
+            }
+        }
+        try out.append(allocator, '\n');
+        return;
+    }
+
+    if (std.mem.startsWith(u8, line, "found ")) {
+        const vuln = numberAfter(line, "found ") orelse "?";
+        try out.appendSlice(allocator, "v ");
+        try out.appendSlice(allocator, vuln);
+        if (std.mem.indexOfScalar(u8, line, '(')) |open| {
+            if (std.mem.indexOfScalarPos(u8, line, open + 1, ')')) |close| {
+                const details = std.mem.trim(u8, line[open + 1 .. close], " \t\r");
+                if (details.len > 0) {
+                    try out.appendSlice(allocator, " (");
+                    try out.appendSlice(allocator, details);
+                    try out.append(allocator, ')');
+                }
+            }
+        }
+        try out.append(allocator, '\n');
+        return;
+    }
+
     try out.appendSlice(allocator, line);
     try out.append(allocator, '\n');
+}
+
+fn numberAfter(line: []const u8, marker: []const u8) ?[]const u8 {
+    const i = std.mem.indexOf(u8, line, marker) orelse return null;
+    var j = i + marker.len;
+    const start = j;
+    while (j < line.len and std.ascii.isDigit(line[j])) : (j += 1) {}
+    if (j == start) return null;
+    return line[start..j];
+}
+
+fn firstToken(s: []const u8) []const u8 {
+    const t = std.mem.trim(u8, s, " \t\r");
+    var i: usize = 0;
+    while (i < t.len and t[i] != ' ' and t[i] != '\t') : (i += 1) {}
+    return t[0..i];
 }
 
 fn shouldKeep(line: []const u8) bool {
@@ -139,8 +192,8 @@ test "apply: fixture keeps WARN + summary, drops notice + funding noise" {
     const got = out.written();
     try std.testing.expect(got.len < input.len);
     try std.testing.expect(std.mem.find(u8, got, "W dep lodash.isequal@4.5.0") != null);
-    try std.testing.expect(std.mem.find(u8, got, "added 847 packages") != null);
-    try std.testing.expect(std.mem.find(u8, got, "found 2 vulnerabilities") != null);
+    try std.testing.expect(std.mem.find(u8, got, "+847 aud848 12s") != null);
+    try std.testing.expect(std.mem.find(u8, got, "v 2 (1 moderate, 1 high)") != null);
     // Dropped noise.
     try std.testing.expect(std.mem.find(u8, got, "npm notice") == null);
     try std.testing.expect(std.mem.find(u8, got, "packages are looking for funding") == null);
