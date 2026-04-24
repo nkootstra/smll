@@ -650,7 +650,16 @@ fn runWrapper(
                 }
                 break :blk false;
             };
-            if (show_summary_mode or show_custom_format) {
+            // Detect `git show OBJECT:PATH` — file blob output, not a commit.
+            // Any non-flag argument containing ':' is a blob specifier.
+            const show_blob = blk: {
+                for (argv[2..]) |a| { // argv[0]=git, argv[1]=show
+                    if (a.len > 0 and a[0] != '-' and std.mem.indexOfScalar(u8, a, ':') != null)
+                        break :blk true;
+                }
+                break :blk false;
+            };
+            if (show_summary_mode or show_custom_format or show_blob) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
             } else {
