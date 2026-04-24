@@ -260,6 +260,12 @@ fn runWrapper(
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
+        } else if (!lossless and rg.matchesPattern(stdout_slice)) {
+            rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
         } else if (rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
