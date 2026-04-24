@@ -488,6 +488,7 @@ pub fn build(b: *std.Build) void {
         .strip = true,
         .unwind_tables = .none,
         .single_threaded = true,
+        .omit_frame_pointer = true,
     });
     release_mod.addImport("git_status", git_status_mod);
     release_mod.addImport("git_diff", git_diff_mod);
