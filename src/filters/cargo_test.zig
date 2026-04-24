@@ -24,6 +24,7 @@ const KEEP_NEEDLES = [_][]const u8{
     "panicked at",
     "---- ",
     "thread '",
+    "bench:", // cargo bench / cargo test --bench result lines
 };
 
 pub fn matches(input: []const u8) bool {
@@ -153,4 +154,55 @@ test "apply: strips ANSI from kept lines" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
     try std.testing.expect(std.mem.find(u8, got, "FAILED") != null);
+}
+
+test "apply: benchmark results preserved (cargo test --bench)" {
+    const input =
+        \\   Compiling foo v0.1.0
+        \\    Finished bench [optimized] target(s) in 0.42s
+        \\     Running benches/bench.rs
+        \\
+        \\running 2 tests
+        \\test bench_add      ... bench:         10 ns/iter (+/- 1)
+        \\test bench_multiply ... bench:         15 ns/iter (+/- 2)
+        \\
+        \\test result: ok. 0 passed; 0 failed; 0 ignored; 2 measured; 0 filtered out; finished in 0.12s
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    // Benchmark result lines must be preserved.
+    try std.testing.expect(std.mem.find(u8, got, "bench_add") != null);
+    try std.testing.expect(std.mem.find(u8, got, "10 ns/iter") != null);
+    try std.testing.expect(std.mem.find(u8, got, "bench_multiply") != null);
+    try std.testing.expect(std.mem.find(u8, got, "15 ns/iter") != null);
+    // Summary kept.
+    try std.testing.expect(std.mem.find(u8, got, "test result: ok") != null);
+    // Noise dropped.
+    try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
+    // Must NOT emit "all tests passed" when benchmark results are present.
+    try std.testing.expect(std.mem.find(u8, got, "all tests passed") == null);
+}
+
+test "apply: mixed unit tests + benchmarks" {
+    const input =
+        \\running 3 tests
+        \\test tests::add   ... ok
+        \\test bench_add    ... bench:         10 ns/iter (+/- 1)
+        \\test bench_mul    ... bench:         15 ns/iter (+/- 2)
+        \\
+        \\test result: ok. 1 passed; 0 failed; 0 ignored; 2 measured; finished in 0.15s
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "10 ns/iter") != null);
+    try std.testing.expect(std.mem.find(u8, got, "15 ns/iter") != null);
+    try std.testing.expect(std.mem.find(u8, got, "test result:") != null);
+    // Passing unit test line dropped.
+    try std.testing.expect(std.mem.find(u8, got, "tests::add   ... ok") == null);
 }
