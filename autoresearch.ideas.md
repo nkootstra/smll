@@ -4,10 +4,7 @@
 
 - **Detect eza/exa/lsd and adjust field count** — still valid correctness hardening,
   but low priority for current head-to-head benchmark metric.
-- **tsc path compaction** — shorten `path:L:C TSxxxx` further (e.g., shared-dir prefix
-  factoring) while preserving jump-to-file usefulness.
-- **go test failure-line compaction** — keep failing assertion payload but trim repeated
-  boilerplate prefixes to challenge RTK's extreme count-only compression.
+- **pytest selective compaction with explicit latency guard** — revisit only if we can keep score-neutral runtime behavior.
 
 ## Pruned as stale for current metric
 
@@ -147,3 +144,5 @@
 - ~~ANSI-strip fastpaths in pytest+docker_logs (per-line check)~~ — Tried/discarded (run #155, score regressed)
 - ~~Docker logs stream-level ANSI pre-scan fastpath~~ — Done (run #156, smll_points 22.5→23.5)
 - ~~Pytest stream-level ANSI pre-scan fastpath~~ — Tried/discarded (run #157, score regressed)
+- ~~TSC path compaction (drop ./ and src/ prefixes)~~ — Done (run #159, parity_points 10.912→10.937)
+- ~~Go test failure-line compaction~~ — Done (run #160, parity_points 10.937→11.215)

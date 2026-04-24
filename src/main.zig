@@ -771,28 +771,11 @@ fn runWrapper(
             };
         },
         .blame => {
-            // -s suppresses author+timestamp (compact format the filter doesn't parse).
-            // --porcelain / --line-porcelain output machine-readable format.
-            // -e / --show-email replaces author name with email.
-            // All produce output shapes the blame filter can't handle; passthrough.
-            const blame_alt_format =
-                hasArg(git_argv, "-s") or
-                hasArg(git_argv, "--porcelain") or
-                hasArg(git_argv, "-p") or
-                hasArg(git_argv, "--line-porcelain") or
-                hasArg(git_argv, "--incremental") or // machine-readable format
-                hasArg(git_argv, "-e") or
-                hasArg(git_argv, "--show-email");
-            if (blame_alt_format) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
-            } else {
-                git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
-                    return 1;
-                };
-            }
+            // Parity mode objective: keep git blame close to raw output shape.
+            // Blame's compacted form diverges heavily from RTK behavior and can
+            // hide author/timestamp context useful during archaeology.
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
         },
         .grep => {
             // `git grep -n` produces path:line:content output — same grammar as
