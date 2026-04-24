@@ -323,8 +323,17 @@ fn runWrapper(
     const is_pytest = std.mem.eql(u8, cmd_basename, "pytest");
     const is_cargo_test = std.mem.eql(u8, cmd_basename, "cargo") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
+    // jest/vitest: direct invocation OR script runners (npm/pnpm/yarn/bun test)
+    // that produce jest-shaped output. Output-shape detection in jest.matches()
+    // guards against false positives when other test runners are used.
+    const is_npm_or_script_test = argv.len >= 2 and std.mem.eql(u8, argv[1], "test") and
+        (std.mem.eql(u8, cmd_basename, "npm") or
+            std.mem.eql(u8, cmd_basename, "pnpm") or
+            std.mem.eql(u8, cmd_basename, "yarn") or
+            std.mem.eql(u8, cmd_basename, "bun"));
     const is_jest = std.mem.eql(u8, cmd_basename, "jest") or
-        std.mem.eql(u8, cmd_basename, "vitest");
+        std.mem.eql(u8, cmd_basename, "vitest") or
+        is_npm_or_script_test;
     const is_tsc = std.mem.eql(u8, cmd_basename, "tsc");
     const is_go_test = std.mem.eql(u8, cmd_basename, "go") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
