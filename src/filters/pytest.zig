@@ -21,8 +21,6 @@ const KEEP_NEEDLES = [_][]const u8{
     "failed",
     "error",
     "assert",
-    "AssertionError",
-    "collected",
     "short test summary",
     "==== ",
     ">   ",
