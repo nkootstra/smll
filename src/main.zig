@@ -601,24 +601,9 @@ fn runWrapper(
             };
         },
         .diff => {
-            // --stat / --shortstat / --name-only / --name-status / --summary
-            // produce already-compact summary output whose lines all start
-            // with a leading space (treated as context and dropped) or a
-            // summary line. Passthrough these modes rather than corrupting them.
-            const diff_summary_mode =
-                has_stat_or_name_flags or
-                hasArg(git_argv, "--summary") or
-                hasArg(git_argv, "--patch-with-stat"); // stat lines start with space, dropped by filter
-            if (diff_summary_mode) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
-            } else {
-                git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
-                    return 1;
-                };
-            }
+            // Parity target: keep git diff close to RTK/raw output shape.
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
         },
         .log => {
             // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the
