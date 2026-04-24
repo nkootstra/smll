@@ -618,16 +618,41 @@ fn runWrapper(
         .log => {
             // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the
             // fuller bespoke formatter (keeps commit bodies).
-            const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
-            const result2 = if (lossless)
-                git_log.apply(allocator, stdout_slice, stderr_slice, writer)
-            else
-                git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer);
-            result2 catch {
+            // --oneline / --stat / --name-only / --format= / --pretty= use custom
+            // output shapes that the filter does not understand. Passthrough raw.
+            const log_custom_format =
+                hasArg(argv, "--oneline") or
+                hasArg(argv, "--stat") or
+                hasArg(argv, "--shortstat") or
+                hasArg(argv, "--name-only") or
+                hasArg(argv, "--name-status") or
+                hasArg(argv, "--compact-summary") or
+                hasArg(argv, "--no-walk");
+            // Detect --format=X and --pretty=X (prefix match only).
+            const log_custom_format2 = blk: {
+                for (argv) |a| {
+                    if (std.mem.startsWith(u8, a, "--format=") or
+                        std.mem.startsWith(u8, a, "--pretty=") or
+                        std.mem.eql(u8, a, "--format") or
+                        std.mem.eql(u8, a, "--pretty")) break :blk true;
+                }
+                break :blk false;
+            };
+            if (log_custom_format or log_custom_format2) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+                const result2 = if (lossless)
+                    git_log.apply(allocator, stdout_slice, stderr_slice, writer)
+                else
+                    git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer);
+                result2 catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .show => {
             // --stat / --name-only / --name-status produce summary-format output
