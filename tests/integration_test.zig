@@ -2147,3 +2147,82 @@ test "smoke: cargo without build subcommand doesn't dispatch to build_compact" {
     // No "Compiled" summary line — build arm didn't engage.
     try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled ") == null);
 }
+
+// ---------------------------------------------------------------------------
+// git grep integration tests
+// ---------------------------------------------------------------------------
+
+test "git grep -n: path-prefix RLE compresses repeated paths" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture =
+        "src/main.zig:7:pub fn matches(input: []const u8) bool {\n" ++
+        "src/main.zig:12:pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {\n" ++
+        "src/main.zig:21:pub fn run(\n" ++
+        "src/util.zig:4:pub fn isHex40(s: []const u8) bool {\n" ++
+        "src/util.zig:12:pub fn sha7(full: []const u8) [7]u8 {\n";
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig:7:pub fn matches(input: []const u8) bool {\nsrc/main.zig:12:pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {\nsrc/main.zig:21:pub fn run(\nsrc/util.zig:4:pub fn isHex40(s: []const u8) bool {\nsrc/util.zig:12:pub fn sha7(full: []const u8) [7]u8 {\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "grep", "-n", "pub fn" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Compressed: path appears once per file, rest elided.
+    try std.testing.expect(std.mem.count(u8, result.stdout, "src/main.zig") == 1);
+    try std.testing.expect(std.mem.count(u8, result.stdout, "src/util.zig") == 1);
+    // Line numbers still present.
+    try std.testing.expect(std.mem.containsAtLeast(u8, result.stdout, 1, ":7:"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, result.stdout, 1, ":12:"));
+    // Output is smaller than input.
+    try std.testing.expect(result.stdout.len < fixture.len);
+}
+
+test "git grep without -n: passthrough (no :line: pattern)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    // git grep without -n: path:content, no line numbers.
+    const fixture = "src/main.zig:pub fn matches\nsrc/util.zig:pub fn sha7\n";
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig:pub fn matches\nsrc/util.zig:pub fn sha7\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "grep", "pub fn" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // matchesPattern returns false for path:content (no :digit:), passthrough.
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git grep -n SMLL_LOSSLESS=1: passthrough" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture = "src/main.zig:7:pub fn matches\nsrc/util.zig:4:pub fn isHex40\n";
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig:7:pub fn matches\nsrc/util.zig:4:pub fn isHex40\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "git", "grep", "-n", "pub fn" }, &.{.{ "SMLL_LOSSLESS", "1" }});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}

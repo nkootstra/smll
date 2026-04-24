@@ -182,6 +182,7 @@ const KnownSubcommand = enum {
     checkout,
     branch,
     blame,
+    grep,
     unknown,
 };
 
@@ -685,6 +686,22 @@ fn runWrapper(
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
+        },
+        .grep => {
+            // `git grep -n` produces path:line:content output — same grammar as
+            // rg pattern mode. Compress with path-prefix RLE when the output
+            // matches; passthrough otherwise (e.g. git grep without -n).
+            const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+            if (!lossless and rg.matchesPattern(stdout_slice)) {
+                rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            } else {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            }
         },
         .unknown => {
             try writer.writeAll(stdout_slice);
