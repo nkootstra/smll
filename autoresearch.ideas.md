@@ -141,3 +141,6 @@
 - ~~Compact npm deprecated warnings to package-focused lines~~ — Done (run #146, smll_points 16.5→17.5)
 - ~~Compact npm summary/vulnerability lines~~ — Done (run #147, smll_points 17.5→19.5)
 - ~~Drop timestamps in docker/kubectl log compact output~~ — Done (run #148, smll_points 19.5→20.5)
+- ~~Compact cargo test failure scaffolding + summarize test result line~~ — Done (run #153, smll_points 20.5→22.5)
+- ~~Aggressive pytest failure-only compaction~~ — Tried/discarded (run #152, score regressed to 17.5)
+- ~~Cargo+pytest dual compaction attempt~~ — Tried/crash (run #150, compile error)
