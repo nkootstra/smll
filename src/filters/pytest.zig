@@ -21,8 +21,6 @@ const KEEP_NEEDLES = [_][]const u8{
     "failed",
     "error",
     "assert",
-    "short test summary",
-    "==== ",
     ">   ",
     "E   ",
 };
@@ -171,7 +169,7 @@ test "apply: keeps failure context" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "FAILED") != null);
-    try std.testing.expect(std.mem.find(u8, got, "short test summary") != null);
+    try std.testing.expect(std.mem.find(u8, got, "short test summary") == null);
     try std.testing.expect(std.mem.find(u8, got, "1 failed, 1 passed") != null);
     try std.testing.expect(std.mem.find(u8, got, "assert False") != null);
     // Platform banner dropped.

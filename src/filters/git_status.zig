@@ -168,6 +168,7 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
     var lines = std.mem.splitScalar(u8, input, '\n');
     var section: Section = .none;
     var branch_written = false;
+    var has_entries = false;
     var branch_buf: [256]u8 = undefined;
     var branch_len: usize = 0;
     var ahead: ?[]const u8 = null;
@@ -253,12 +254,7 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
 
         // Tab-indented content lines.
         if (std.mem.startsWith(u8, line, "\t")) {
-            // Flush branch line before first content.
-            if (!branch_written) {
-                try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
-                branch_written = true;
-            }
-
+            has_entries = true;
             const content = line[1..]; // strip leading tab
             switch (section) {
                 .staged => try writeStagedEntry(writer, content),
@@ -287,9 +283,10 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
         }
     }
 
-    // If we parsed a branch but found no content (clean repo), still emit branch line.
-    if (!branch_written and branch_len > 0) {
+    // Emit branch line only for clean/no-entry status output.
+    if (!has_entries and branch_len > 0) {
         try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
+        branch_written = true;
     }
 }
 
@@ -482,8 +479,8 @@ test "apply: output for dirty fixture has correct format" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, dirty_fixture);
     defer allocator.free(out);
-    // Branch line
-    try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
+    // Branch line omitted when entries exist (parity mode).
+    try std.testing.expect(std.mem.find(u8, out, "# main") == null);
     // Unstaged modified paths
     try std.testing.expect(std.mem.find(u8, out, "M main.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "M pipeline.zig\n") != null);
@@ -503,7 +500,7 @@ test "apply: output for conflict fixture has UU sigil" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, conflict_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
+    try std.testing.expect(std.mem.find(u8, out, "# main") == null);
     try std.testing.expect(std.mem.find(u8, out, "S pipeline.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "UU git_status.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "? git_status_conflict.txt\n") != null);

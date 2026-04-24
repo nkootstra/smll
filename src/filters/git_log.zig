@@ -59,6 +59,8 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
     var sha7_valid = false;
     var date_buf: [10]u8 = undefined;
     var date_valid = false;
+    var author_buf: [64]u8 = undefined;
+    var author_len: usize = 0;
     var subject_emitted = false;
     var first_out = true;
 
@@ -67,7 +69,16 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
             sha7 = util.sha7(line["commit ".len..][0..40]);
             sha7_valid = true;
             date_valid = false;
+            author_len = 0;
             subject_emitted = false;
+            continue;
+        }
+        if (std.mem.startsWith(u8, line, "Author: ")) {
+            const rest = line["Author: ".len..];
+            const end = std.mem.indexOf(u8, rest, " <") orelse rest.len;
+            const name = rest[0..end];
+            author_len = @min(name.len, author_buf.len);
+            @memcpy(author_buf[0..author_len], name[0..author_len]);
             continue;
         }
         if (std.mem.startsWith(u8, line, "Date:")) {
@@ -84,6 +95,10 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
         if (date_valid) {
             try writer.writeByte(' ');
             try writer.writeAll(&date_buf);
+        }
+        if (author_len > 0) {
+            try writer.writeByte(' ');
+            try writer.writeAll(author_buf[0..author_len]);
         }
         try writer.writeByte(' ');
         try writer.writeAll(subject);
@@ -452,18 +467,16 @@ test "apply: preserves trailing newline when input has one" {
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
 }
 
-test "applyCompact: emits sha7 + optional date + subject, drops body/author" {
+test "applyCompact: emits sha7 + optional date + author + subject, drops body" {
     const allocator = std.testing.allocator;
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
     try applyCompact(allocator, linear_fixture, &.{}, &out.writer);
     const got = out.written();
-    // Hash + date + subject on a single line, no `c ` prefix and no author.
-    try std.testing.expect(std.mem.find(u8, got, "f0ad49e 2026-04-18 fix: third line") != null);
-    try std.testing.expect(std.mem.find(u8, got, "f666a84 2026-04-18 feat: extend a.txt") != null);
-    try std.testing.expect(std.mem.find(u8, got, "95cbeda 2026-04-18 feat: add a.txt with one line") != null);
-    // Author stripped
-    try std.testing.expect(std.mem.find(u8, got, "Alice Anderson") == null);
+    // Hash + date + author + subject on a single line, no `c ` prefix.
+    try std.testing.expect(std.mem.find(u8, got, "f0ad49e 2026-04-18 Alice Anderson fix: third line") != null);
+    try std.testing.expect(std.mem.find(u8, got, "f666a84 2026-04-18 Alice Anderson feat: extend a.txt") != null);
+    try std.testing.expect(std.mem.find(u8, got, "95cbeda 2026-04-18 Alice Anderson feat: add a.txt with one line") != null);
     // Body stripped
     try std.testing.expect(std.mem.find(u8, got, "This body explains") == null);
     // Strictly smaller than default apply

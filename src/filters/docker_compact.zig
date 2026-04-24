@@ -58,9 +58,21 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         break :blk "m";
     };
 
-    _ = names_col;
-    // Parity target: keep docker ps output very compact (close to RTK shape).
-    try writer.print("d{d}{s}\n", .{ count, state });
+    // Parity target: very compact summary, but keep one exemplar container name
+    // for actionability and better alignment with RTK-like compact output.
+    try writer.print("d{d}{s}", .{ count, state });
+
+    var emit = std.mem.splitScalar(u8, stdout, '\n');
+    _ = emit.next(); // skip header
+    while (emit.next()) |line| {
+        if (line.len == 0) continue;
+        const name = extractName(line, names_col);
+        if (name.len == 0) continue;
+        try writer.writeByte(' ');
+        try writer.writeAll(name);
+        break;
+    }
+    try writer.writeByte('\n');
 }
 
 /// Locate column-start index of a named header in the HEADER row.
