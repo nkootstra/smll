@@ -482,6 +482,8 @@ fn runWrapper(
         const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
         // kubectl logs <pod> — same grammar, same filter.
         const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
+        // kubectl get ... tables: keep raw output for closer RTK parity.
+        const is_kubectl_get = std.mem.eql(u8, cmd_basename, "kubectl") and std.mem.eql(u8, arg1, "get");
         // npm install / npm i / npm ci — keep summary + warnings, drop notice/funding.
         const is_npm_install = std.mem.eql(u8, cmd_basename, "npm") and
             (std.mem.eql(u8, arg1, "install") or
@@ -493,6 +495,8 @@ fn runWrapper(
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
+        } else if (!lossless and is_kubectl_get) {
+            try writer.writeAll(stdout_slice);
         } else if (!lossless and is_npm_install and npm_install.matches(stdout_slice)) {
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
