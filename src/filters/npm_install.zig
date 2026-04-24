@@ -71,10 +71,36 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
         if (!shouldKeep(trimmed)) continue;
-        try out.appendSlice(allocator, trimmed);
-        try out.append(allocator, '\n');
+        try writeLine(allocator, trimmed, out);
         kept.* += 1;
     }
+}
+
+fn writeLine(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !void {
+    const dep = "npm WARN deprecated ";
+    if (std.mem.startsWith(u8, line, dep)) {
+        const rest = line[dep.len..];
+        const pkg_end = std.mem.indexOfScalar(u8, rest, ':') orelse rest.len;
+        const pkg = rest[0..pkg_end];
+        try out.appendSlice(allocator, "W dep ");
+        try out.appendSlice(allocator, pkg);
+
+        if (std.mem.indexOf(u8, rest, "Use ")) |use_idx| {
+            const after_use = rest[use_idx + 4 ..];
+            if (std.mem.indexOf(u8, after_use, " instead")) |end_idx| {
+                const replacement = std.mem.trim(u8, after_use[0..end_idx], " \t\r\"");
+                if (replacement.len > 0) {
+                    try out.appendSlice(allocator, " -> ");
+                    try out.appendSlice(allocator, replacement);
+                }
+            }
+        }
+        try out.append(allocator, '\n');
+        return;
+    }
+
+    try out.appendSlice(allocator, line);
+    try out.append(allocator, '\n');
 }
 
 fn shouldKeep(line: []const u8) bool {
@@ -112,7 +138,7 @@ test "apply: fixture keeps WARN + summary, drops notice + funding noise" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < input.len);
-    try std.testing.expect(std.mem.find(u8, got, "npm WARN deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.find(u8, got, "W dep lodash.isequal@4.5.0") != null);
     try std.testing.expect(std.mem.find(u8, got, "added 847 packages") != null);
     try std.testing.expect(std.mem.find(u8, got, "found 2 vulnerabilities") != null);
     // Dropped noise.
