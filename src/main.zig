@@ -279,6 +279,16 @@ fn runWrapper(
     {
         const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         const is_find_ls = std.mem.eql(u8, cmd_basename, "find") and hasArg(argv, "-ls");
+        // For rg: only apply --files dirname RLE when the output is confirmed file-list
+        // mode. Guards against rg -N (no line numbers) output which is path:content —
+        // matchesPattern correctly rejects it, but rg.matches() could accept it and
+        // apply wrong dirname compression. --files/-l/--files-with-matches confirm
+        // file-list mode; find output (no colons in paths) is also safe.
+        const is_rg_files_mode = std.mem.eql(u8, cmd_basename, "rg") and
+            (hasArg(argv, "--files") or
+                hasArg(argv, "-l") or
+                hasArg(argv, "--files-with-matches"));
+        const is_find_plain = std.mem.eql(u8, cmd_basename, "find") and !is_find_ls;
         if (!lossless and is_find_ls and find_compact.matches(stdout_slice)) {
             find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -291,7 +301,7 @@ fn runWrapper(
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (rg.matches(stdout_slice)) {
+        } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
