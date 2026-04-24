@@ -86,6 +86,18 @@ fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayL
     var path_lc = line[0..idx];
     if (std.mem.startsWith(u8, path_lc, "./")) path_lc = path_lc[2..];
     if (std.mem.startsWith(u8, path_lc, "src/")) path_lc = path_lc[4..];
+
+    // Further compact: keep only basename for the file path, preserve :L:C.
+    if (std.mem.indexOfScalar(u8, path_lc, ':')) |c1| {
+        if (std.mem.indexOfScalarPos(u8, path_lc, c1 + 1, ':')) |_| {
+            const file_part = path_lc[0..c1];
+            const lc_part = path_lc[c1..];
+            const base = if (std.mem.findScalarLast(u8, file_part, '/')) |s| file_part[s + 1 ..] else file_part;
+            var compact_buf: [256]u8 = undefined;
+            const joined = std.fmt.bufPrint(&compact_buf, "{s}{s}", .{ base, lc_part }) catch path_lc;
+            path_lc = joined;
+        }
+    }
     const code_start = idx + 9; // past " - error "
     var code_end = code_start;
     while (code_end < line.len and line[code_end] != ':') code_end += 1;
@@ -122,11 +134,11 @@ test "apply: fixture compresses errors to locations + codes" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     // Transformed form: path:L:C TSnnnn (message dropped).
-    try std.testing.expect(std.mem.find(u8, got, "api/client.ts:42:5 TS2322") != null);
-    try std.testing.expect(std.mem.find(u8, got, "api/client.ts:58:12 TS2339") != null);
-    try std.testing.expect(std.mem.find(u8, got, "components/Button.tsx:15:7 TS2345") != null);
-    try std.testing.expect(std.mem.find(u8, got, "utils/format.ts:8:3 TS7006") != null);
-    try std.testing.expect(std.mem.find(u8, got, "utils/format.ts:14:10 TS2304") != null);
+    try std.testing.expect(std.mem.find(u8, got, "client.ts:42:5 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, got, "client.ts:58:12 TS2339") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Button.tsx:15:7 TS2345") != null);
+    try std.testing.expect(std.mem.find(u8, got, "format.ts:8:3 TS7006") != null);
+    try std.testing.expect(std.mem.find(u8, got, "format.ts:14:10 TS2304") != null);
     try std.testing.expect(std.mem.find(u8, got, "Found 5 errors in 3 files.") != null);
     // Message text dropped.
     try std.testing.expect(std.mem.find(u8, got, "is not assignable") == null);
