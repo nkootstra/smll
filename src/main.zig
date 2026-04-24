@@ -248,6 +248,9 @@ fn runWrapper(
     else
         outer_cmd;
 
+    // Hoist SMLL_LOSSLESS lookup — checked in every dispatch branch.
+    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
     // via dirname RLE. `find -ls` goes through find_compact instead
     // (columnar inode/mode/size/path → path-only). SMLL_LOSSLESS=1 bypasses
@@ -255,7 +258,6 @@ fn runWrapper(
     if (std.mem.eql(u8, cmd_basename, "rg") or
         std.mem.eql(u8, cmd_basename, "find"))
     {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         const is_find_ls = std.mem.eql(u8, cmd_basename, "find") and hasArg(argv, "-ls");
         // For rg: only apply --files dirname RLE when the output is confirmed file-list
         // mode. Guards against rg -N (no line numbers) output which is path:content —
@@ -327,7 +329,6 @@ fn runWrapper(
     const is_go_test = std.mem.eql(u8, cmd_basename, "go") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
     if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless) {
             if (is_pytest and pytest.matches(stdout_slice)) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
@@ -380,7 +381,6 @@ fn runWrapper(
     // status line, request/response headers, and body. Non-standard filter:
     // matches() inspects STDERR, not stdout. Set SMLL_LOSSLESS=1 to bypass.
     if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv)) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and curl_compact.matches(stderr_slice)) {
             curl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -398,7 +398,6 @@ fn runWrapper(
     // When `-s` / `--summarize` is present, sort entries descending by byte size
     // so the largest offenders come first. Set SMLL_LOSSLESS=1 for raw passthrough.
     if (std.mem.eql(u8, cmd_basename, "du")) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and du_compact.matches(stdout_slice)) {
             const sort_desc = du_compact.hasSummarizeFlag(argv);
             du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
@@ -416,7 +415,6 @@ fn runWrapper(
     // ls wrapper — LOSSY compaction (filenames only) by default (v0.6).
     // Set SMLL_LOSSLESS=1 for raw passthrough.
     if (std.mem.eql(u8, cmd_basename, "ls")) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and ls_compact.matches(stdout_slice)) {
             ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
                 // ParsedNothing: content was present but parser extracted nothing
@@ -453,7 +451,6 @@ fn runWrapper(
         std.mem.eql(u8, cmd_basename, "brew") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         // docker logs <container> — line dedup (before docker ps table dispatch).
         const is_docker_logs = std.mem.eql(u8, cmd_basename, "docker") and
             argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
@@ -524,7 +521,6 @@ fn runWrapper(
     const is_go_build = std.mem.eql(u8, cmd_basename, "go") and
         argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
     if (is_make or is_cargo_build or is_go_build) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
             build_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -542,7 +538,6 @@ fn runWrapper(
         // Non-git outer command: size-gated generic compactor on stdout
         // when no bespoke arm claimed it AND output exceeds threshold.
         // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and generic_compact.matches(stdout_slice)) {
             generic_compact.apply(allocator, stdout_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -622,7 +617,6 @@ fn runWrapper(
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
             } else {
-                const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
                 const result2 = if (lossless)
                     git_log.apply(allocator, stdout_slice, stderr_slice, writer)
                 else
@@ -752,7 +746,6 @@ fn runWrapper(
             // `git grep -n` produces path:line:content output — same grammar as
             // rg pattern mode. Compress with path-prefix RLE when the output
             // matches; passthrough otherwise (e.g. git grep without -n).
-            const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
             if (!lossless and rg.matchesPattern(stdout_slice)) {
                 rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
