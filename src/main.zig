@@ -593,11 +593,27 @@ fn runWrapper(
             };
         },
         .diff => {
-            git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // --stat / --shortstat / --name-only / --name-status / --summary
+            // produce already-compact summary output whose lines all start
+            // with a leading space (treated as context and dropped) or a
+            // summary line. Passthrough these modes rather than corrupting them.
+            const diff_summary_mode =
+                hasArg(argv, "--stat") or
+                hasArg(argv, "--shortstat") or
+                hasArg(argv, "--name-only") or
+                hasArg(argv, "--name-status") or
+                hasArg(argv, "--summary") or
+                hasArg(argv, "--compact-summary");
+            if (diff_summary_mode) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .log => {
             // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the

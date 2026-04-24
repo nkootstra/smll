@@ -2226,3 +2226,88 @@ test "git grep -n SMLL_LOSSLESS=1: passthrough" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualSlices(u8, fixture, result.stdout);
 }
+
+// ---------------------------------------------------------------------------
+// git diff summary-mode passthrough tests
+// ---------------------------------------------------------------------------
+
+test "git diff --stat: passes through verbatim (not corrupted)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    // Real git diff --stat output: all file lines start with a space.
+    const fixture =
+        " src/main.zig         | 10 +++++-----\n" ++
+        " src/filters/rg.zig   |  5 +++++\n" ++
+        " 2 files changed, 15 insertions(+), 5 deletions(-)\n";
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf ' src/main.zig         | 10 +++++-----\n src/filters/rg.zig   |  5 +++++\n 2 files changed, 15 insertions(+), 5 deletions(-)\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff", "--stat" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // All file stat lines must be preserved — the old bug silently dropped them.
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git diff --name-only: passes through verbatim" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture = "src/main.zig\nsrc/filters/rg.zig\n";
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig\nsrc/filters/rg.zig\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff", "--name-only" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git diff (full): still compressed when no summary flag" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture =
+        "diff --git a/src/main.zig b/src/main.zig\n" ++
+        "index abc1234..def5678 100644\n" ++
+        "--- a/src/main.zig\n" ++
+        "+++ b/src/main.zig\n" ++
+        "@@ -7,4 +7,5 @@ pub fn main() void {\n" ++
+        " const x = 1;\n" ++
+        "+const y = 2;\n" ++
+        " return;\n" ++
+        "}\n";
+    _ = fixture; // kept for documentation; smll compresses it
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'diff --git a/src/main.zig b/src/main.zig\nindex abc1234..def5678 100644\n--- a/src/main.zig\n+++ b/src/main.zig\n@@ -7,4 +7,5 @@ pub fn main() void {\n const x = 1;\n+const y = 2;\n return;\n}\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Compressed: "d src/main.zig" header, "index" line dropped.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "d src/main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "index abc1234") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "+const y = 2;") != null);
+}
