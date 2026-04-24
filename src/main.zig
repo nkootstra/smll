@@ -627,7 +627,10 @@ fn runWrapper(
                 hasArg(argv, "--name-only") or
                 hasArg(argv, "--name-status") or
                 hasArg(argv, "--compact-summary") or
-                hasArg(argv, "--no-walk");
+                hasArg(argv, "--no-walk") or
+                hasArg(argv, "-p") or
+                hasArg(argv, "--patch") or
+                hasArg(argv, "-u"); // -u is alias for --patch
             // Detect --format=X and --pretty=X (prefix match only).
             const log_custom_format2 = blk: {
                 for (argv) |a| {
@@ -746,11 +749,27 @@ fn runWrapper(
             };
         },
         .blame => {
-            git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // -s suppresses author+timestamp (compact format the filter doesn't parse).
+            // --porcelain / --line-porcelain output machine-readable format.
+            // -e / --show-email replaces author name with email.
+            // All produce output shapes the blame filter can't handle; passthrough.
+            const blame_alt_format =
+                hasArg(argv, "-s") or
+                hasArg(argv, "--porcelain") or
+                hasArg(argv, "-p") or
+                hasArg(argv, "--line-porcelain") or
+                hasArg(argv, "-e") or
+                hasArg(argv, "--show-email");
+            if (blame_alt_format) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .grep => {
             // `git grep -n` produces path:line:content output — same grammar as
