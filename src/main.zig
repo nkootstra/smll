@@ -377,12 +377,10 @@ fn runWrapper(
                 };
                 return exit_code;
             }
-            if (is_jest and jest.matches(stdout_slice)) {
-                jest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
-                    return 1;
-                };
+            if (is_jest) {
+                // Parity target: keep jest/vitest output near RTK/raw shape.
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
                 return exit_code;
             }
             if (is_tsc and tsc.matches(stdout_slice)) {

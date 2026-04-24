@@ -3,8 +3,7 @@
 ## Pending
 
 - **jest output parity mode** — evaluate passthrough/near-raw routing for `jest` in parity objective where RTK barely compacts.
-- **rg --files parity mode** — test raw passthrough for file lists (RTK output is near-raw/expanded).
-- **tree parity mode** — reduce/disable tree structural compaction to better match RTK behavior while preserving readability.
+- **find -ls / git diff / git show parity mode** — consider passthrough or milder formatting where RTK output is effectively raw/expanded.
 - **Detect eza/exa/lsd and adjust field count** — correctness hardening, orthogonal to current parity metric.
 
 ## Pruned as stale for current metric
@@ -150,3 +149,5 @@
 - ~~Git blame passthrough for parity~~ — Done (run #161, parity_points 11.215→12.022)
 - ~~Kubectl get passthrough for parity~~ — Done (run #163, parity_points 12.022→12.684)
 - ~~kubectl-get passthrough first attempt~~ — Tried/crash (run #162, syntax typo)
+- ~~RG --files parity passthrough~~ — Done (run #164, parity_points 12.684→13.066)
+- ~~Tree parity passthrough~~ — Done (run #165, parity_points 13.066→13.494)
