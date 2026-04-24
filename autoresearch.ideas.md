@@ -144,3 +144,6 @@
 - ~~Compact cargo test failure scaffolding + summarize test result line~~ — Done (run #153, smll_points 20.5→22.5)
 - ~~Aggressive pytest failure-only compaction~~ — Tried/discarded (run #152, score regressed to 17.5)
 - ~~Cargo+pytest dual compaction attempt~~ — Tried/crash (run #150, compile error)
+- ~~ANSI-strip fastpaths in pytest+docker_logs (per-line check)~~ — Tried/discarded (run #155, score regressed)
+- ~~Docker logs stream-level ANSI pre-scan fastpath~~ — Done (run #156, smll_points 22.5→23.5)
+- ~~Pytest stream-level ANSI pre-scan fastpath~~ — Tried/discarded (run #157, score regressed)
