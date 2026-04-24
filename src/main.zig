@@ -641,6 +641,7 @@ fn runWrapper(
                 hasArg(argv, "--name-status") or
                 hasArg(argv, "--compact-summary") or
                 hasArg(argv, "--no-patch") or
+                hasArg(argv, "--raw") or // object-hash format instead of diff
                 hasArg(argv, "-s");
             // Detect --format=X and --pretty=X (custom output shapes).
             const show_custom_format = blk: {
