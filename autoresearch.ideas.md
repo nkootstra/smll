@@ -8,11 +8,12 @@
   output shape differs enough that parsing fails. Could detect eza by inspecting PATH
   or binary name and applying a different field-count parser.
 
-- **rg -N (no line numbers) passthrough guard** — `rg -N` output is `path:content`
-  (no `:digit:` pattern). matchesPattern correctly rejects it. However, rg.matches()
-  (--files dirname RLE) may accept it if content doesn't start with a digit, leading
-  to incorrect compression. Fix: in main.zig, only route `rg` to the --files filter
-  when `--files`/`-l` flag is present in argv OR output contains no `:` at all.
+- **git log --oneline / --format edge cases** — Check whether git_log.applyCompact
+  handles --oneline and custom --format= output without corrupting it. Parallel to
+  the git diff --stat bug we just fixed.
+
+- **git show --stat** — Similar to git diff --stat: `git show --stat` output has
+  space-leading stat lines that might also be dropped by git_show's filter.
 
 ## Done / pruned
 
@@ -20,3 +21,6 @@
 - ~~go test -bench better~~ — Done (commit 4fc1621, benchmark lines preserved)
 - ~~Force LC_ALL=C when spawning ls subprocess~~ — Done (commit 79ff39c)
 - ~~Route git grep -n through pattern filter~~ — Done (commit 9c6d83e)
+- ~~rg -N passthrough guard~~ — Done (commit 7bbf67b)
+- ~~cargo test --bench results silently dropped~~ — Done (commit 6c214d4)
+- ~~git diff --stat output silently dropped~~ — Done (commit 096c766)

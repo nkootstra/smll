@@ -630,11 +630,25 @@ fn runWrapper(
             };
         },
         .show => {
-            git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // --stat / --name-only / --name-status produce summary-format output
+            // whose file-stat lines all start with a space and would be silently
+            // dropped by the diff section of git_show.apply. Passthrough raw.
+            const show_summary_mode =
+                hasArg(argv, "--stat") or
+                hasArg(argv, "--shortstat") or
+                hasArg(argv, "--name-only") or
+                hasArg(argv, "--name-status") or
+                hasArg(argv, "--compact-summary");
+            if (show_summary_mode) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .add => {
             git_add.apply(allocator, stdout_slice, stderr_slice, writer) catch {
