@@ -600,6 +600,7 @@ fn runWrapper(
                 hasArg(argv, "--name-status") or
                 hasArg(argv, "--compact-summary") or
                 hasArg(argv, "--no-walk") or
+                hasArg(argv, "--abbrev-commit") or // shortened SHA breaks isCommitLine
                 hasArg(argv, "-p") or
                 hasArg(argv, "--patch") or
                 hasArg(argv, "-u"); // -u is alias for --patch
