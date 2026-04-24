@@ -218,19 +218,32 @@ fn emitHumanSize(writer: *Writer, bytes: u64) !void {
     // Uses one decimal place via (value * 10 / unit) trick.
     if (bytes >= 1024 * 1024 * 1024 * 1024) {
         const t = bytes / (1024 * 1024 * 1024 * 1024 / 10); // tenths of TiB
-        try writer.print("{d}.{d}T", .{ t / 10, t % 10 });
+        try emitTenths(writer, t, 'T');
     } else if (bytes >= 1024 * 1024 * 1024) {
         const g = bytes / (1024 * 1024 * 1024 / 10);
-        try writer.print("{d}.{d}G", .{ g / 10, g % 10 });
+        try emitTenths(writer, g, 'G');
     } else if (bytes >= 1024 * 1024) {
         const m = bytes / (1024 * 1024 / 10);
-        try writer.print("{d}.{d}M", .{ m / 10, m % 10 });
+        try emitTenths(writer, m, 'M');
     } else if (bytes >= 1024) {
         const k = bytes / (1024 / 10); // tenths of KiB = bytes / 102
-        try writer.print("{d}.{d}K", .{ k / 10, k % 10 });
+        try emitTenths(writer, k, 'K');
     } else {
         try writer.print("{d}", .{bytes});
     }
+}
+
+fn emitTenths(writer: *Writer, tenths: u64, unit: u8) !void {
+    // Emit "X.YU" without multiple print calls — just write digits directly.
+    const whole = tenths / 10;
+    const frac = tenths % 10;
+    // Write whole part (may be multi-digit)
+    var buf: [20]u8 = undefined;
+    const whole_str = std.fmt.bufPrint(&buf, "{d}", .{whole}) catch unreachable;
+    try writer.writeAll(whole_str);
+    try writer.writeByte('.');
+    try writer.writeByte('0' + @as(u8, @intCast(frac)));
+    try writer.writeByte(unit);
 }
 
 /// Round a written number to 2 significant figures.
