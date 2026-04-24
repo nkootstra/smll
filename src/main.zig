@@ -575,7 +575,8 @@ fn runWrapper(
                 hasArg(argv, "--name-only") or
                 hasArg(argv, "--name-status") or
                 hasArg(argv, "--summary") or
-                hasArg(argv, "--compact-summary");
+                hasArg(argv, "--compact-summary") or
+                hasArg(argv, "--patch-with-stat"); // stat lines start with space, dropped by filter
             if (diff_summary_mode) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
@@ -751,6 +752,7 @@ fn runWrapper(
                 hasArg(argv, "--porcelain") or
                 hasArg(argv, "-p") or
                 hasArg(argv, "--line-porcelain") or
+                hasArg(argv, "--incremental") or // machine-readable format
                 hasArg(argv, "-e") or
                 hasArg(argv, "--show-email");
             if (blame_alt_format) {
