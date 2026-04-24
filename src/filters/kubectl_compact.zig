@@ -54,7 +54,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         break :blk "mixed";
     };
 
-    try writer.print("k{d}{s}:", .{ count, agg });
+    try writer.print("k{d}{s}", .{ count, agg });
 
     // Pass 2: emit names (annotate unhealthy).
     var pass2 = std.mem.splitScalar(u8, stdout, '\n');
@@ -147,7 +147,7 @@ test "apply: fixture all-running produces count + names" {
     defer out.deinit();
     try apply(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.startsWith(u8, got, "k9running:"));
+    try std.testing.expect(std.mem.startsWith(u8, got, "k9running"));
     try std.testing.expect(std.mem.endsWith(u8, got, "\n"));
     try std.testing.expect(std.mem.find(u8, got, "api-server-6f8b9c4d7-x2k8m") != null);
     try std.testing.expect(std.mem.find(u8, got, "redis-master-0") != null);
@@ -168,7 +168,7 @@ test "apply: mixed state annotates unhealthy pods" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.startsWith(u8, got, "k3mixed:"));
+    try std.testing.expect(std.mem.startsWith(u8, got, "k3mixed"));
     try std.testing.expect(std.mem.find(u8, got, "pod-ok ") != null or std.mem.endsWith(u8, got, "pod-ok\n"));
     try std.testing.expect(std.mem.find(u8, got, "pod-bad(0/1,CrashLoopBackOff)") != null);
     try std.testing.expect(std.mem.find(u8, got, "pod-pend(0/1,Pending)") != null);
@@ -178,7 +178,7 @@ test "apply: zero rows produces k0none:" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, "NAME   READY   STATUS   RESTARTS   AGE\n", &.{}, &out.writer);
-    try std.testing.expectEqualStrings("k0none:\n", out.written());
+    try std.testing.expectEqualStrings("k0none\n", out.written());
 }
 
 test "apply: empty input produces nothing" {
