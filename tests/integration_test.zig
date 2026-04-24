@@ -1282,12 +1282,12 @@ test "columnar: kubectl compresses by default" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    // v0.8: kubectl_compact dispatches to dedicated pod-name summary filter.
-    // Emits single line: "[k8s] N running: name1 name2 ...". Pod names preserved.
+    // v0.8+: kubectl_compact dispatches to compact pod-name summary filter.
+    // Emits single line with k<count><state> prefix and pod names.
     try std.testing.expect(result.stdout.len < kubectl_pods_fixture.len);
     const savings_pct = (kubectl_pods_fixture.len - result.stdout.len) * 100 / kubectl_pods_fixture.len;
     try std.testing.expect(savings_pct >= 40);
-    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "[k8s] "));
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "k"));
     try std.testing.expect(std.mem.find(u8, result.stdout, "api-server-6f8b9c4d7-x2k8m") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "redis-master-0") != null);
 }
@@ -2012,7 +2012,7 @@ test "smoke: cargo build collapses Compiling lines on stderr (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // Progress collapsed, summary emitted.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 7 files (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 7 (cargo)") != null);
     // No raw "   Compiling " lines survive.
     try std.testing.expect(std.mem.find(u8, result.stdout, "   Compiling ") == null);
     // Warning block preserved verbatim.
@@ -2034,7 +2034,7 @@ test "smoke: cargo build large fixture reduces by ≥ 60%" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     const reduction = (cargo_build_large.len - result.stdout.len) * 100 / cargo_build_large.len;
     try std.testing.expect(reduction >= 60);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 files (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 (cargo)") != null);
     // Warnings survived.
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused import") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: variable does not need to be mutable") != null);
@@ -2052,7 +2052,7 @@ test "smoke: make collapses cc/LINK lines on stdout" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // 4 cc lines + 1 LINK line = 5 progress.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 5 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 5 (make)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "cc -c -Wall") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "LINK build/app") == null);
     // Warning survived.
@@ -2072,7 +2072,7 @@ test "smoke: make large fixture reduces by ≥ 60%" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     const reduction = (make_build_large.len - result.stdout.len) * 100 / make_build_large.len;
     try std.testing.expect(reduction >= 60);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 501 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 501 (make)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'tmp'") != null);
 }
 
@@ -2087,7 +2087,7 @@ test "smoke: go build collapses `go build:` lines on stderr" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 6 files (go)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 6 (go)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "go build: compiling") == null);
     // The "declared and not used" line has no error:/warning: prefix, so it
     // classifies as .other and passes through verbatim.
@@ -2107,7 +2107,7 @@ test "smoke: go build large fixture reduces by ≥ 60%" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     const reduction = (go_build_large.len - result.stdout.len) * 100 / go_build_large.len;
     try std.testing.expect(reduction >= 60);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 files (go)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 (go)") != null);
     // Errors survived.
     try std.testing.expect(std.mem.find(u8, result.stdout, "error: declared and not used") != null);
 }
@@ -2146,4 +2146,168 @@ test "smoke: cargo without build subcommand doesn't dispatch to build_compact" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // No "Compiled" summary line — build arm didn't engage.
     try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled ") == null);
+}
+
+// ---------------------------------------------------------------------------
+// git grep integration tests
+// ---------------------------------------------------------------------------
+
+test "git grep -n: path-prefix RLE compresses repeated paths" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture =
+        "src/main.zig:7:pub fn matches(input: []const u8) bool {\n" ++
+        "src/main.zig:12:pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {\n" ++
+        "src/main.zig:21:pub fn run(\n" ++
+        "src/util.zig:4:pub fn isHex40(s: []const u8) bool {\n" ++
+        "src/util.zig:12:pub fn sha7(full: []const u8) [7]u8 {\n";
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig:7:pub fn matches(input: []const u8) bool {\nsrc/main.zig:12:pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {\nsrc/main.zig:21:pub fn run(\nsrc/util.zig:4:pub fn isHex40(s: []const u8) bool {\nsrc/util.zig:12:pub fn sha7(full: []const u8) [7]u8 {\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "grep", "-n", "pub fn" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Compressed: path appears once per file, rest elided.
+    try std.testing.expect(std.mem.count(u8, result.stdout, "src/main.zig") == 1);
+    try std.testing.expect(std.mem.count(u8, result.stdout, "src/util.zig") == 1);
+    // Line numbers still present.
+    try std.testing.expect(std.mem.containsAtLeast(u8, result.stdout, 1, ":7:"));
+    try std.testing.expect(std.mem.containsAtLeast(u8, result.stdout, 1, ":12:"));
+    // Output is smaller than input.
+    try std.testing.expect(result.stdout.len < fixture.len);
+}
+
+test "git grep without -n: passthrough (no :line: pattern)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    // git grep without -n: path:content, no line numbers.
+    const fixture = "src/main.zig:pub fn matches\nsrc/util.zig:pub fn sha7\n";
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig:pub fn matches\nsrc/util.zig:pub fn sha7\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "grep", "pub fn" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // matchesPattern returns false for path:content (no :digit:), passthrough.
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git grep -n SMLL_LOSSLESS=1: passthrough" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture = "src/main.zig:7:pub fn matches\nsrc/util.zig:4:pub fn isHex40\n";
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig:7:pub fn matches\nsrc/util.zig:4:pub fn isHex40\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "git", "grep", "-n", "pub fn" }, &.{.{ "SMLL_LOSSLESS", "1" }});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+// ---------------------------------------------------------------------------
+// git diff summary-mode passthrough tests
+// ---------------------------------------------------------------------------
+
+test "git diff --stat: passes through verbatim (not corrupted)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    // Real git diff --stat output: all file lines start with a space.
+    const fixture =
+        " src/main.zig         | 10 +++++-----\n" ++
+        " src/filters/rg.zig   |  5 +++++\n" ++
+        " 2 files changed, 15 insertions(+), 5 deletions(-)\n";
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf ' src/main.zig         | 10 +++++-----\n src/filters/rg.zig   |  5 +++++\n 2 files changed, 15 insertions(+), 5 deletions(-)\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff", "--stat" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // All file stat lines must be preserved — the old bug silently dropped them.
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git diff --name-only: passes through verbatim" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture = "src/main.zig\nsrc/filters/rg.zig\n";
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'src/main.zig\nsrc/filters/rg.zig\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff", "--name-only" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git diff (full): still compressed when no summary flag" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const fixture =
+        "diff --git a/src/main.zig b/src/main.zig\n" ++
+        "index abc1234..def5678 100644\n" ++
+        "--- a/src/main.zig\n" ++
+        "+++ b/src/main.zig\n" ++
+        "@@ -7,4 +7,5 @@ pub fn main() void {\n" ++
+        " const x = 1;\n" ++
+        "+const y = 2;\n" ++
+        " return;\n" ++
+        "}\n";
+    _ = fixture; // kept for documentation; smll compresses it
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'diff --git a/src/main.zig b/src/main.zig\nindex abc1234..def5678 100644\n--- a/src/main.zig\n+++ b/src/main.zig\n@@ -7,4 +7,5 @@ pub fn main() void {\n const x = 1;\n+const y = 2;\n return;\n}\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    // Compressed: "d src/main.zig" header, "index" line dropped.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "d src/main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "index abc1234") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "+const y = 2;") != null);
 }

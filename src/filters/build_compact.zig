@@ -15,8 +15,8 @@ const Writer = std.Io.Writer;
 // stdout into a single virtual stream before classification.
 //
 // Shape of summary line (emitted once per tool that fired at least one
-// progress line): `Compiled N files (cargo)` / `Compiled N files (make)` /
-// `Compiled N files (go)`.
+// progress line): `Compiled N (cargo)` / `Compiled N (make)` /
+// `Compiled N (go)`.
 
 // Source-line prefixes that count as "compiler progress" and collapse into
 // a count. Two space-prefixed entries cover cargo's leading 3-space indent
@@ -98,13 +98,13 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &make_count, &go_count);
 
     if (cargo_count > 0) {
-        try writer.print("Compiled {d} files (cargo)\n", .{cargo_count});
+        try writer.print("Compiled {d} (cargo)\n", .{cargo_count});
     }
     if (make_count > 0) {
-        try writer.print("Compiled {d} files (make)\n", .{make_count});
+        try writer.print("Compiled {d} (make)\n", .{make_count});
     }
     if (go_count > 0) {
-        try writer.print("Compiled {d} files (go)\n", .{go_count});
+        try writer.print("Compiled {d} (go)\n", .{go_count});
     }
 }
 
@@ -181,7 +181,7 @@ test "apply: cargo happy path collapses to summary" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 files (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (cargo)") != null);
     try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
 }
@@ -199,7 +199,7 @@ test "apply: make mixed progress + warning" {
     try apply(std.testing.allocator, input, "", &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "warning: unused variable") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (make)") != null);
     try std.testing.expect(std.mem.find(u8, got, "gcc -c") == null);
     try std.testing.expect(std.mem.find(u8, got, "LINK") == null);
 }
@@ -215,7 +215,7 @@ test "apply: go build progress collapses" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 files (go)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (go)") != null);
     try std.testing.expect(std.mem.find(u8, got, "go build:") == null);
 }
 
@@ -253,7 +253,7 @@ test "apply: compile error block emitted verbatim, no progress collapse inside" 
     try std.testing.expect(std.mem.find(u8, got, "error[E0308]: mismatched types") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/lib.rs:3:5") != null);
     try std.testing.expect(std.mem.find(u8, got, "expected `i32`") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 files (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (cargo)") != null);
 }
 
 test "apply: mixed cargo + make emits two summary lines" {
@@ -266,8 +266,8 @@ test "apply: mixed cargo + make emits two summary lines" {
     defer out.deinit();
     try apply(std.testing.allocator, input, "", &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 files (cargo)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 files (make)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (make)") != null);
 }
 
 test "apply: strips ANSI on kept lines" {
@@ -295,7 +295,7 @@ test "apply: large synthetic cargo fixture reduces ≥ 60%" {
     defer out.deinit();
     try apply(alloc, "", raw, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 500 files (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 500 (cargo)") != null);
     try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
     // Reduction target: ≥ 60%.  got/raw < 0.4 → got * 5 < raw * 2.
     try std.testing.expect(got.len * 5 < raw.len * 2);

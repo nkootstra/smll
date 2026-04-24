@@ -487,6 +487,8 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
         .strip = true,
         .unwind_tables = .none,
+        .single_threaded = true,
+        .omit_frame_pointer = true,
     });
     release_mod.addImport("git_status", git_status_mod);
     release_mod.addImport("git_diff", git_diff_mod);
@@ -503,11 +505,8 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_branch", git_branch_mod);
     release_mod.addImport("git_stash", git_stash_mod);
     release_mod.addImport("git_blame", git_blame_mod);
-    release_mod.addImport("detect", detect_mod);
-    release_mod.addImport("validator", validator_mod);
     release_mod.addImport("rg", rg_mod);
     release_mod.addImport("tree", tree_mod);
-    release_mod.addImport("ws_rle", ws_rle_mod);
     release_mod.addImport("columnar", columnar_mod);
     release_mod.addImport("docker_compact", docker_compact_mod);
     release_mod.addImport("ls_compact", ls_compact_mod);

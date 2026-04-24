@@ -15,11 +15,8 @@ const git_checkout = @import("git_checkout");
 const git_branch = @import("git_branch");
 const git_stash = @import("git_stash");
 const git_blame = @import("git_blame");
-const detect = @import("detect");
-const validator = @import("validator");
 const rg = @import("rg");
 const tree = @import("tree");
-const ws_rle = @import("ws_rle");
 const columnar = @import("columnar");
 const docker_compact = @import("docker_compact");
 const ls_compact = @import("ls_compact");
@@ -75,6 +72,24 @@ fn hasArg(argv: []const []const u8, arg: []const u8) bool {
     return false;
 }
 
+fn hasFormatOrPrettyArg(argv: []const []const u8) bool {
+    for (argv) |a| {
+        if (std.mem.startsWith(u8, a, "--format=") or
+            std.mem.startsWith(u8, a, "--pretty=") or
+            std.mem.eql(u8, a, "--format") or
+            std.mem.eql(u8, a, "--pretty")) return true;
+    }
+    return false;
+}
+
+fn hasStatOrNameFlags(argv: []const []const u8) bool {
+    return hasArg(argv, "--stat") or
+        hasArg(argv, "--shortstat") or
+        hasArg(argv, "--name-only") or
+        hasArg(argv, "--name-status") or
+        hasArg(argv, "--compact-summary");
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const environ = init.environ_map;
@@ -91,25 +106,6 @@ pub fn main(init: std.process.Init) !void {
     // Fast path: no extra argv → stdin mode. Skip the wrapper-mode arena
     // init entirely. args[0] is the program name; len 1 = stdin mode.
     if (args.len <= 1) {
-        // v0.6 prototype: SMLL_DETECT=1 enables the tool-agnostic detect filter
-        // (ANSI strip + whitespace collapse + prefix RLE) instead of the git filter
-        // tuple. Used for measurement only.
-        if (envFlagOn(environ, "SMLL_DETECT")) {
-            const allocator = std.heap.page_allocator;
-            const input = try readAllStdin(allocator, io);
-            defer allocator.free(input);
-            try detect.apply(allocator, input, &.{}, &stdout_writer.interface);
-            try stdout_writer.interface.flush();
-            return;
-        }
-        if (envFlagOn(environ, "SMLL_VALIDATE")) {
-            const allocator = std.heap.page_allocator;
-            const input = try readAllStdin(allocator, io);
-            defer allocator.free(input);
-            try validator.apply(allocator, input, &stdout_writer.interface);
-            try stdout_writer.interface.flush();
-            return;
-        }
         var in_buf: [4096]u8 = undefined;
         var stdin_file = std.Io.File.stdin();
         var stdin_reader = stdin_file.reader(io, &in_buf);
@@ -166,7 +162,7 @@ const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 // All 15 R4 git subcommands.  Phase 2 fills in the remaining 11; for now
 // only the 4 v0.3 filters (status, diff, log, show) are wired — the other
 // 11 arms fall through to passthrough.
-const KnownSubcommand = enum {
+const KnownSubcommand = enum(u8) {
     status,
     diff,
     log,
@@ -182,7 +178,7 @@ const KnownSubcommand = enum {
     checkout,
     branch,
     blame,
-    unknown,
+    grep,
 };
 
 fn runWrapper(
@@ -198,11 +194,35 @@ fn runWrapper(
     // the pipe buffer (~64 KB on Linux) before stdout is drained — acceptable
     // for git/cargo/bun which emit small stderr (errors, progress lines).
     // MAX_OUTPUT_BYTES cap still bounds total capture.
+    //
+    // For `ls`: force LC_ALL=C + LANG=C so date fields always use the C-locale
+    // shape ("Apr 22") regardless of the user's system locale. Without this,
+    // non-English locales produce different date formats that shift the field
+    // count and cause extractName() to return null for every line.
+    const outer_cmd = argv[0];
+    const cmd_basename = if (std.mem.findScalarLast(u8, outer_cmd, '/')) |idx|
+        outer_cmd[idx + 1 ..]
+    else
+        outer_cmd;
+
+    var ls_env: std.process.Environ.Map = undefined;
+    var ls_env_inited = false;
+    defer if (ls_env_inited) ls_env.deinit();
+    const spawn_env: ?*const std.process.Environ.Map = blk: {
+        if (std.mem.eql(u8, cmd_basename, "ls")) {
+            ls_env = try environ.clone(allocator);
+            ls_env_inited = true;
+            try ls_env.put("LC_ALL", "C");
+            break :blk &ls_env;
+        }
+        break :blk null;
+    };
     var child = std.process.spawn(io, .{
         .argv = argv,
         .stdin = .ignore,
         .stdout = .pipe,
         .stderr = .pipe,
+        .environ_map = spawn_env,
     }) catch |err| return err;
     defer child.kill(io);
 
@@ -210,7 +230,7 @@ fn runWrapper(
     var stdout_reader = child.stdout.?.reader(io, &stdout_buf);
     const stdout_slice = stdout_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
         error.StreamTooLong => {
-            const msg = "smll: child stdout exceeded 2 MiB cap\n";
+            const msg = "2M+\n";
             stderr_writer.writeAll(msg) catch {};
             return 1;
         },
@@ -221,7 +241,7 @@ fn runWrapper(
     var stderr_reader = child.stderr.?.reader(io, &err_drain_buf);
     const stderr_slice = stderr_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
         error.StreamTooLong => {
-            const msg = "smll: child stderr exceeded 2 MiB cap\n";
+            const msg = "2M+\n";
             stderr_writer.writeAll(msg) catch {};
             return 1;
         },
@@ -238,29 +258,47 @@ fn runWrapper(
     // command is literally "git".  Any other outer command (e.g. "cargo")
     // goes straight to passthrough even if the subcommand string matches a
     // KnownSubcommand.
-    const outer_cmd = argv[0];
     // Strip any directory prefix: "git", "/usr/bin/git", etc. all match.
-    const cmd_basename = if (std.mem.findScalarLast(u8, outer_cmd, '/')) |idx|
-        outer_cmd[idx + 1 ..]
-    else
-        outer_cmd;
+
+    // Hoist SMLL_LOSSLESS lookup — checked in every dispatch branch.
+    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+
+    const has_arg1 = argv.len >= 2;
+    const arg1 = if (has_arg1) argv[1] else "";
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
     // via dirname RLE. `find -ls` goes through find_compact instead
     // (columnar inode/mode/size/path → path-only). SMLL_LOSSLESS=1 bypasses
     // both.
-    if (std.mem.eql(u8, cmd_basename, "rg") or
-        std.mem.eql(u8, cmd_basename, "find"))
-    {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
-        const is_find_ls = std.mem.eql(u8, cmd_basename, "find") and hasArg(argv, "-ls");
-        if (!lossless and is_find_ls and find_compact.matches(stdout_slice)) {
+    const is_rg_cmd = std.mem.eql(u8, cmd_basename, "rg");
+    const is_find_cmd = std.mem.eql(u8, cmd_basename, "find");
+    if (is_rg_cmd or is_find_cmd) {
+        const is_find_ls = is_find_cmd and hasArg(argv, "-ls");
+        // For rg: only apply --files dirname RLE when the output is confirmed file-list
+        // mode. Guards against rg -N (no line numbers) output which is path:content —
+        // matchesPattern correctly rejects it, but rg.matches() could accept it and
+        // apply wrong dirname compression. --files/-l/--files-with-matches confirm
+        // file-list mode; find output (no colons in paths) is also safe.
+        const is_rg_files_mode = is_rg_cmd and
+            (hasArg(argv, "--files") or
+                hasArg(argv, "-l") or
+                hasArg(argv, "--files-with-matches"));
+        const is_find_plain = is_find_cmd and !is_find_ls;
+        if (lossless) {
+            try writer.writeAll(stdout_slice);
+        } else if (is_find_ls and find_compact.matches(stdout_slice)) {
             find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (rg.matches(stdout_slice)) {
+        } else if (rg.matchesPattern(stdout_slice)) {
+            rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
@@ -300,15 +338,23 @@ fn runWrapper(
     // Emits failures + summary only; "all tests passed\n" / "no type errors\n"
     // on clean runs. Set SMLL_LOSSLESS=1 for raw passthrough.
     const is_pytest = std.mem.eql(u8, cmd_basename, "pytest");
-    const is_cargo_test = std.mem.eql(u8, cmd_basename, "cargo") and
-        argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
-    const is_jest = std.mem.eql(u8, cmd_basename, "jest") or
-        std.mem.eql(u8, cmd_basename, "vitest");
+    const is_test_subcmd = std.mem.eql(u8, arg1, "test");
+    const is_cargo_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
+    // jest/vitest: direct invocation OR script runners (npm/pnpm/yarn/bun test)
+    // that produce jest-shaped output. Output-shape detection in jest.matches()
+    // guards against false positives when other test runners are used.
+    const is_jest = switch (cmd_basename[0]) {
+        'j' => std.mem.eql(u8, cmd_basename, "jest"),
+        'v' => std.mem.eql(u8, cmd_basename, "vitest"),
+        'n' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "npm"),
+        'p' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "pnpm"),
+        'y' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "yarn"),
+        'b' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "bun"),
+        else => false,
+    };
     const is_tsc = std.mem.eql(u8, cmd_basename, "tsc");
-    const is_go_test = std.mem.eql(u8, cmd_basename, "go") and
-        argv.len >= 2 and std.mem.eql(u8, argv[1], "test");
+    const is_go_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "go");
     if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless) {
             if (is_pytest and pytest.matches(stdout_slice)) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
@@ -361,7 +407,6 @@ fn runWrapper(
     // status line, request/response headers, and body. Non-standard filter:
     // matches() inspects STDERR, not stdout. Set SMLL_LOSSLESS=1 to bypass.
     if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv)) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and curl_compact.matches(stderr_slice)) {
             curl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -379,7 +424,6 @@ fn runWrapper(
     // When `-s` / `--summarize` is present, sort entries descending by byte size
     // so the largest offenders come first. Set SMLL_LOSSLESS=1 for raw passthrough.
     if (std.mem.eql(u8, cmd_basename, "du")) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and du_compact.matches(stdout_slice)) {
             const sort_desc = du_compact.hasSummarizeFlag(argv);
             du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
@@ -397,12 +441,18 @@ fn runWrapper(
     // ls wrapper — LOSSY compaction (filenames only) by default (v0.6).
     // Set SMLL_LOSSLESS=1 for raw passthrough.
     if (std.mem.eql(u8, cmd_basename, "ls")) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and ls_compact.matches(stdout_slice)) {
-            ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
-                return 1;
+            ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
+                // ParsedNothing: content was present but parser extracted nothing
+                // (e.g. eza/exa/lsd date format, non-English locale). Fall through
+                // to raw passthrough instead of returning empty/misleading output.
+                if (err == error.ParsedNothing) {
+                    try writer.writeAll(stdout_slice);
+                } else {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                }
             };
         } else {
             try writer.writeAll(stdout_slice);
@@ -415,7 +465,6 @@ fn runWrapper(
     // docker routes through docker_compact (name-only summary); the rest fall
     // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
     // passthrough.
-    _ = &ws_rle; // kept in-tree as reference; see ws_rle.zig header comment
     if (std.mem.eql(u8, cmd_basename, "docker") or
         std.mem.eql(u8, cmd_basename, "kubectl") or
         std.mem.eql(u8, cmd_basename, "gh") or
@@ -428,19 +477,16 @@ fn runWrapper(
         std.mem.eql(u8, cmd_basename, "brew") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+        const is_logs_subcmd = std.mem.eql(u8, arg1, "logs");
         // docker logs <container> — line dedup (before docker ps table dispatch).
-        const is_docker_logs = std.mem.eql(u8, cmd_basename, "docker") and
-            argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
+        const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
         // kubectl logs <pod> — same grammar, same filter.
-        const is_kubectl_logs = std.mem.eql(u8, cmd_basename, "kubectl") and
-            argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
+        const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
         // npm install / npm i / npm ci — keep summary + warnings, drop notice/funding.
         const is_npm_install = std.mem.eql(u8, cmd_basename, "npm") and
-            argv.len >= 2 and
-            (std.mem.eql(u8, argv[1], "install") or
-                std.mem.eql(u8, argv[1], "i") or
-                std.mem.eql(u8, argv[1], "ci"));
+            (std.mem.eql(u8, arg1, "install") or
+                std.mem.eql(u8, arg1, "i") or
+                std.mem.eql(u8, arg1, "ci"));
         if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             docker_logs.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -494,12 +540,10 @@ fn runWrapper(
     // progress on stderr, make splits; the filter inspects both. Gate by
     // `!SMLL_LOSSLESS`. `bun` is explicitly excluded.
     const is_make = std.mem.eql(u8, cmd_basename, "make");
-    const is_cargo_build = std.mem.eql(u8, cmd_basename, "cargo") and
-        argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
-    const is_go_build = std.mem.eql(u8, cmd_basename, "go") and
-        argv.len >= 2 and std.mem.eql(u8, argv[1], "build");
+    const is_build_subcmd = std.mem.eql(u8, arg1, "build");
+    const is_cargo_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
+    const is_go_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "go");
     if (is_make or is_cargo_build or is_go_build) {
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
             build_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -517,7 +561,6 @@ fn runWrapper(
         // Non-git outer command: size-gated generic compactor on stdout
         // when no bespoke arm claimed it AND output exceeds threshold.
         // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
-        const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
         if (!lossless and generic_compact.matches(stdout_slice)) {
             generic_compact.apply(allocator, stdout_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -531,128 +574,244 @@ fn runWrapper(
         return exit_code;
     }
 
-    // argv[1] is the git subcommand (e.g. "status", "diff").
-    const subcmd_str = argv[1];
-    const subcmd = std.meta.stringToEnum(KnownSubcommand, subcmd_str) orelse .unknown;
+    // Global lossless mode: bypass all git filters.
+    if (lossless) {
+        try writer.writeAll(stdout_slice);
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
 
-    switch (subcmd) {
+    // argv[1] is the git subcommand (e.g. "status", "diff").
+    const subcmd_str = arg1;
+    const git_argv = argv[1..];
+    const has_stat_or_name_flags = hasStatOrNameFlags(git_argv);
+    if (std.meta.stringToEnum(KnownSubcommand, subcmd_str)) |subcmd| switch (subcmd) {
         .status => {
             git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                // Formatter-error policy: emit raw stdout as fail-open, exit non-zero.
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .diff => {
-            git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // --stat / --shortstat / --name-only / --name-status / --summary
+            // produce already-compact summary output whose lines all start
+            // with a leading space (treated as context and dropped) or a
+            // summary line. Passthrough these modes rather than corrupting them.
+            const diff_summary_mode =
+                has_stat_or_name_flags or
+                hasArg(git_argv, "--summary") or
+                hasArg(git_argv, "--patch-with-stat"); // stat lines start with space, dropped by filter
+            if (diff_summary_mode) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .log => {
             // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the
             // fuller bespoke formatter (keeps commit bodies).
-            const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
-            const result2 = if (lossless)
-                git_log.apply(allocator, stdout_slice, stderr_slice, writer)
-            else
-                git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer);
-            result2 catch {
+            // --oneline / --stat / --name-only / --format= / --pretty= use custom
+            // output shapes that the filter does not understand. Passthrough raw.
+            const log_custom_format =
+                hasArg(git_argv, "--oneline") or
+                has_stat_or_name_flags or
+                hasArg(git_argv, "--no-walk") or
+                hasArg(git_argv, "--abbrev-commit") or // shortened SHA breaks isCommitLine
+                hasArg(git_argv, "-p") or
+                hasArg(git_argv, "--patch") or
+                hasArg(git_argv, "-u"); // -u is alias for --patch
+            // Detect --format=X and --pretty=X (prefix match only).
+            const log_custom_format2 = hasFormatOrPrettyArg(git_argv);
+            if (log_custom_format or log_custom_format2) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .show => {
-            git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // --stat / --name-only / --name-status produce summary-format output
+            // whose file-stat lines all start with a space and would be silently
+            // dropped by the diff section of git_show.apply. Passthrough raw.
+            const show_summary_mode =
+                has_stat_or_name_flags or
+                hasArg(git_argv, "--no-patch") or
+                hasArg(git_argv, "--raw") or // object-hash format instead of diff
+                hasArg(git_argv, "-s");
+            // Detect --format=X and --pretty=X (custom output shapes).
+            const show_custom_format = hasFormatOrPrettyArg(git_argv);
+            // Detect `git show OBJECT:PATH` — file blob output, not a commit.
+            // Any non-flag argument containing ':' is a blob specifier.
+            const show_blob = blk: {
+                for (argv[2..]) |a| { // argv[0]=git, argv[1]=show
+                    if (a.len > 0 and a[0] != '-' and std.mem.indexOfScalar(u8, a, ':') != null)
+                        break :blk true;
+                }
+                break :blk false;
+            };
+            if (show_summary_mode or show_custom_format or show_blob) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .add => {
-            git_add.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_add.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .commit => {
-            git_commit.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_commit.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .push => {
-            git_push.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_push.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .pull => {
-            git_pull.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_pull.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .fetch => {
-            git_fetch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_fetch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .merge => {
-            git_merge.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_merge.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .rebase => {
-            git_rebase.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_rebase.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .checkout => {
-            git_checkout.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_checkout.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .branch => {
-            git_branch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_branch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .stash => {
-            git_stash.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            if (lossless) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else git_stash.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
         },
         .blame => {
-            git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // -s suppresses author+timestamp (compact format the filter doesn't parse).
+            // --porcelain / --line-porcelain output machine-readable format.
+            // -e / --show-email replaces author name with email.
+            // All produce output shapes the blame filter can't handle; passthrough.
+            const blame_alt_format =
+                hasArg(git_argv, "-s") or
+                hasArg(git_argv, "--porcelain") or
+                hasArg(git_argv, "-p") or
+                hasArg(git_argv, "--line-porcelain") or
+                hasArg(git_argv, "--incremental") or // machine-readable format
+                hasArg(git_argv, "-e") or
+                hasArg(git_argv, "--show-email");
+            if (blame_alt_format) {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
-        .unknown => {
-            try writer.writeAll(stdout_slice);
-            try stderr_writer.writeAll(stderr_slice);
+        .grep => {
+            // `git grep -n` produces path:line:content output — same grammar as
+            // rg pattern mode. Compress with path-prefix RLE when the output
+            // matches; passthrough otherwise (e.g. git grep without -n).
+            if (rg.matchesPattern(stdout_slice)) {
+                rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            } else {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            }
         },
+    } else {
+        try writer.writeAll(stdout_slice);
+        try stderr_writer.writeAll(stderr_slice);
     }
 
     return exit_code;

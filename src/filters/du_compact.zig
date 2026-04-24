@@ -67,11 +67,19 @@ pub fn apply(
         try rows.append(allocator, parsed);
     }
 
-    std.mem.sort(Parsed, rows.items, {}, struct {
-        fn lessThan(_: void, a: Parsed, b: Parsed) bool {
-            return a.bytes > b.bytes;
+    // Insertion sort — du -s output has ≤O(100) entries; avoids pulling in
+    // the full pdqsort machinery from std.mem.sort.
+    {
+        var i: usize = 1;
+        while (i < rows.items.len) : (i += 1) {
+            const key = rows.items[i];
+            var j: usize = i;
+            while (j > 0 and rows.items[j - 1].bytes < key.bytes) : (j -= 1) {
+                rows.items[j] = rows.items[j - 1];
+            }
+            rows.items[j] = key;
         }
-    }.lessThan);
+    }
 
     // Emit top entries; summarize the rest
     const TOP_N: usize = 10;
@@ -185,13 +193,23 @@ fn computeBytes(num: []const u8, unit: u8) ?u64 {
         'E' => 1024 * 1024 * 1024 * 1024 * 1024 * 1024,
         else => return null,
     };
-    const parsed = std.fmt.parseFloat(f64, num) catch return null;
-    if (parsed < 0) return null;
-    const scaled = parsed * @as(f64, @floatFromInt(multiplier));
-    if (scaled > @as(f64, @floatFromInt(std.math.maxInt(u64)))) {
-        return std.math.maxInt(u64);
-    }
-    return @intFromFloat(scaled);
+    // Parse integer and optional fractional part without pulling in f64 libs.
+    // du sizes are small decimals (e.g. "1.2", "234") — integer arithmetic suffices.
+    const dot = std.mem.indexOfScalar(u8, num, '.');
+    const int_part_str = if (dot) |d| num[0..d] else num;
+    const int_part = std.fmt.parseInt(u64, int_part_str, 10) catch return null;
+    // Fractional: at most one decimal digit matters for 2-sig-fig rounding.
+    // Represent the value as (int_part * 10 + frac_digit) / 10 * multiplier.
+    const frac_digit: u64 = if (dot) |d| blk: {
+        const frac = num[d + 1 ..];
+        if (frac.len == 0) break :blk 0;
+        const digit = frac[0];
+        if (digit < '0' or digit > '9') break :blk 0;
+        break :blk digit - '0';
+    } else 0;
+    // (int_part * 10 + frac_digit) * multiplier / 10
+    const tenths = int_part *| 10 +| frac_digit; // saturating add
+    return tenths *| (multiplier / 10) +| (tenths *| (multiplier % 10) / 10);
 }
 
 fn emitRoundedLine(writer: *Writer, row: Parsed) !void {
@@ -204,18 +222,47 @@ fn emitRoundedLine(writer: *Writer, row: Parsed) !void {
 }
 
 fn emitHumanSize(writer: *Writer, bytes: u64) !void {
-    const fb: f64 = @floatFromInt(bytes);
-    if (fb >= 1024.0 * 1024.0 * 1024.0 * 1024.0) {
-        try writer.print("{d:.1}T", .{fb / (1024.0 * 1024.0 * 1024.0 * 1024.0)});
-    } else if (fb >= 1024.0 * 1024.0 * 1024.0) {
-        try writer.print("{d:.1}G", .{fb / (1024.0 * 1024.0 * 1024.0)});
-    } else if (fb >= 1024.0 * 1024.0) {
-        try writer.print("{d:.1}M", .{fb / (1024.0 * 1024.0)});
-    } else if (fb >= 1024.0) {
-        try writer.print("{d:.1}K", .{fb / 1024.0});
+    // Integer-only human size — avoids pulling in f64 formatting tables.
+    // Uses one decimal place via (value * 10 / unit) trick.
+    if (bytes >= 1024 * 1024 * 1024 * 1024) {
+        const t = bytes / (1024 * 1024 * 1024 * 1024 / 10); // tenths of TiB
+        try emitTenths(writer, t, 'T');
+    } else if (bytes >= 1024 * 1024 * 1024) {
+        const g = bytes / (1024 * 1024 * 1024 / 10);
+        try emitTenths(writer, g, 'G');
+    } else if (bytes >= 1024 * 1024) {
+        const m = bytes / (1024 * 1024 / 10);
+        try emitTenths(writer, m, 'M');
+    } else if (bytes >= 1024) {
+        const k = bytes / (1024 / 10); // tenths of KiB = bytes / 102
+        try emitTenths(writer, k, 'K');
     } else {
         try writer.print("{d}", .{bytes});
     }
+}
+
+fn emitTenths(writer: *Writer, tenths: u64, unit: u8) !void {
+    // Write whole.fracU without any heap allocation.
+    const whole = tenths / 10;
+    const frac = @as(u8, @intCast(tenths % 10));
+    // Write whole part using a small stack buffer (du sizes fit in u32 easily).
+    var buf: [20]u8 = undefined;
+    var pos: usize = buf.len;
+    var n = whole;
+    if (n == 0) {
+        pos -= 1;
+        buf[pos] = '0';
+    } else {
+        while (n > 0) {
+            pos -= 1;
+            buf[pos] = '0' + @as(u8, @intCast(n % 10));
+            n /= 10;
+        }
+    }
+    try writer.writeAll(buf[pos..]);
+    try writer.writeByte('.');
+    try writer.writeByte('0' + frac);
+    try writer.writeByte(unit);
 }
 
 /// Round a written number to 2 significant figures.
