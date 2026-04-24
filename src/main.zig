@@ -91,25 +91,6 @@ pub fn main(init: std.process.Init) !void {
     // Fast path: no extra argv → stdin mode. Skip the wrapper-mode arena
     // init entirely. args[0] is the program name; len 1 = stdin mode.
     if (args.len <= 1) {
-        // v0.6 prototype: SMLL_DETECT=1 enables the tool-agnostic detect filter
-        // (ANSI strip + whitespace collapse + prefix RLE) instead of the git filter
-        // tuple. Used for measurement only.
-        if (envFlagOn(environ, "SMLL_DETECT")) {
-            const allocator = std.heap.page_allocator;
-            const input = try readAllStdin(allocator, io);
-            defer allocator.free(input);
-            try detect.apply(allocator, input, &.{}, &stdout_writer.interface);
-            try stdout_writer.interface.flush();
-            return;
-        }
-        if (envFlagOn(environ, "SMLL_VALIDATE")) {
-            const allocator = std.heap.page_allocator;
-            const input = try readAllStdin(allocator, io);
-            defer allocator.free(input);
-            try validator.apply(allocator, input, &stdout_writer.interface);
-            try stdout_writer.interface.flush();
-            return;
-        }
         var in_buf: [4096]u8 = undefined;
         var stdin_file = std.Io.File.stdin();
         var stdin_reader = stdin_file.reader(io, &in_buf);
@@ -463,7 +444,6 @@ fn runWrapper(
     // docker routes through docker_compact (name-only summary); the rest fall
     // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
     // passthrough.
-    _ = &ws_rle; // kept in-tree as reference; see ws_rle.zig header comment
     if (std.mem.eql(u8, cmd_basename, "docker") or
         std.mem.eql(u8, cmd_basename, "kubectl") or
         std.mem.eql(u8, cmd_basename, "gh") or
