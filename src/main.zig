@@ -582,7 +582,7 @@ fn runWrapper(
     }
 
     // argv[1] is the git subcommand (e.g. "status", "diff").
-    const subcmd_str = argv[1];
+    const subcmd_str = arg1;
     const git_argv = argv[1..];
     const has_stat_or_name_flags = hasStatOrNameFlags(git_argv);
     if (std.meta.stringToEnum(KnownSubcommand, subcmd_str)) |subcmd| switch (subcmd) {
