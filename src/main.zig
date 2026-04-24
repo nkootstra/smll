@@ -321,17 +321,18 @@ fn runWrapper(
     if (std.mem.eql(u8, cmd_basename, "tree") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
+        if (std.mem.eql(u8, cmd_basename, "tree")) {
+            // Parity target: keep tree output near raw shape.
+            try writer.writeAll(stdout_slice);
+            try stderr_writer.writeAll(stderr_slice);
+            return exit_code;
+        }
         if (tree.matches(stdout_slice)) {
             tree.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-            try stderr_writer.writeAll(stderr_slice);
-            return exit_code;
-        }
-        if (std.mem.eql(u8, cmd_basename, "tree")) {
-            try writer.writeAll(stdout_slice);
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
