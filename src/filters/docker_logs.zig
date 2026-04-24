@@ -36,10 +36,14 @@ fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
 
     var lines = std.mem.splitScalar(u8, input, '\n');
     var first: bool = true;
+    const has_ansi = std.mem.indexOfScalar(u8, input, '\x1b') != null;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     while (lines.next()) |raw| {
-        const clean = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const clean = if (has_ansi)
+            (ansi.stripInto(&strip_buf, allocator, raw) catch raw)
+        else
+            raw;
         const trimmed = std.mem.trimEnd(u8, clean, " \t\r");
         if (trimmed.len == 0) {
             // Empty line — flush pending, don't emit blank.
