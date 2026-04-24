@@ -81,13 +81,6 @@ fn groupDirectories(output: []const u8, writer: *Writer) !void {
         const p = parsed.?;
         const dir = parentDir(p.path);
 
-        if (dir.len == 0) {
-            try writer.writeAll(line);
-            try writer.writeByte('\n');
-            i += 1;
-            continue;
-        }
-
         var run_end = i + 1;
         while (run_end < line_count) {
             const next_parsed = parseSigilLine(all_lines[run_end]) orelse break;
@@ -98,15 +91,19 @@ fn groupDirectories(output: []const u8, writer: *Writer) !void {
         }
         const run_len = run_end - i;
 
-        if (run_len >= DIR_GROUP_THRESHOLD) {
+        if (dir.len > 0 and run_len >= DIR_GROUP_THRESHOLD) {
             try writer.writeAll(p.sigil);
             try writer.writeAll(" ");
             try writer.writeAll(dir);
-            try writer.writeAll(" ×"); try writer.print("{d}\n", .{run_len});
+            try writer.writeAll(" ×");
+            try writer.print("{d}\n", .{run_len});
             i = run_end;
         } else {
             while (i < run_end) {
-                try writer.writeAll(all_lines[i]);
+                const q = parseSigilLine(all_lines[i]).?;
+                try writer.writeAll(q.sigil);
+                try writer.writeAll(" ");
+                try writeCompactPath(writer, q.path);
                 try writer.writeByte('\n');
                 i += 1;
             }
@@ -141,6 +138,25 @@ fn parentDir(path: []const u8) []const u8 {
         return path[0 .. idx + 1];
     }
     return "";
+}
+
+fn writeCompactPath(writer: *Writer, path: []const u8) !void {
+    if (std.mem.indexOf(u8, path, " -> ")) |sep| {
+        const left = path[0..sep];
+        const right = path[sep + 4 ..];
+        try writer.writeAll(baseName(left));
+        try writer.writeAll(" -> ");
+        try writer.writeAll(baseName(right));
+        return;
+    }
+    try writer.writeAll(baseName(path));
+}
+
+fn baseName(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
+        return path[idx + 1 ..];
+    }
+    return path;
 }
 
 fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
@@ -469,11 +485,11 @@ test "apply: output for dirty fixture has correct format" {
     // Branch line
     try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
     // Unstaged modified paths
-    try std.testing.expect(std.mem.find(u8, out, "M src/main.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "M src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M main.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M pipeline.zig\n") != null);
     // Untracked paths
-    try std.testing.expect(std.mem.find(u8, out, "? src/filters/git_status.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "? tests/fixtures/git_status_dirty.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? git_status_dirty.txt\n") != null);
 }
 
 test "apply: output for clean fixture is just branch line" {
@@ -488,9 +504,9 @@ test "apply: output for conflict fixture has UU sigil" {
     const out = try applyToString(allocator, conflict_fixture);
     defer allocator.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
-    try std.testing.expect(std.mem.find(u8, out, "S src/pipeline.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "UU src/filters/git_status.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "? tests/fixtures/git_status_conflict.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "S pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "UU git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? git_status_conflict.txt\n") != null);
 }
 
 test "apply: drops all hint lines on dirty" {
@@ -539,7 +555,7 @@ test "apply: staged-new-file uses A sigil" {
         "\tnew file:   src/new_module.zig\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "A src/new_module.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "A new_module.zig\n") != null);
 }
 
 test "apply: ahead/behind counts preserved" {
