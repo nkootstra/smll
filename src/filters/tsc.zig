@@ -83,7 +83,9 @@ fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayL
         }
         return false;
     };
-    const path_lc = line[0..idx];
+    var path_lc = line[0..idx];
+    if (std.mem.startsWith(u8, path_lc, "./")) path_lc = path_lc[2..];
+    if (std.mem.startsWith(u8, path_lc, "src/")) path_lc = path_lc[4..];
     const code_start = idx + 9; // past " - error "
     var code_end = code_start;
     while (code_end < line.len and line[code_end] != ':') code_end += 1;
@@ -120,11 +122,11 @@ test "apply: fixture compresses errors to locations + codes" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     // Transformed form: path:L:C TSnnnn (message dropped).
-    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:42:5 TS2322") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:58:12 TS2339") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/components/Button.tsx:15:7 TS2345") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:8:3 TS7006") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:14:10 TS2304") != null);
+    try std.testing.expect(std.mem.find(u8, got, "api/client.ts:42:5 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, got, "api/client.ts:58:12 TS2339") != null);
+    try std.testing.expect(std.mem.find(u8, got, "components/Button.tsx:15:7 TS2345") != null);
+    try std.testing.expect(std.mem.find(u8, got, "utils/format.ts:8:3 TS7006") != null);
+    try std.testing.expect(std.mem.find(u8, got, "utils/format.ts:14:10 TS2304") != null);
     try std.testing.expect(std.mem.find(u8, got, "Found 5 errors in 3 files.") != null);
     // Message text dropped.
     try std.testing.expect(std.mem.find(u8, got, "is not assignable") == null);
