@@ -90,6 +90,57 @@ fn isFuzzLine(line: []const u8) bool {
     return false;
 }
 
+fn appendCompactFailMarker(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !void {
+    // "--- FAIL: TestDivide (0.00s)" -> "F TestDivide"
+    if (std.mem.startsWith(u8, line, "--- FAIL: ")) {
+        const rest = line["--- FAIL: ".len..];
+        const test_name = firstToken(rest);
+        try out.appendSlice(allocator, "F ");
+        try out.appendSlice(allocator, test_name);
+        try out.append(allocator, '\n');
+        return;
+    }
+    try out.appendSlice(allocator, line);
+    try out.append(allocator, '\n');
+}
+
+fn appendCompactFailureLine(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !void {
+    // "math_test.go:42: message" -> "L42 message"
+    if (std.mem.indexOfScalar(u8, line, ':')) |a| {
+        if (std.mem.indexOfScalarPos(u8, line, a + 1, ':')) |b| {
+            const line_no = line[a + 1 .. b];
+            const msg = std.mem.trim(u8, line[b + 1 ..], " \t");
+            var all_digits = line_no.len > 0;
+            for (line_no) |c| if (!std.ascii.isDigit(c)) {
+                all_digits = false;
+                break;
+            };
+            if (all_digits and msg.len > 0) {
+                try out.appendSlice(allocator, "L");
+                try out.appendSlice(allocator, line_no);
+                try out.appendSlice(allocator, " ");
+                try out.appendSlice(allocator, msg);
+                try out.append(allocator, '\n');
+                return;
+            }
+        }
+    }
+    try out.appendSlice(allocator, line);
+    try out.append(allocator, '\n');
+}
+
+fn firstToken(s: []const u8) []const u8 {
+    const t = std.mem.trim(u8, s, " \t\r");
+    var i: usize = 0;
+    while (i < t.len and t[i] != ' ' and t[i] != '\t') : (i += 1) {}
+    return t[0..i];
+}
+
+fn lastTabField(line: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, line, '\t')) |i| return std.mem.trim(u8, line[i + 1 ..], " \t\r");
+    return line;
+}
+
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize, has_bench_or_fuzz: *bool) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -145,8 +196,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         if (std.mem.startsWith(u8, trimmed, "--- FAIL:")) {
             try out.appendSlice(allocator, pending.items);
             pending.clearRetainingCapacity();
-            try out.appendSlice(allocator, trimmed);
-            try out.append(allocator, '\n');
+            try appendCompactFailMarker(allocator, trimmed, out);
             kept.* += 1;
             continue;
         }
@@ -165,8 +215,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 
         // Indented content (likely test output / t.Errorf): buffer for current test.
         if (std.mem.startsWith(u8, line, "    ") or std.mem.startsWith(u8, line, "\t")) {
-            try pending.appendSlice(allocator, trimmed);
-            try pending.append(allocator, '\n');
+            try appendCompactFailureLine(allocator, trimmed, &pending);
             continue;
         }
 
@@ -175,15 +224,29 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         // content here — but a bare FAIL/PASS marker terminates the test run).
         try out.appendSlice(allocator, pending.items);
         pending.clearRetainingCapacity();
-        if (std.mem.startsWith(u8, trimmed, "FAIL") or
-            std.mem.startsWith(u8, trimmed, "ok\t") or
-            std.mem.startsWith(u8, trimmed, "ok  ") or
-            std.mem.startsWith(u8, trimmed, "PASS") or
-            std.mem.startsWith(u8, trimmed, "exit status"))
-        {
-            try out.appendSlice(allocator, trimmed);
+        if (std.mem.startsWith(u8, trimmed, "FAIL\t")) {
+            // Example: FAIL\tgithub.com/example/math\t0.012s
+            const dur = lastTabField(trimmed);
+            try out.appendSlice(allocator, "res fail");
+            if (dur.len > 0 and !std.mem.eql(u8, dur, trimmed)) {
+                try out.appendSlice(allocator, " ");
+                try out.appendSlice(allocator, dur);
+            }
             try out.append(allocator, '\n');
             kept.* += 1;
+        } else if (std.mem.startsWith(u8, trimmed, "ok\t") or
+            std.mem.startsWith(u8, trimmed, "ok  "))
+        {
+            const dur = lastTabField(trimmed);
+            try out.appendSlice(allocator, "res ok");
+            if (dur.len > 0 and !std.mem.eql(u8, dur, trimmed)) {
+                try out.appendSlice(allocator, " ");
+                try out.appendSlice(allocator, dur);
+            }
+            try out.append(allocator, '\n');
+            kept.* += 1;
+        } else if (std.mem.startsWith(u8, trimmed, "PASS") or std.mem.startsWith(u8, trimmed, "exit status")) {
+            // Redundant with res line; drop.
         }
     }
     // Flush final fuzz progress line (the last one seen).
@@ -213,11 +276,11 @@ test "apply: fixture keeps FAIL + error context + package summary" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestDivide") != null);
-    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestSqrt") != null);
-    try std.testing.expect(std.mem.find(u8, got, "divide(10, 0) panic expected") != null);
-    try std.testing.expect(std.mem.find(u8, got, "sqrt(-1) = 0, want NaN") != null);
-    try std.testing.expect(std.mem.find(u8, got, "FAIL\tgithub.com/example/math") != null);
+    try std.testing.expect(std.mem.find(u8, got, "F TestDivide") != null);
+    try std.testing.expect(std.mem.find(u8, got, "F TestSqrt") != null);
+    try std.testing.expect(std.mem.find(u8, got, "L42 divide(10, 0) panic expected") != null);
+    try std.testing.expect(std.mem.find(u8, got, "L58 sqrt(-1) = 0, want NaN") != null);
+    try std.testing.expect(std.mem.find(u8, got, "res fail 0.012s") != null);
     // PASS markers dropped.
     try std.testing.expect(std.mem.find(u8, got, "--- PASS:") == null);
     try std.testing.expect(std.mem.find(u8, got, "=== RUN") == null);
@@ -303,7 +366,7 @@ test "apply: mixed benchmarks + unit tests with failures" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestFail") != null);
+    try std.testing.expect(std.mem.find(u8, got, "F TestFail") != null);
     try std.testing.expect(std.mem.find(u8, got, "BenchmarkAdd-8") != null);
     try std.testing.expect(std.mem.find(u8, got, "1234 ns/op") != null);
 }
@@ -321,7 +384,7 @@ test "apply: FAIL on own line counts as failure" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestA") != null);
-    try std.testing.expect(std.mem.find(u8, got, "foo_test.go:5: boom") != null);
-    try std.testing.expect(std.mem.find(u8, got, "exit status 1") != null);
+    try std.testing.expect(std.mem.find(u8, got, "F TestA") != null);
+    try std.testing.expect(std.mem.find(u8, got, "L5 boom") != null);
+    try std.testing.expect(std.mem.find(u8, got, "exit status 1") == null);
 }
