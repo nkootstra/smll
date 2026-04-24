@@ -64,7 +64,6 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 
     // Out-of-scope shapes (show, drop, apply, pop, or unknown): passthrough.
     try w.writeAll(stdout);
-    if (stderr.len > 0) std.debug.print("{s}", .{stderr});
 }
 
 /// Parse and emit a save-shape line.
