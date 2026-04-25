@@ -56,6 +56,8 @@ fn hasFailureMarker(s: []const u8) bool {
     if (std.mem.find(u8, s, "--- FAIL:") != null) return true;
     if (std.mem.find(u8, s, "FAIL\t") != null) return true;
     if (std.mem.startsWith(u8, s, "FAIL\n")) return true;
+    if (std.mem.startsWith(u8, s, "F ")) return true;
+    if (std.mem.find(u8, s, "\nF ") != null) return true;
     // "FAIL" on its own line (package-level)
     var it = std.mem.splitScalar(u8, s, '\n');
     while (it.next()) |line| {
