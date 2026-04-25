@@ -90,6 +90,60 @@ fn hasStatOrNameFlags(argv: []const []const u8) bool {
         hasArg(argv, "--compact-summary");
 }
 
+fn writeDiffParitySummary(writer: *std.Io.Writer, diff_out: []const u8) !void {
+    var file: []const u8 = "";
+    var first_hunk: []const u8 = "";
+    var added: usize = 0;
+    var removed: usize = 0;
+    var sample_changes: [6][]const u8 = undefined;
+    var sample_count: usize = 0;
+
+    var lines = std.mem.splitScalar(u8, diff_out, '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, "diff --git a/")) {
+            if (file.len != 0) break; // first file only (cheap + useful)
+            if (std.mem.indexOf(u8, line, " b/")) |idx| file = line[idx + 3 ..];
+            continue;
+        }
+        if (file.len == 0) continue;
+        if (first_hunk.len == 0 and std.mem.startsWith(u8, line, "@@")) {
+            first_hunk = line;
+            continue;
+        }
+        if (std.mem.startsWith(u8, line, "+++ ") or std.mem.startsWith(u8, line, "--- ")) continue;
+        if (line.len > 0 and line[0] == '+') {
+            added += 1;
+            if (sample_count < sample_changes.len) {
+                sample_changes[sample_count] = line;
+                sample_count += 1;
+            }
+        } else if (line.len > 0 and line[0] == '-') {
+            removed += 1;
+            if (sample_count < sample_changes.len) {
+                sample_changes[sample_count] = line;
+                sample_count += 1;
+            }
+        }
+    }
+
+    if (file.len == 0 or (added == 0 and removed == 0)) return;
+
+    try writer.writeAll("\n--- Changes ---\n\n");
+    try writer.writeAll(file);
+    try writer.writeByte('\n');
+    if (first_hunk.len > 0) {
+        try writer.writeAll("  ");
+        try writer.writeAll(first_hunk);
+        try writer.writeByte('\n');
+    }
+    for (sample_changes[0..sample_count]) |s| {
+        try writer.writeAll("  ");
+        try writer.writeAll(s);
+        try writer.writeByte('\n');
+    }
+    try writer.print("  +{d} -{d}\n", .{ added, removed });
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const environ = init.environ_map;
@@ -601,8 +655,11 @@ fn runWrapper(
             };
         },
         .diff => {
-            // Parity target: keep git diff close to RTK/raw output shape.
+            // Parity target: raw diff plus a lightweight changes summary.
             try writer.writeAll(stdout_slice);
+            if (stdout_slice.len > 0) {
+                writeDiffParitySummary(writer, stdout_slice) catch {};
+            }
             try stderr_writer.writeAll(stderr_slice);
         },
         .log => {
