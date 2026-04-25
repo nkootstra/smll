@@ -91,6 +91,7 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
         const subject = std.mem.trim(u8, line[4..], " \t\r");
         if (subject.len == 0) continue;
         if (!first_out) try writer.writeByte('\n');
+        if (first_out) try writer.writeAll("commit ");
         try writer.writeAll(&sha7);
         if (date_valid) {
             try writer.writeByte(' ');
