@@ -144,6 +144,14 @@ fn writeDiffParitySummary(writer: *std.Io.Writer, diff_out: []const u8) !void {
     try writer.print("  +{d} -{d}\n", .{ added, removed });
 }
 
+fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
+    const marker = "\ndiff --git ";
+    const idx = std.mem.indexOf(u8, show_out, marker) orelse return;
+    if (idx == 0) return;
+    try writer.writeAll("\n-- commit context --\n");
+    try writer.writeAll(show_out[0 .. idx + 1]);
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const environ = init.environ_map;
@@ -689,9 +697,10 @@ fn runWrapper(
             }
         },
         .show => {
-            // Parity target: keep raw show output and add lightweight change summary.
+            // Parity target: raw show + repeated commit context + change summary.
             try writer.writeAll(stdout_slice);
             if (stdout_slice.len > 0) {
+                writeShowHeaderReplay(writer, stdout_slice) catch {};
                 writeDiffParitySummary(writer, stdout_slice) catch {};
             }
             try stderr_writer.writeAll(stderr_slice);
