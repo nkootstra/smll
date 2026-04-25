@@ -124,7 +124,7 @@ fn writeCompressedError(
         try out.appendSlice(allocator, file_part);
     }
     try out.appendSlice(allocator, line_part);
-    try out.append(allocator, ' ');
+    if (!repeated) try out.append(allocator, ' ');
     try out.appendSlice(allocator, code);
     try out.append(allocator, '\n');
     return true;
@@ -156,7 +156,7 @@ test "apply: fixture compresses errors to locations + codes" {
     const got = out.written();
     // Transformed form: path:L:C TSnnnn (message dropped).
     try std.testing.expect(std.mem.find(u8, got, "client.ts:42 TS2322") != null);
-    try std.testing.expect(std.mem.find(u8, got, ":58 TS2339") != null);
+    try std.testing.expect(std.mem.find(u8, got, ":58TS2339") != null);
     try std.testing.expect(std.mem.find(u8, got, "Button.tsx:15 TS2345") != null);
     try std.testing.expect(std.mem.find(u8, got, "format.ts:8 TS7006") != null);
     try std.testing.expect(std.mem.find(u8, got, "format.ts:14 TS2304") != null);
