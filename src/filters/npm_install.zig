@@ -77,65 +77,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 }
 
 fn writeLine(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !void {
-    const dep = "npm WARN deprecated ";
-    if (std.mem.startsWith(u8, line, dep)) {
-        const rest = line[dep.len..];
-        const pkg_end = std.mem.indexOfScalar(u8, rest, ':') orelse rest.len;
-        const pkg = rest[0..pkg_end];
-        try out.appendSlice(allocator, "W dep ");
-        try out.appendSlice(allocator, pkg);
-
-        if (std.mem.indexOf(u8, rest, "Use ")) |use_idx| {
-            const after_use = rest[use_idx + 4 ..];
-            if (std.mem.indexOf(u8, after_use, " instead")) |end_idx| {
-                const replacement = std.mem.trim(u8, after_use[0..end_idx], " \t\r\"");
-                if (replacement.len > 0) {
-                    try out.appendSlice(allocator, " -> ");
-                    try out.appendSlice(allocator, replacement);
-                }
-            }
-        }
-        try out.append(allocator, '\n');
-        return;
-    }
-
-    if (std.mem.startsWith(u8, line, "added ")) {
-        const added = numberAfter(line, "added ") orelse "?";
-        try out.appendSlice(allocator, "+");
-        try out.appendSlice(allocator, added);
-        if (numberAfter(line, "audited ")) |audited| {
-            try out.appendSlice(allocator, " aud");
-            try out.appendSlice(allocator, audited);
-        }
-        if (std.mem.indexOf(u8, line, " in ")) |i| {
-            const dur = firstToken(line[i + 4 ..]);
-            if (dur.len > 0) {
-                try out.appendSlice(allocator, " ");
-                try out.appendSlice(allocator, dur);
-            }
-        }
-        try out.append(allocator, '\n');
-        return;
-    }
-
-    if (std.mem.startsWith(u8, line, "found ")) {
-        const vuln = numberAfter(line, "found ") orelse "?";
-        try out.appendSlice(allocator, "v ");
-        try out.appendSlice(allocator, vuln);
-        if (std.mem.indexOfScalar(u8, line, '(')) |open| {
-            if (std.mem.indexOfScalarPos(u8, line, open + 1, ')')) |close| {
-                const details = std.mem.trim(u8, line[open + 1 .. close], " \t\r");
-                if (details.len > 0) {
-                    try out.appendSlice(allocator, " (");
-                    try out.appendSlice(allocator, details);
-                    try out.append(allocator, ')');
-                }
-            }
-        }
-        try out.append(allocator, '\n');
-        return;
-    }
-
+    // Keep original kept lines verbatim (after ANSI stripping in caller).
     try out.appendSlice(allocator, line);
     try out.append(allocator, '\n');
 }
@@ -191,9 +133,9 @@ test "apply: fixture keeps WARN + summary, drops notice + funding noise" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < input.len);
-    try std.testing.expect(std.mem.find(u8, got, "W dep lodash.isequal@4.5.0") != null);
-    try std.testing.expect(std.mem.find(u8, got, "+847 aud848 12s") != null);
-    try std.testing.expect(std.mem.find(u8, got, "v 2 (1 moderate, 1 high)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "npm WARN deprecated lodash.isequal@4.5.0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "added 847 packages") != null);
+    try std.testing.expect(std.mem.find(u8, got, "found 2 vulnerabilities") != null);
     // Dropped noise.
     try std.testing.expect(std.mem.find(u8, got, "npm notice") == null);
     try std.testing.expect(std.mem.find(u8, got, "packages are looking for funding") == null);
