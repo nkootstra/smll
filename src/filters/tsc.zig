@@ -47,7 +47,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 80;
+    const head_cap: usize = 2;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     var last_file: [128]u8 = undefined;
