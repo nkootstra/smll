@@ -194,9 +194,9 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
             continue;
         }
 
-        // --- FAIL: flush pending buffer (test output) then the marker.
+        // --- FAIL: emit compact marker; buffered per-line context is dropped
+        // in parity mode to keep output concise while preserving failing test IDs.
         if (std.mem.startsWith(u8, trimmed, "--- FAIL:")) {
-            try out.appendSlice(allocator, pending.items);
             pending.clearRetainingCapacity();
             try appendCompactFailMarker(allocator, trimmed, out);
             kept.* += 1;
@@ -227,25 +227,12 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         try out.appendSlice(allocator, pending.items);
         pending.clearRetainingCapacity();
         if (std.mem.startsWith(u8, trimmed, "FAIL\t")) {
-            // Example: FAIL\tgithub.com/example/math\t0.012s
-            const dur = lastTabField(trimmed);
-            try out.appendSlice(allocator, "res fail");
-            if (dur.len > 0 and !std.mem.eql(u8, dur, trimmed)) {
-                try out.appendSlice(allocator, " ");
-                try out.appendSlice(allocator, dur);
-            }
-            try out.append(allocator, '\n');
+            try out.appendSlice(allocator, "FAIL\n");
             kept.* += 1;
         } else if (std.mem.startsWith(u8, trimmed, "ok\t") or
             std.mem.startsWith(u8, trimmed, "ok  "))
         {
-            const dur = lastTabField(trimmed);
-            try out.appendSlice(allocator, "res ok");
-            if (dur.len > 0 and !std.mem.eql(u8, dur, trimmed)) {
-                try out.appendSlice(allocator, " ");
-                try out.appendSlice(allocator, dur);
-            }
-            try out.append(allocator, '\n');
+            try out.appendSlice(allocator, "ok\n");
             kept.* += 1;
         } else if (std.mem.startsWith(u8, trimmed, "PASS") or std.mem.startsWith(u8, trimmed, "exit status")) {
             // Redundant with res line; drop.
@@ -280,9 +267,9 @@ test "apply: fixture keeps FAIL + error context + package summary" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "F TestDivide") != null);
     try std.testing.expect(std.mem.find(u8, got, "F TestSqrt") != null);
-    try std.testing.expect(std.mem.find(u8, got, "L42 divide(10, 0) panic expected") != null);
-    try std.testing.expect(std.mem.find(u8, got, "L58 sqrt(-1) = 0, want NaN") != null);
-    try std.testing.expect(std.mem.find(u8, got, "res fail 0.012s") != null);
+    try std.testing.expect(std.mem.find(u8, got, "L42 divide(10, 0) panic expected") == null);
+    try std.testing.expect(std.mem.find(u8, got, "L58 sqrt(-1) = 0, want NaN") == null);
+    try std.testing.expect(std.mem.find(u8, got, "FAIL") != null);
     // PASS markers dropped.
     try std.testing.expect(std.mem.find(u8, got, "--- PASS:") == null);
     try std.testing.expect(std.mem.find(u8, got, "=== RUN") == null);
