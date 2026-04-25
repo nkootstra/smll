@@ -50,6 +50,37 @@ SMLL_LOSSLESS=1 smll jest           # raw jest output, no compaction
 SMLL_LOSSLESS=1 smll docker ps      # full columnar table preserved
 ```
 
+## Agent setup
+
+smll can install or remove safe defaults for popular agent CLIs:
+
+```sh
+smll --setup claude
+smll --setup opencode
+smll --unsetup claude
+smll --unsetup opencode
+```
+
+Use `--dry-run` to preview writes/deletes:
+
+```sh
+smll --setup claude --dry-run
+smll --unsetup opencode --dry-run
+```
+
+What setup does:
+- `claude`: writes `~/.claude/hooks/smll-pretooluse.sh` and adds a `PreToolUse`
+  hook in `~/.claude/settings.json` that blocks noisy Bash commands unless they
+  are prefixed with `smll`.
+- `opencode`: writes `~/.config/opencode/plugins/smll-proxy.js` and enables it
+  in `~/.config/opencode/opencode.json`; the plugin rewrites matching Bash
+  commands to `smll <command>`.
+
+Safety behavior:
+- Existing files are backed up as `*.bak.smll` before changes.
+- If existing RTK integration is detected, setup aborts and asks you to remove
+  RTK first (to avoid conflicting double-proxy behavior).
+
 ## Supported commands
 
 | Category | Commands | Default behavior |

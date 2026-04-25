@@ -33,6 +33,7 @@ const docker_logs = @import("docker_logs");
 const npm_install = @import("npm_install");
 const build_compact = @import("build_compact");
 const generic_compact = @import("generic_compact");
+const setup = @import("setup.zig");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
@@ -102,6 +103,13 @@ pub fn main(init: std.process.Init) !void {
     var err_buf: [1024]u8 = undefined;
     var stderr_file = std.Io.File.stderr();
     var stderr_writer = stderr_file.writer(io, &err_buf);
+
+    if (try setup.maybeRun(init.arena.allocator(), io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
+        try stdout_writer.interface.flush();
+        try stderr_writer.interface.flush();
+        if (code != 0) std.process.exit(code);
+        return;
+    }
 
     // Fast path: no extra argv → stdin mode. Skip the wrapper-mode arena
     // init entirely. args[0] is the program name; len 1 = stdin mode.
