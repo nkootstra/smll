@@ -47,23 +47,21 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 80;
+    const head_cap: usize = 2;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+    var last_file: [128]u8 = undefined;
+    var last_file_len: usize = 0;
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
-        if (try writeCompressedError(allocator, trimmed, out)) {
+        if (try writeCompressedError(allocator, trimmed, out, &last_file, &last_file_len)) {
             kept.* += 1;
             continue;
         }
-        if (isFoundSummary(trimmed)) {
-            try out.appendSlice(allocator, trimmed);
-            try out.append(allocator, '\n');
-            kept.* += 1;
-        }
+        // Omit trailing "Found N errors" summary in compact mode.
     }
 }
 
@@ -71,7 +69,13 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 /// Returns true when a line was written. If the line looks like a tsc error
 /// but can't be parsed, falls back to writing the raw line so we never drop
 /// actionable content.
-fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !bool {
+fn writeCompressedError(
+    allocator: Allocator,
+    line: []const u8,
+    out: *std.ArrayList(u8),
+    last_file: *[128]u8,
+    last_file_len: *usize,
+) !bool {
     const marker = " - error TS";
     const idx = std.mem.find(u8, line, marker) orelse {
         // Some tsc modes emit `error TS` without the leading path (rare).
@@ -83,13 +87,47 @@ fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayL
         }
         return false;
     };
-    const path_lc = line[0..idx];
+    var path_lc = line[0..idx];
+    if (std.mem.startsWith(u8, path_lc, "./")) path_lc = path_lc[2..];
+    if (std.mem.startsWith(u8, path_lc, "src/")) path_lc = path_lc[4..];
+
+    // Further compact: basename + line only (drop column), keep TS code.
+    if (std.mem.indexOfScalar(u8, path_lc, ':')) |c1| {
+        if (std.mem.indexOfScalarPos(u8, path_lc, c1 + 1, ':')) |c2| {
+            const file_part = path_lc[0..c1];
+            const line_part = path_lc[c1 + 1 .. c2];
+            const base = if (std.mem.findScalarLast(u8, file_part, '/')) |s| file_part[s + 1 ..] else file_part;
+            var compact_buf: [256]u8 = undefined;
+            const joined = std.fmt.bufPrint(&compact_buf, "{s}:{s}", .{ base, line_part }) catch path_lc;
+            path_lc = joined;
+        }
+    }
     const code_start = idx + 9; // past " - error "
     var code_end = code_start;
     while (code_end < line.len and line[code_end] != ':') code_end += 1;
     const code = line[code_start..code_end];
-    try out.appendSlice(allocator, path_lc);
-    try out.append(allocator, ' ');
+
+    // Elide repeated file basename: for consecutive entries from the same file,
+    // emit ":<line> TSxxxx".
+    var file_part = path_lc;
+    var line_part: []const u8 = "";
+    if (std.mem.indexOfScalar(u8, path_lc, ':')) |c| {
+        file_part = path_lc[0..c];
+        line_part = path_lc[c..];
+    }
+
+    const repeated = std.mem.eql(u8, file_part, last_file[0..last_file_len.*]);
+    if (!repeated) {
+        const n = @min(file_part.len, last_file.len);
+        @memcpy(last_file[0..n], file_part[0..n]);
+        last_file_len.* = n;
+        try out.appendSlice(allocator, file_part);
+    }
+    if (repeated and line_part.len > 0 and line_part[0] == ':') {
+        try out.appendSlice(allocator, line_part[1..]);
+    } else {
+        try out.appendSlice(allocator, line_part);
+    }
     try out.appendSlice(allocator, code);
     try out.append(allocator, '\n');
     return true;
@@ -120,11 +158,11 @@ test "apply: fixture compresses errors to locations + codes" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     // Transformed form: path:L:C TSnnnn (message dropped).
-    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:42:5 TS2322") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:58:12 TS2339") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/components/Button.tsx:15:7 TS2345") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:8:3 TS7006") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:14:10 TS2304") != null);
+    try std.testing.expect(std.mem.find(u8, got, "client.ts:42TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, got, "58TS2339") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Button.tsx:15 TS2345") != null);
+    try std.testing.expect(std.mem.find(u8, got, "format.ts:8 TS7006") != null);
+    try std.testing.expect(std.mem.find(u8, got, "format.ts:14 TS2304") != null);
     try std.testing.expect(std.mem.find(u8, got, "Found 5 errors in 3 files.") != null);
     // Message text dropped.
     try std.testing.expect(std.mem.find(u8, got, "is not assignable") == null);
@@ -151,7 +189,7 @@ test "apply: strips ANSI" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     try std.testing.expect(std.mem.find(u8, out.written(), "\x1b") == null);
-    try std.testing.expect(std.mem.find(u8, out.written(), "src/a.ts:1:1 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "a.ts:1 TS2322") != null);
 }
 
 test "apply: malformed error line falls back to raw" {
