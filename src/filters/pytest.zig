@@ -51,8 +51,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll("all tests passed\n");
         return;
     }
-    try writer.writeAll("Pytest:\n");
-    try writer.writeAll("Failures:\n");
+    try writer.writeAll("Pytest\n");
+    try writer.writeAll("Failures\n");
     try writer.writeAll(scratch.items);
 }
 
