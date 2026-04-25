@@ -762,6 +762,7 @@ fn runWrapper(
             try writer.writeAll(stdout_slice);
             if (stdout_slice.len > 0) {
                 writeDiffParitySummary(writer, stdout_slice) catch {};
+                try writer.writeByte('\n');
             }
             try stderr_writer.writeAll(stderr_slice);
         },
