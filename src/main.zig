@@ -163,6 +163,7 @@ fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
 fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
     var lines = std.mem.splitScalar(u8, find_out, '\n');
     var wrote = false;
+    var entry_count: usize = 0;
     while (lines.next()) |line| {
         const t = std.mem.trim(u8, line, " \t\r");
         if (t.len == 0) continue;
@@ -215,6 +216,10 @@ fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
         try writer.writeAll(":");
         try writer.writeAll(group);
         try writer.writeByte('\n');
+        entry_count += 1;
+    }
+    if (wrote) {
+        try writer.print("total entries={d}\n", .{entry_count});
     }
 }
 
