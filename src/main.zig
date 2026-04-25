@@ -150,6 +150,14 @@ fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
     if (idx == 0) return;
     try writer.writeAll("\n-- commit context --\n");
     try writer.writeAll(show_out[0 .. idx + 1]);
+
+    // Replay a short diff preview to better mirror RTK's expanded show shape.
+    const tail = show_out[idx + 1 ..];
+    const preview_len = @min(tail.len, 96);
+    if (preview_len > 0) {
+        try writer.writeAll(tail[0..preview_len]);
+        try writer.writeByte('\n');
+    }
 }
 
 fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
