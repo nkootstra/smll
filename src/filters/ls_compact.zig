@@ -65,6 +65,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var lines = std.mem.splitScalar(u8, stdout, '\n');
     var first = true;
     var had_content_lines = false;
+    var wrote_header = false;
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         if (isTotalLine(line)) {
@@ -76,6 +77,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
         const name = extractName(line) orelse continue;
         if (name.len == 0) continue;
+        if (!wrote_header) {
+            try writer.writeAll("files:\n");
+            wrote_header = true;
+        }
         if (!first) try writer.writeByte('\n');
         first = false;
         try writer.writeAll(name);
