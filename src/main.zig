@@ -142,6 +142,7 @@ fn writeDiffParitySummary(writer: *std.Io.Writer, diff_out: []const u8) !void {
         try writer.writeByte('\n');
     }
     try writer.print("  +{d} -{d}\n", .{ added, removed });
+    try writer.writeByte('\n');
 }
 
 fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
