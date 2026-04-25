@@ -537,6 +537,7 @@ fn runWrapper(
             if (is_jest) {
                 // Parity target: keep jest/vitest output near RTK/raw shape.
                 try writer.writeAll(stdout_slice);
+                if (stdout_slice.len > 0) try writer.writeByte('\n');
                 try stderr_writer.writeAll(stderr_slice);
                 return exit_code;
             }
