@@ -60,6 +60,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         return;
     }
     try writer.writeAll(scratch.items);
+    try writer.writeByte('\n');
 }
 
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize, saw_failures_banner: *bool) !void {
