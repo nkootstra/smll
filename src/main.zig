@@ -220,6 +220,7 @@ fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
     }
     if (wrote) {
         try writer.print("total entries={d}\n", .{entry_count});
+        try writer.writeAll("index ok\n");
     }
 }
 
