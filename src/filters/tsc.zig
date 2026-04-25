@@ -61,11 +61,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
             kept.* += 1;
             continue;
         }
-        if (isFoundSummary(trimmed)) {
-            try out.appendSlice(allocator, trimmed);
-            try out.append(allocator, '\n');
-            kept.* += 1;
-        }
+        // Omit trailing "Found N errors" summary in compact mode.
     }
 }
 
