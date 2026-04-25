@@ -51,9 +51,6 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     defer buf.deinit();
     try applyInner(allocator, stdout, stderr, &buf.writer);
 
-    // Lightweight section marker for parity/readability.
-    try writer.writeAll("S\n");
-
     // Phase 2: group consecutive entries with the same sigil and parent dir
     try groupDirectories(buf.written(), writer);
 }
@@ -84,6 +81,13 @@ fn groupDirectories(output: []const u8, writer: *Writer) !void {
         const p = parsed.?;
         const dir = parentDir(p.path);
 
+        if (dir.len == 0) {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            i += 1;
+            continue;
+        }
+
         var run_end = i + 1;
         while (run_end < line_count) {
             const next_parsed = parseSigilLine(all_lines[run_end]) orelse break;
@@ -94,19 +98,15 @@ fn groupDirectories(output: []const u8, writer: *Writer) !void {
         }
         const run_len = run_end - i;
 
-        if (dir.len > 0 and run_len >= DIR_GROUP_THRESHOLD) {
+        if (run_len >= DIR_GROUP_THRESHOLD) {
             try writer.writeAll(p.sigil);
             try writer.writeAll(" ");
             try writer.writeAll(dir);
-            try writer.writeAll(" ×");
-            try writer.print("{d}\n", .{run_len});
+            try writer.writeAll(" ×"); try writer.print("{d}\n", .{run_len});
             i = run_end;
         } else {
             while (i < run_end) {
-                const q = parseSigilLine(all_lines[i]).?;
-                try writer.writeAll(q.sigil);
-                try writer.writeAll(" ");
-                try writeCompactPath(writer, q.path);
+                try writer.writeAll(all_lines[i]);
                 try writer.writeByte('\n');
                 i += 1;
             }
@@ -143,25 +143,6 @@ fn parentDir(path: []const u8) []const u8 {
     return "";
 }
 
-fn writeCompactPath(writer: *Writer, path: []const u8) !void {
-    if (std.mem.indexOf(u8, path, " -> ")) |sep| {
-        const left = path[0..sep];
-        const right = path[sep + 4 ..];
-        try writer.writeAll(baseName(left));
-        try writer.writeAll(" -> ");
-        try writer.writeAll(baseName(right));
-        return;
-    }
-    try writer.writeAll(baseName(path));
-}
-
-fn baseName(path: []const u8) []const u8 {
-    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
-        return path[idx + 1 ..];
-    }
-    return path;
-}
-
 fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
@@ -171,7 +152,6 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
     var lines = std.mem.splitScalar(u8, input, '\n');
     var section: Section = .none;
     var branch_written = false;
-    var has_entries = false;
     var branch_buf: [256]u8 = undefined;
     var branch_len: usize = 0;
     var ahead: ?[]const u8 = null;
@@ -257,7 +237,12 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
 
         // Tab-indented content lines.
         if (std.mem.startsWith(u8, line, "\t")) {
-            has_entries = true;
+            // Flush branch line before first content.
+            if (!branch_written) {
+                try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
+                branch_written = true;
+            }
+
             const content = line[1..]; // strip leading tab
             switch (section) {
                 .staged => try writeStagedEntry(writer, content),
@@ -286,10 +271,9 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
         }
     }
 
-    // Emit branch line only for clean/no-entry status output.
-    if (!has_entries and branch_len > 0) {
+    // If we parsed a branch but found no content (clean repo), still emit branch line.
+    if (!branch_written and branch_len > 0) {
         try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
-        branch_written = true;
     }
 }
 
@@ -482,14 +466,14 @@ test "apply: output for dirty fixture has correct format" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, dirty_fixture);
     defer allocator.free(out);
-    // Branch line omitted when entries exist (parity mode).
-    try std.testing.expect(std.mem.find(u8, out, "# main") == null);
+    // Branch line
+    try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
     // Unstaged modified paths
-    try std.testing.expect(std.mem.find(u8, out, "M main.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "M pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M src/main.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "M src/pipeline.zig\n") != null);
     // Untracked paths
-    try std.testing.expect(std.mem.find(u8, out, "? git_status.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "? git_status_dirty.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? tests/fixtures/git_status_dirty.txt\n") != null);
 }
 
 test "apply: output for clean fixture is just branch line" {
@@ -503,10 +487,10 @@ test "apply: output for conflict fixture has UU sigil" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, conflict_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "# main") == null);
-    try std.testing.expect(std.mem.find(u8, out, "S pipeline.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "UU git_status.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "? git_status_conflict.txt\n") != null);
+    try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
+    try std.testing.expect(std.mem.find(u8, out, "S src/pipeline.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "UU src/filters/git_status.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "? tests/fixtures/git_status_conflict.txt\n") != null);
 }
 
 test "apply: drops all hint lines on dirty" {
@@ -555,7 +539,7 @@ test "apply: staged-new-file uses A sigil" {
         "\tnew file:   src/new_module.zig\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "A new_module.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "A src/new_module.zig\n") != null);
 }
 
 test "apply: ahead/behind counts preserved" {

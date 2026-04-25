@@ -58,10 +58,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         break :blk "m";
     };
 
-    // Parity target: very compact summary, but keep one exemplar container name
-    // for actionability and better alignment with RTK-like compact output.
-    try writer.print("d{d}{s}:", .{ count, state });
+    try writer.print("d{d}{s}", .{ count, state });
 
+    // Second pass: emit names.
     var emit = std.mem.splitScalar(u8, stdout, '\n');
     _ = emit.next(); // skip header
     while (emit.next()) |line| {
@@ -70,9 +69,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
-        break;
     }
-    try writer.writeByte('.');
     try writer.writeByte('\n');
 }
 
@@ -139,7 +136,7 @@ test "apply: zero rows produces d0none:" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expectEqualStrings("d0none:.\n", out.written());
+    try std.testing.expectEqualStrings("d0none\n", out.written());
 }
 
 test "lastField: single field" {

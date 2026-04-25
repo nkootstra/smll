@@ -90,162 +90,6 @@ fn hasStatOrNameFlags(argv: []const []const u8) bool {
         hasArg(argv, "--compact-summary");
 }
 
-fn writeDiffParitySummary(writer: *std.Io.Writer, diff_out: []const u8) !void {
-    var file: []const u8 = "";
-    var first_hunk: []const u8 = "";
-    var added: usize = 0;
-    var removed: usize = 0;
-    var sample_changes: [6][]const u8 = undefined;
-    var sample_count: usize = 0;
-
-    var lines = std.mem.splitScalar(u8, diff_out, '\n');
-    while (lines.next()) |line| {
-        if (std.mem.startsWith(u8, line, "diff --git a/")) {
-            if (file.len != 0) break; // first file only (cheap + useful)
-            if (std.mem.indexOf(u8, line, " b/")) |idx| file = line[idx + 3 ..];
-            continue;
-        }
-        if (file.len == 0) continue;
-        if (first_hunk.len == 0 and std.mem.startsWith(u8, line, "@@")) {
-            first_hunk = line;
-            continue;
-        }
-        if (std.mem.startsWith(u8, line, "+++ ") or std.mem.startsWith(u8, line, "--- ")) continue;
-        if (line.len > 0 and line[0] == '+') {
-            added += 1;
-            if (sample_count < sample_changes.len) {
-                sample_changes[sample_count] = line;
-                sample_count += 1;
-            }
-        } else if (line.len > 0 and line[0] == '-') {
-            removed += 1;
-            if (sample_count < sample_changes.len) {
-                sample_changes[sample_count] = line;
-                sample_count += 1;
-            }
-        }
-    }
-
-    if (file.len == 0 or (added == 0 and removed == 0)) return;
-
-    try writer.writeAll("\n--- Changes ---\n\n");
-    try writer.writeAll(file);
-    try writer.writeByte('\n');
-    if (first_hunk.len > 0) {
-        try writer.writeAll("  ");
-        try writer.writeAll(first_hunk);
-        try writer.writeByte('\n');
-    }
-    for (sample_changes[0..sample_count]) |s| {
-        try writer.writeAll("  ");
-        try writer.writeAll(s);
-        try writer.writeByte('\n');
-    }
-    try writer.print("  +{d} -{d}\n", .{ added, removed });
-    try writer.writeByte('\n');
-}
-
-fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
-    const marker = "\ndiff --git ";
-    const idx = std.mem.indexOf(u8, show_out, marker) orelse return;
-    if (idx == 0) return;
-    try writer.writeAll("\n-- commit context --\n");
-    try writer.writeAll(show_out[0 .. idx + 1]);
-
-    // Replay a short diff preview to better mirror RTK's expanded show shape.
-    const tail = show_out[idx + 1 ..];
-    const preview_len = @min(tail.len, 76);
-    if (preview_len > 0) {
-        try writer.writeAll(tail[0..preview_len]);
-        try writer.writeByte('\n');
-    }
-}
-
-fn stripTreeFooter(tree_out: []const u8) []const u8 {
-    if (tree_out.len == 0) return tree_out;
-    var end = tree_out.len;
-    // Trim trailing whitespace/newlines first.
-    while (end > 0 and (tree_out[end - 1] == '\n' or tree_out[end - 1] == '\r' or tree_out[end - 1] == ' ' or tree_out[end - 1] == '\t')) {
-        end -= 1;
-    }
-    if (end == 0) return tree_out;
-
-    const rel = std.mem.lastIndexOfScalar(u8, tree_out[0..end], '\n');
-    const line_start = if (rel) |p| p + 1 else 0;
-    const last = tree_out[line_start..end];
-    if (std.mem.indexOf(u8, last, " director") != null and std.mem.indexOf(u8, last, " file") != null) {
-        var cut = line_start;
-        // Avoid leaving a double-blank tail when removing the count footer.
-        if (cut > 1 and tree_out[cut - 1] == '\n' and tree_out[cut - 2] == '\n') cut -= 1;
-        return tree_out[0..cut];
-    }
-    return tree_out;
-}
-
-fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
-    var lines = std.mem.splitScalar(u8, find_out, '\n');
-    var wrote = false;
-    var entry_count: usize = 0;
-    while (lines.next()) |line| {
-        const t = std.mem.trim(u8, line, " \t\r");
-        if (t.len == 0) continue;
-
-        // Format: inode blocks mode links user group size date time path
-        var it = std.mem.tokenizeAny(u8, t, " \t");
-        var col: usize = 0;
-        var inode: []const u8 = "";
-        var blocks: []const u8 = "";
-        var mode: []const u8 = "";
-        var links: []const u8 = "";
-        var user: []const u8 = "";
-        var group: []const u8 = "";
-        var size: []const u8 = "";
-        var path: []const u8 = "";
-        while (it.next()) |tok| {
-            switch (col) {
-                0 => inode = tok,
-                1 => blocks = tok,
-                2 => mode = tok,
-                3 => links = tok,
-                4 => user = tok,
-                5 => group = tok,
-                6 => size = tok,
-                else => {},
-            }
-            path = tok;
-            col += 1;
-        }
-        if (path.len == 0) continue;
-        if (!wrote) {
-            try writer.writeAll("\n-- entries --\n");
-            wrote = true;
-        }
-        try writer.writeAll(path);
-        if (size.len > 0) {
-            try writer.writeAll(" size=");
-            try writer.writeAll(size);
-        }
-        try writer.writeAll(" | inode=");
-        try writer.writeAll(inode);
-        try writer.writeAll(" blocks=");
-        try writer.writeAll(blocks);
-        try writer.writeAll(" mode=");
-        try writer.writeAll(mode);
-        try writer.writeAll(" links=");
-        try writer.writeAll(links);
-        try writer.writeAll(" owner=");
-        try writer.writeAll(user);
-        try writer.writeAll(":");
-        try writer.writeAll(group);
-        try writer.writeByte('\n');
-        entry_count += 1;
-    }
-    if (wrote) {
-        try writer.print("total entries={d}\n", .{entry_count});
-        try writer.writeAll("index ok\n");
-    }
-}
-
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const environ = init.environ_map;
@@ -442,24 +286,19 @@ fn runWrapper(
         const is_find_plain = is_find_cmd and !is_find_ls;
         if (lossless) {
             try writer.writeAll(stdout_slice);
-        } else if (is_find_ls) {
-            // Parity target: raw `find -ls` plus lightweight entries index.
-            try writer.writeAll(stdout_slice);
-            if (stdout_slice.len > 0) {
-                writeFindLsSummary(writer, stdout_slice) catch {};
-            }
-            try stderr_writer.writeAll(stderr_slice);
+        } else if (is_find_ls and find_compact.matches(stdout_slice)) {
+            find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
         } else if (rg.matchesPattern(stdout_slice)) {
             rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (is_rg_files_mode) {
-            // Parity target: keep rg --files output near raw (RTK tends to keep
-            // file-list shape with minimal transformation).
-            try writer.writeAll(stdout_slice);
-        } else if (is_find_plain and rg.matches(stdout_slice)) {
+        } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
@@ -478,18 +317,17 @@ fn runWrapper(
     if (std.mem.eql(u8, cmd_basename, "tree") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
-        if (std.mem.eql(u8, cmd_basename, "tree")) {
-            // Parity target: align with RTK-style tree output (without count footer).
-            try writer.writeAll(stripTreeFooter(stdout_slice));
-            try stderr_writer.writeAll(stderr_slice);
-            return exit_code;
-        }
         if (tree.matches(stdout_slice)) {
             tree.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
+            try stderr_writer.writeAll(stderr_slice);
+            return exit_code;
+        }
+        if (std.mem.eql(u8, cmd_basename, "tree")) {
+            try writer.writeAll(stdout_slice);
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
@@ -534,11 +372,12 @@ fn runWrapper(
                 };
                 return exit_code;
             }
-            if (is_jest) {
-                // Parity target: keep jest/vitest output near RTK/raw shape.
-                try writer.writeAll(stdout_slice);
-                if (stdout_slice.len > 0) try writer.writeByte('\n');
-                try stderr_writer.writeAll(stderr_slice);
+            if (is_jest and jest.matches(stdout_slice)) {
+                jest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
                 return exit_code;
             }
             if (is_tsc and tsc.matches(stdout_slice)) {
@@ -643,8 +482,6 @@ fn runWrapper(
         const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
         // kubectl logs <pod> — same grammar, same filter.
         const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
-        // kubectl get ... tables: keep raw output for closer RTK parity.
-        const is_kubectl_get = std.mem.eql(u8, cmd_basename, "kubectl") and std.mem.eql(u8, arg1, "get");
         // npm install / npm i / npm ci — keep summary + warnings, drop notice/funding.
         const is_npm_install = std.mem.eql(u8, cmd_basename, "npm") and
             (std.mem.eql(u8, arg1, "install") or
@@ -656,8 +493,6 @@ fn runWrapper(
                 try stderr_writer.writeAll(stderr_slice);
                 return 1;
             };
-        } else if (!lossless and is_kubectl_get) {
-            try writer.writeAll(stdout_slice);
         } else if (!lossless and is_npm_install and npm_install.matches(stdout_slice)) {
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -759,13 +594,24 @@ fn runWrapper(
             };
         },
         .diff => {
-            // Parity target: raw diff plus a lightweight changes summary.
-            try writer.writeAll(stdout_slice);
-            if (stdout_slice.len > 0) {
-                writeDiffParitySummary(writer, stdout_slice) catch {};
-                try writer.writeByte('\n');
+            // --stat / --shortstat / --name-only / --name-status / --summary
+            // produce already-compact summary output whose lines all start
+            // with a leading space (treated as context and dropped) or a
+            // summary line. Passthrough these modes rather than corrupting them.
+            const diff_summary_mode =
+                has_stat_or_name_flags or
+                hasArg(git_argv, "--summary") or
+                hasArg(git_argv, "--patch-with-stat"); // stat lines start with space, dropped by filter
+            if (diff_summary_mode) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else {
+                git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
             }
-            try stderr_writer.writeAll(stderr_slice);
         },
         .log => {
             // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the
@@ -794,13 +640,35 @@ fn runWrapper(
             }
         },
         .show => {
-            // Parity target: raw show + repeated commit context + change summary.
-            try writer.writeAll(stdout_slice);
-            if (stdout_slice.len > 0) {
-                writeShowHeaderReplay(writer, stdout_slice) catch {};
-                writeDiffParitySummary(writer, stdout_slice) catch {};
+            // --stat / --name-only / --name-status produce summary-format output
+            // whose file-stat lines all start with a space and would be silently
+            // dropped by the diff section of git_show.apply. Passthrough raw.
+            const show_summary_mode =
+                has_stat_or_name_flags or
+                hasArg(git_argv, "--no-patch") or
+                hasArg(git_argv, "--raw") or // object-hash format instead of diff
+                hasArg(git_argv, "-s");
+            // Detect --format=X and --pretty=X (custom output shapes).
+            const show_custom_format = hasFormatOrPrettyArg(git_argv);
+            // Detect `git show OBJECT:PATH` — file blob output, not a commit.
+            // Any non-flag argument containing ':' is a blob specifier.
+            const show_blob = blk: {
+                for (argv[2..]) |a| { // argv[0]=git, argv[1]=show
+                    if (a.len > 0 and a[0] != '-' and std.mem.indexOfScalar(u8, a, ':') != null)
+                        break :blk true;
+                }
+                break :blk false;
+            };
+            if (show_summary_mode or show_custom_format or show_blob) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else {
+                git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
             }
-            try stderr_writer.writeAll(stderr_slice);
         },
         .add => {
             if (lossless) {
@@ -903,11 +771,28 @@ fn runWrapper(
             };
         },
         .blame => {
-            // Parity mode objective: keep git blame close to raw output shape.
-            // Blame's compacted form diverges heavily from RTK behavior and can
-            // hide author/timestamp context useful during archaeology.
-            try writer.writeAll(stdout_slice);
-            try stderr_writer.writeAll(stderr_slice);
+            // -s suppresses author+timestamp (compact format the filter doesn't parse).
+            // --porcelain / --line-porcelain output machine-readable format.
+            // -e / --show-email replaces author name with email.
+            // All produce output shapes the blame filter can't handle; passthrough.
+            const blame_alt_format =
+                hasArg(git_argv, "-s") or
+                hasArg(git_argv, "--porcelain") or
+                hasArg(git_argv, "-p") or
+                hasArg(git_argv, "--line-porcelain") or
+                hasArg(git_argv, "--incremental") or // machine-readable format
+                hasArg(git_argv, "-e") or
+                hasArg(git_argv, "--show-email");
+            if (blame_alt_format) {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            } else {
+                git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .grep => {
             // `git grep -n` produces path:line:content output — same grammar as

@@ -74,20 +74,12 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         if (!isLsLongLine(line)) continue;
         had_content_lines = true;
 
-        const parsed = extractNameAndSize(line) orelse continue;
-        const name = parsed.name;
+        const name = extractName(line) orelse continue;
         if (name.len == 0) continue;
-        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
-
         if (!first) try writer.writeByte('\n');
         first = false;
         try writer.writeAll(name);
-        if (line[0] == 'd') {
-            try writer.writeByte('/');
-        } else if (parsed.size.len > 0) {
-            try writer.writeAll("  ");
-            try writer.writeAll(parsed.size);
-        }
+        if (line[0] == 'd') try writer.writeByte('/');
     }
     // Safety net: if we saw content lines (total or mode-prefixed) but
     // extracted zero filenames, the parser likely failed on an unexpected
@@ -101,29 +93,20 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 /// Return the rest of the line (filename, which may contain spaces).
 /// macOS ls -l may emit ACL markers ("@", "+") after mode — tokenizer ignores them
 /// because the "@" sticks to the mode token.
-const ParsedNameSize = struct {
-    name: []const u8,
-    size: []const u8,
-};
-
-fn extractNameAndSize(line: []const u8) ?ParsedNameSize {
+fn extractName(line: []const u8) ?[]const u8 {
     var i: usize = 0;
     var fields_consumed: usize = 0;
-    var size_tok: []const u8 = "";
     while (i < line.len and fields_consumed < 8) {
         while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
         if (i >= line.len) return null;
-        const start = i;
         while (i < line.len and line[i] != ' ' and line[i] != '\t') i += 1;
-        if (fields_consumed == 4) size_tok = line[start..i];
         fields_consumed += 1;
     }
     if (fields_consumed < 8) return null;
     while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
     if (i >= line.len) return null;
-    return .{ .name = std.mem.trimEnd(u8, line[i..], " \t\r"), .size = size_tok };
+    return std.mem.trimEnd(u8, line[i..], " \t\r");
 }
-
 
 test "matches: total line" {
     try std.testing.expect(matches("total 24\n-rw-r--r-- 1 a b 1 Apr 1 00:00 x\n"));
@@ -149,8 +132,7 @@ test "apply: fixture produces filename list" {
     try std.testing.expect(std.mem.find(u8, got, "main.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "pipeline.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "filters/") != null);
-    try std.testing.expect(std.mem.find(u8, got, "./") == null);
-    try std.testing.expect(std.mem.find(u8, got, "main.zig  ") != null);
+    try std.testing.expect(std.mem.find(u8, got, "./") != null);
     // Ensure metadata stripped
     try std.testing.expect(std.mem.find(u8, got, "nielskootstra") == null);
     try std.testing.expect(std.mem.find(u8, got, "total") == null);
