@@ -174,7 +174,10 @@ fn stripTreeFooter(tree_out: []const u8) []const u8 {
     const line_start = if (rel) |p| p + 1 else 0;
     const last = tree_out[line_start..end];
     if (std.mem.indexOf(u8, last, " director") != null and std.mem.indexOf(u8, last, " file") != null) {
-        return tree_out[0..line_start];
+        var cut = line_start;
+        // Avoid leaving a double-blank tail when removing the count footer.
+        if (cut > 1 and tree_out[cut - 1] == '\n' and tree_out[cut - 2] == '\n') cut -= 1;
+        return tree_out[0..cut];
     }
     return tree_out;
 }
