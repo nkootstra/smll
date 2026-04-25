@@ -23,7 +23,6 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     if (stderr.len != 0) {
         try applyStream(allocator, stderr, writer);
     }
-    try writer.writeAll("ok\n");
 }
 
 fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
