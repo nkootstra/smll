@@ -21,9 +21,6 @@ const KEEP_NEEDLES = [_][]const u8{
     "failed",
     "error",
     "assert",
-    "collected",
-    "short test summary",
-    "==== ",
     ">   ",
     "E   ",
 };
@@ -54,6 +51,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll("all tests passed\n");
         return;
     }
+    try writer.writeAll("Pytest\n");
+    try writer.writeAll("Failures\n");
     try writer.writeAll(scratch.items);
 }
 
@@ -105,6 +104,8 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 }
 
 fn shouldKeep(line: []const u8) bool {
+    if (std.mem.startsWith(u8, line, "________________")) return true;
+    if (std.mem.startsWith(u8, line, "def test_")) return true;
     for (KEEP_NEEDLES) |n| {
         if (std.mem.find(u8, line, n) != null) return true;
     }
@@ -170,7 +171,7 @@ test "apply: keeps failure context" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "FAILED") != null);
-    try std.testing.expect(std.mem.find(u8, got, "short test summary") != null);
+    try std.testing.expect(std.mem.find(u8, got, "short test summary") == null);
     try std.testing.expect(std.mem.find(u8, got, "1 failed, 1 passed") != null);
     try std.testing.expect(std.mem.find(u8, got, "assert False") != null);
     // Platform banner dropped.
