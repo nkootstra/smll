@@ -689,35 +689,12 @@ fn runWrapper(
             }
         },
         .show => {
-            // --stat / --name-only / --name-status produce summary-format output
-            // whose file-stat lines all start with a space and would be silently
-            // dropped by the diff section of git_show.apply. Passthrough raw.
-            const show_summary_mode =
-                has_stat_or_name_flags or
-                hasArg(git_argv, "--no-patch") or
-                hasArg(git_argv, "--raw") or // object-hash format instead of diff
-                hasArg(git_argv, "-s");
-            // Detect --format=X and --pretty=X (custom output shapes).
-            const show_custom_format = hasFormatOrPrettyArg(git_argv);
-            // Detect `git show OBJECT:PATH` — file blob output, not a commit.
-            // Any non-flag argument containing ':' is a blob specifier.
-            const show_blob = blk: {
-                for (argv[2..]) |a| { // argv[0]=git, argv[1]=show
-                    if (a.len > 0 and a[0] != '-' and std.mem.indexOfScalar(u8, a, ':') != null)
-                        break :blk true;
-                }
-                break :blk false;
-            };
-            if (show_summary_mode or show_custom_format or show_blob) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
-            } else {
-                git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
-                    return 1;
-                };
+            // Parity target: keep raw show output and add lightweight change summary.
+            try writer.writeAll(stdout_slice);
+            if (stdout_slice.len > 0) {
+                writeDiffParitySummary(writer, stdout_slice) catch {};
             }
+            try stderr_writer.writeAll(stderr_slice);
         },
         .add => {
             if (lossless) {
