@@ -161,6 +161,24 @@ fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
     }
 }
 
+fn stripTreeFooter(tree_out: []const u8) []const u8 {
+    if (tree_out.len == 0) return tree_out;
+    var end = tree_out.len;
+    // Trim trailing whitespace/newlines first.
+    while (end > 0 and (tree_out[end - 1] == '\n' or tree_out[end - 1] == '\r' or tree_out[end - 1] == ' ' or tree_out[end - 1] == '\t')) {
+        end -= 1;
+    }
+    if (end == 0) return tree_out;
+
+    const rel = std.mem.lastIndexOfScalar(u8, tree_out[0..end], '\n');
+    const line_start = if (rel) |p| p + 1 else 0;
+    const last = tree_out[line_start..end];
+    if (std.mem.indexOf(u8, last, " director") != null and std.mem.indexOf(u8, last, " file") != null) {
+        return tree_out[0..line_start];
+    }
+    return tree_out;
+}
+
 fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
     var lines = std.mem.splitScalar(u8, find_out, '\n');
     var wrote = false;
@@ -458,8 +476,8 @@ fn runWrapper(
         std.mem.eql(u8, cmd_basename, "bun"))
     {
         if (std.mem.eql(u8, cmd_basename, "tree")) {
-            // Parity target: keep tree output near raw shape.
-            try writer.writeAll(stdout_slice);
+            // Parity target: align with RTK-style tree output (without count footer).
+            try writer.writeAll(stripTreeFooter(stdout_slice));
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
