@@ -50,12 +50,14 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
     const head_cap: usize = 80;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+    var last_file: [128]u8 = undefined;
+    var last_file_len: usize = 0;
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
-        if (try writeCompressedError(allocator, trimmed, out)) {
+        if (try writeCompressedError(allocator, trimmed, out, &last_file, &last_file_len)) {
             kept.* += 1;
             continue;
         }
@@ -71,7 +73,13 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
 /// Returns true when a line was written. If the line looks like a tsc error
 /// but can't be parsed, falls back to writing the raw line so we never drop
 /// actionable content.
-fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !bool {
+fn writeCompressedError(
+    allocator: Allocator,
+    line: []const u8,
+    out: *std.ArrayList(u8),
+    last_file: *[128]u8,
+    last_file_len: *usize,
+) !bool {
     const marker = " - error TS";
     const idx = std.mem.find(u8, line, marker) orelse {
         // Some tsc modes emit `error TS` without the leading path (rare).
@@ -102,7 +110,24 @@ fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayL
     var code_end = code_start;
     while (code_end < line.len and line[code_end] != ':') code_end += 1;
     const code = line[code_start..code_end];
-    try out.appendSlice(allocator, path_lc);
+
+    // Elide repeated file basename: for consecutive entries from the same file,
+    // emit ":<line> TSxxxx".
+    var file_part = path_lc;
+    var line_part: []const u8 = "";
+    if (std.mem.indexOfScalar(u8, path_lc, ':')) |c| {
+        file_part = path_lc[0..c];
+        line_part = path_lc[c..];
+    }
+
+    const repeated = std.mem.eql(u8, file_part, last_file[0..last_file_len.*]);
+    if (!repeated) {
+        const n = @min(file_part.len, last_file.len);
+        @memcpy(last_file[0..n], file_part[0..n]);
+        last_file_len.* = n;
+        try out.appendSlice(allocator, file_part);
+    }
+    try out.appendSlice(allocator, line_part);
     try out.append(allocator, ' ');
     try out.appendSlice(allocator, code);
     try out.append(allocator, '\n');
@@ -135,7 +160,7 @@ test "apply: fixture compresses errors to locations + codes" {
     const got = out.written();
     // Transformed form: path:L:C TSnnnn (message dropped).
     try std.testing.expect(std.mem.find(u8, got, "client.ts:42 TS2322") != null);
-    try std.testing.expect(std.mem.find(u8, got, "client.ts:58 TS2339") != null);
+    try std.testing.expect(std.mem.find(u8, got, ":58 TS2339") != null);
     try std.testing.expect(std.mem.find(u8, got, "Button.tsx:15 TS2345") != null);
     try std.testing.expect(std.mem.find(u8, got, "format.ts:8 TS7006") != null);
     try std.testing.expect(std.mem.find(u8, got, "format.ts:14 TS2304") != null);
