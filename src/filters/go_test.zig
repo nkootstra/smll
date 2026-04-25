@@ -49,7 +49,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll(scratch.items);
         return;
     }
-    try writer.writeAll("all tests passed\n");
+    try writer.writeAll("Go test: all tests passed\n");
 }
 
 fn hasFailureMarker(s: []const u8) bool {
