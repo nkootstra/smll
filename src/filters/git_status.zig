@@ -51,6 +51,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     defer buf.deinit();
     try applyInner(allocator, stdout, stderr, &buf.writer);
 
+    // Lightweight section marker for parity/readability.
+    try writer.writeAll("S\n");
+
     // Phase 2: group consecutive entries with the same sigil and parent dir
     try groupDirectories(buf.written(), writer);
 }
