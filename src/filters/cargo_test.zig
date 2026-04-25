@@ -51,8 +51,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     defer scratch.deinit(allocator);
 
     var kept_lines: usize = 0;
-    try scanAndKeep(allocator, stdout, &scratch, &kept_lines);
-    try scanAndKeep(allocator, stderr, &scratch, &kept_lines);
+    var saw_failures_banner = false;
+    try scanAndKeep(allocator, stdout, &scratch, &kept_lines, &saw_failures_banner);
+    try scanAndKeep(allocator, stderr, &scratch, &kept_lines, &saw_failures_banner);
 
     if (kept_lines == 0) {
         try writer.writeAll("all tests passed\n");
@@ -61,7 +62,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try writer.writeAll(scratch.items);
 }
 
-fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
+fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize, saw_failures_banner: *bool) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
     const head_cap: usize = 80;
@@ -73,6 +74,10 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
         if (!shouldKeep(trimmed)) continue;
+        if (std.mem.eql(u8, trimmed, "failures:")) {
+            if (saw_failures_banner.*) continue;
+            saw_failures_banner.* = true;
+        }
 
         try out.appendSlice(allocator, trimmed);
         try out.append(allocator, '\n');
