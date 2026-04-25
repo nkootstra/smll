@@ -2,14 +2,17 @@
 
 ## Pending
 
-- **git status parity tuning** — nudge compact shape toward RTK (currently small but persistent delta).
-- **pytest fine-grained parity tuning** — only pursue if primary score moves meaningfully.
-- **Detect eza/exa/lsd and adjust field count** — correctness hardening, orthogonal to current parity metric.
+- **Detect eza/exa/lsd and adjust field count** — still valid correctness hardening,
+  but low priority for current head-to-head benchmark metric.
+- **tsc path compaction** — shorten `path:L:C TSxxxx` further (e.g., shared-dir prefix
+  factoring) while preserving jump-to-file usefulness.
+- **go test failure-line compaction** — keep failing assertion payload but trim repeated
+  boilerplate prefixes to challenge RTK's extreme count-only compression.
 
 ## Pruned as stale for current metric
 
 - Broad binary-size micro-optimizations from the 182 KB campaign are parked; current
-  metric is parity (`parity_points`) under a hard size cap, so wins must improve RTK-shape alignment.
+  metric is head-to-head score (`smll_points`), so wins must move compression/latency.
 
 ## Done / pruned
 
@@ -141,20 +144,3 @@
 - ~~Compact cargo test failure scaffolding + summarize test result line~~ — Done (run #153, smll_points 20.5→22.5)
 - ~~Aggressive pytest failure-only compaction~~ — Tried/discarded (run #152, score regressed to 17.5)
 - ~~Cargo+pytest dual compaction attempt~~ — Tried/crash (run #150, compile error)
-- ~~ANSI-strip fastpaths in pytest+docker_logs (per-line check)~~ — Tried/discarded (run #155, score regressed)
-- ~~Docker logs stream-level ANSI pre-scan fastpath~~ — Done (run #156, smll_points 22.5→23.5)
-- ~~Pytest stream-level ANSI pre-scan fastpath~~ — Tried/discarded (run #157, score regressed)
-- ~~TSC path compaction (drop ./ and src/ prefixes)~~ — Done (run #159, parity_points 10.912→10.937)
-- ~~Go test failure-line compaction~~ — Done (run #160, parity_points 10.937→11.215)
-- ~~Git blame passthrough for parity~~ — Done (run #161, parity_points 11.215→12.022)
-- ~~Kubectl get passthrough for parity~~ — Done (run #163, parity_points 12.022→12.684)
-- ~~kubectl-get passthrough first attempt~~ — Tried/crash (run #162, syntax typo)
-- ~~RG --files parity passthrough~~ — Done (run #164, parity_points 12.684→13.066)
-- ~~Tree parity passthrough~~ — Done (run #165, parity_points 13.066→13.494)
-- ~~Find -ls parity passthrough~~ — Tried/discarded (run #166, no primary gain)
-- ~~Git show parity passthrough~~ — Tried/discarded (run #167/#170, no primary gain)
-- ~~Jest/Vitest parity passthrough~~ — Done (run #168, parity_points 13.494→14.060)
-- ~~Git diff parity passthrough~~ — Done (run #169, parity_points 14.060→14.509)
-- ~~Docker ps summary-only parity mode~~ — Done (run #171, parity_points 14.509→14.550)
-- ~~TSC basename-only path compaction~~ — Done (run #172, parity_points 14.550→14.587)
-- ~~Cargo test parity tuning (less aggressive compaction)~~ — Done (run #173, parity_points 14.587→14.777)
