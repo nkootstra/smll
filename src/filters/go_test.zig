@@ -227,8 +227,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         try out.appendSlice(allocator, pending.items);
         pending.clearRetainingCapacity();
         if (std.mem.startsWith(u8, trimmed, "FAIL\t")) {
-            try out.appendSlice(allocator, "FAIL\n");
-            kept.* += 1;
+            // Failure already signaled by compact F-markers; drop package tail.
         } else if (std.mem.startsWith(u8, trimmed, "ok\t") or
             std.mem.startsWith(u8, trimmed, "ok  "))
         {
