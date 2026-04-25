@@ -152,6 +152,37 @@ fn writeShowHeaderReplay(writer: *std.Io.Writer, show_out: []const u8) !void {
     try writer.writeAll(show_out[0 .. idx + 1]);
 }
 
+fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
+    var lines = std.mem.splitScalar(u8, find_out, '\n');
+    var wrote = false;
+    while (lines.next()) |line| {
+        const t = std.mem.trim(u8, line, " \t\r");
+        if (t.len == 0) continue;
+
+        // Format: inode blocks mode links user group size date time path
+        var it = std.mem.tokenizeAny(u8, t, " \t");
+        var col: usize = 0;
+        var size: []const u8 = "";
+        var path: []const u8 = "";
+        while (it.next()) |tok| {
+            if (col == 6) size = tok;
+            path = tok;
+            col += 1;
+        }
+        if (path.len == 0) continue;
+        if (!wrote) {
+            try writer.writeAll("\n-- entries --\n");
+            wrote = true;
+        }
+        try writer.writeAll(path);
+        if (size.len > 0) {
+            try writer.writeAll(" size=");
+            try writer.writeAll(size);
+        }
+        try writer.writeByte('\n');
+    }
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const environ = init.environ_map;
@@ -348,12 +379,13 @@ fn runWrapper(
         const is_find_plain = is_find_cmd and !is_find_ls;
         if (lossless) {
             try writer.writeAll(stdout_slice);
-        } else if (is_find_ls and find_compact.matches(stdout_slice)) {
-            find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+        } else if (is_find_ls) {
+            // Parity target: raw `find -ls` plus lightweight entries index.
+            try writer.writeAll(stdout_slice);
+            if (stdout_slice.len > 0) {
+                writeFindLsSummary(writer, stdout_slice) catch {};
+            }
+            try stderr_writer.writeAll(stderr_slice);
         } else if (rg.matchesPattern(stdout_slice)) {
             rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
