@@ -162,10 +162,25 @@ fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
         // Format: inode blocks mode links user group size date time path
         var it = std.mem.tokenizeAny(u8, t, " \t");
         var col: usize = 0;
+        var inode: []const u8 = "";
+        var blocks: []const u8 = "";
+        var mode: []const u8 = "";
+        var links: []const u8 = "";
+        var user: []const u8 = "";
+        var group: []const u8 = "";
         var size: []const u8 = "";
         var path: []const u8 = "";
         while (it.next()) |tok| {
-            if (col == 6) size = tok;
+            switch (col) {
+                0 => inode = tok,
+                1 => blocks = tok,
+                2 => mode = tok,
+                3 => links = tok,
+                4 => user = tok,
+                5 => group = tok,
+                6 => size = tok,
+                else => {},
+            }
             path = tok;
             col += 1;
         }
@@ -179,6 +194,18 @@ fn writeFindLsSummary(writer: *std.Io.Writer, find_out: []const u8) !void {
             try writer.writeAll(" size=");
             try writer.writeAll(size);
         }
+        try writer.writeAll(" | inode=");
+        try writer.writeAll(inode);
+        try writer.writeAll(" blocks=");
+        try writer.writeAll(blocks);
+        try writer.writeAll(" mode=");
+        try writer.writeAll(mode);
+        try writer.writeAll(" links=");
+        try writer.writeAll(links);
+        try writer.writeAll(" owner=");
+        try writer.writeAll(user);
+        try writer.writeAll(":");
+        try writer.writeAll(group);
         try writer.writeByte('\n');
     }
 }
