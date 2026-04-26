@@ -55,6 +55,27 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
     var first_out = true;
 
     while (lines.next()) |line| {
+        // Fast path for content lines (+/-, context) — the majority of diff lines.
+        // Check before metadata to avoid the startsWith cascade for common cases.
+        if (line.len > 1) {
+            const c = line[0];
+            if (c == '+' and line[1] != '+') {
+                if (!first_out) try writer.writeByte('\n');
+                try writer.writeAll(line);
+                first_out = false;
+                continue;
+            }
+            if (c == '-' and line[1] != '-') {
+                if (!first_out) try writer.writeByte('\n');
+                try writer.writeAll(line);
+                first_out = false;
+                continue;
+            }
+        }
+        // Drop context lines (leading space) and empty +/- lines.
+        if (line.len > 0 and line[0] == ' ') continue;
+        if (line.len == 1 and (line[0] == '+' or line[0] == '-')) continue;
+
         // diff --git a/<old> b/<new> — emit d sigil
         if (std.mem.startsWith(u8, line, "diff --git a/")) {
             // Parse paths from "diff --git a/<path_a> b/<path_b>"
@@ -148,17 +169,7 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
         if (std.mem.startsWith(u8, line, "copy to ")) continue;
 
         // Everything else passes through verbatim:
-        // new file mode, deleted file mode, +/- lines, context lines
-        // Context lines (leading space): keep max 1 before first change in hunk
-        if (line.len > 0 and line[0] == ' ') {
-            // Context line — skip if we've already seen a +/- in this hunk
-            // and already emitted 1 trailing context line.
-            // Simple policy: drop ALL context lines. The @ hunk header
-            // already has the function name for location context.
-            continue;
-        }
-        // Drop empty +/- lines (blank lines added/removed are noise)
-        if (line.len == 1 and (line[0] == '+' or line[0] == '-')) continue;
+        // new file mode, deleted file mode
         if (!first_out) try writer.writeByte('\n');
         try writer.writeAll(line);
         first_out = false;

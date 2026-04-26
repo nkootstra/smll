@@ -23,7 +23,14 @@ const git_diff = @import("git_diff");
 
 pub fn matches(input: []const u8) bool {
     if (!git_log.matches(input)) return false;
-    return findDiffStart(input) != null;
+    // For matches() only: limit scan to the first commit section.
+    // In `git show` output, the diff appears right after the first
+    // commit's message — typically within 4 KB. Multi-commit `git log`
+    // output won't have a diff marker this early, so a bounded scan
+    // avoids the O(n) full-input scan that penalises large log data.
+    // apply() still uses the unbounded findDiffStart for correctness.
+    const limit = @min(input.len, 8 * 1024);
+    return findDiffStart(input[0..limit]) != null;
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
@@ -40,13 +47,17 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 }
 
 fn findDiffStart(input: []const u8) ?usize {
-    var i: usize = 0;
-    while (i < input.len) {
-        const line_start = i;
-        while (i < input.len and input[i] != '\n') i += 1;
-        const line = input[line_start..i];
-        if (std.mem.startsWith(u8, line, "diff --git a/")) return line_start;
-        if (i < input.len) i += 1;
+    // Fast scan: search for the diff marker directly in the input.
+    // The marker must appear at the start of a line.
+    const marker = "diff --git a/";
+    var pos: usize = 0;
+    while (pos < input.len) {
+        const found = std.mem.indexOf(u8, input[pos..], marker) orelse return null;
+        const abs_pos = pos + found;
+        // Check that it's at the start of a line (pos 0 or preceded by '\n').
+        if (abs_pos == 0 or input[abs_pos - 1] == '\n') return abs_pos;
+        // Skip past this occurrence.
+        pos = abs_pos + marker.len;
     }
     return null;
 }

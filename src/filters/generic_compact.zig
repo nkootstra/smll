@@ -46,6 +46,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
         const line = std.mem.trimEnd(u8, clean, " \t\r");
         if (line.len == 0) {
             try clean_lines.append(allocator, "");
+        } else if (@intFromPtr(line.ptr) >= @intFromPtr(stdout.ptr) and (@intFromPtr(line.ptr) + line.len) <= (@intFromPtr(stdout.ptr) + stdout.len)) {
+            // Zero-copy: line is a slice into the original input (no ANSI was stripped)
+            try clean_lines.append(allocator, line);
         } else {
             const owned = try allocator.dupe(u8, line);
             try owned_strs.append(allocator, owned);
