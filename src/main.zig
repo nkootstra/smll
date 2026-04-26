@@ -562,7 +562,7 @@ fn runWrapperInner(
     const is_go_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "go");
     if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
         if (!lossless) {
-            if (is_pytest and pytest.matches(stdout_slice)) {
+            if (is_pytest and (pytest.matches(stdout_slice) or pytest.matches(stderr_slice))) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
@@ -578,7 +578,7 @@ fn runWrapperInner(
                 };
                 return exit_code;
             }
-            if (is_jest and jest.matches(stdout_slice)) {
+            if (is_jest and (jest.matches(stdout_slice) or jest.matches(stderr_slice))) {
                 jest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
@@ -586,7 +586,7 @@ fn runWrapperInner(
                 };
                 return exit_code;
             }
-            if (is_tsc and tsc.matches(stdout_slice)) {
+            if (is_tsc and (tsc.matches(stdout_slice) or tsc.matches(stderr_slice))) {
                 tsc.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
