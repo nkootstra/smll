@@ -232,13 +232,15 @@ test "conflict fixture: smll output == GitStatusFilter.apply byte-for-byte" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "non-git input passes through unchanged (fail-open)" {
+test "non-git input: ls-like output gets compressed by ls_compact" {
     const allocator = std.testing.allocator;
     const ls_like = "total 48\ndrwxr-xr-x  10 user  staff  320 Apr 18 07:00 .\n-rw-r--r--   1 user  staff  512 Apr 18 07:00 README\n";
     var result = try runSmll(allocator, ls_like);
     defer result.deinit(allocator);
 
-    try std.testing.expectEqualStrings(ls_like, result.stdout);
+    // ls_compact now matches in pipe mode and extracts filenames.
+    try std.testing.expect(result.stdout.len <= ls_like.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "README") != null);
     try std.testing.expectEqualStrings("", result.stderr);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
