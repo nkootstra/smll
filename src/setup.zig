@@ -218,39 +218,12 @@ fn setupOpencode(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const config_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
-    defer allocator.free(config_path);
-
+    _ = stderr;
     const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
     defer allocator.free(plugin_path);
 
-    const existing_config = try readFileOptional(allocator, io, config_path);
-    defer if (existing_config) |buf| allocator.free(buf);
-
-    if (existing_config) |buf| {
-        if (containsRtkIntegration(buf)) {
-            try stderr.writeAll("smll setup (opencode): detected existing RTK integration in opencode.json\n");
-            try stderr.writeAll("Please remove RTK plugin/hook entries first, then run smll --setup opencode again.\n");
-            return 1;
-        }
-    }
-
-    var config_json = loadOrCreateJsonObject(allocator, existing_config) catch {
-        try stderr.writeAll("smll setup (opencode): opencode.json is not valid JSON\n");
-        return 1;
-    };
-    defer config_json.deinit();
-
-    const pa = config_json.arena.allocator();
-    const already_enabled = try ensureOpencodePluginEnabled(pa, &config_json.value, plugin_path);
-
-    if (!already_enabled) {
-        try writeBackupIfExists(allocator, io, config_path, dry_run);
-        try writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
-    } else {
-        try stdout.writeAll("opencode config already enables smll plugin\n");
-    }
-
+    // OpenCode auto-discovers .ts files in ~/.config/opencode/plugins/.
+    // Just write the file — no config JSON modification needed.
     const plugin_script = buildOpencodePluginScript();
     const existing_plugin = try readFileOptional(allocator, io, plugin_path);
     defer if (existing_plugin) |buf| allocator.free(buf);
@@ -337,38 +310,13 @@ fn unsetupOpencode(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const config_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
-    defer allocator.free(config_path);
-
+    _ = stderr;
     const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
     defer allocator.free(plugin_path);
-
-    var changed_config = false;
-    const existing_config = try readFileOptional(allocator, io, config_path);
-    defer if (existing_config) |buf| allocator.free(buf);
-
-    if (existing_config) |_| {
-        var config_json = loadOrCreateJsonObject(allocator, existing_config) catch {
-            try stderr.writeAll("smll unsetup (opencode): opencode.json is not valid JSON\n");
-            return 1;
-        };
-        defer config_json.deinit();
-
-        changed_config = try removeOpencodePluginEntry(&config_json.value, plugin_path);
-        if (changed_config) {
-            try writeBackupIfExists(allocator, io, config_path, dry_run);
-            try writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
-        } else {
-            try stdout.writeAll("opencode config: no smll plugin entry found\n");
-        }
-    } else {
-        try stdout.writeAll("opencode config: file not found, nothing to remove\n");
-    }
 
     const existing_plugin = try readFileOptional(allocator, io, plugin_path);
     defer if (existing_plugin) |buf| allocator.free(buf);
     if (existing_plugin != null) {
-        try writeBackupIfExists(allocator, io, plugin_path, dry_run);
         if (dry_run) {
             try stdout.print("[dry-run] would delete {s}\n", .{plugin_path});
         } else {
