@@ -72,9 +72,18 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
         if (!std.mem.startsWith(u8, line, "    ")) continue;
         const subject = std.mem.trim(u8, line[4..], " \t\r");
         if (subject.len == 0) continue;
-        if (!first_out) try writer.writeByte('\n');
-        try writer.writeAll(&sha7);
-        try writer.writeByte(' ');
+        // Batch output: combine sha7 + space into single write.
+        var hdr: [9]u8 = undefined;
+        if (!first_out) {
+            hdr[0] = '\n';
+            @memcpy(hdr[1..8], &sha7);
+            hdr[8] = ' ';
+            try writer.writeAll(&hdr);
+        } else {
+            @memcpy(hdr[0..7], &sha7);
+            hdr[7] = ' ';
+            try writer.writeAll(hdr[0..8]);
+        }
         try writer.writeAll(subject);
         first_out = false;
         subject_emitted = true;

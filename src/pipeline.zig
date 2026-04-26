@@ -24,7 +24,7 @@ pub fn run(
     writer: *Writer,
     comptime Filters: anytype,
 ) !void {
-    var stack_buf: [16 * 1024]u8 = undefined;
+    var stack_buf: [32 * 1024]u8 = undefined;
     var total: usize = 0;
     while (total < stack_buf.len) {
         const got = reader.readSliceShort(stack_buf[total..]) catch |err| switch (err) {
@@ -38,14 +38,30 @@ pub fn run(
         return dispatch(allocator, stack_buf[0..total], writer, Filters);
     }
 
-    var allocating = std.Io.Writer.Allocating.init(allocator);
-    defer allocating.deinit();
-    try allocating.writer.writeAll(stack_buf[0..total]);
-    _ = reader.streamRemaining(&allocating.writer) catch |err| switch (err) {
-        error.WriteFailed => return error.OutOfMemory,
-        error.ReadFailed => return err,
-    };
-    return dispatch(allocator, allocating.written(), writer, Filters);
+    // Large input: allocate combined buffer, copy stack prefix, read rest directly.
+    // Pre-allocate generously to avoid a second alloc+copy in most cases.
+    const init_cap = 256 * 1024; // 256 KB covers most real-world outputs
+    var buf = try allocator.alloc(u8, init_cap);
+    defer allocator.free(buf);
+    @memcpy(buf[0..total], stack_buf[0..total]);
+
+    // Read remaining data directly into the buffer.
+    while (true) {
+        if (total >= buf.len) {
+            // Grow buffer (double).
+            const new_cap = buf.len * 2;
+            const new_buf = try allocator.alloc(u8, new_cap);
+            @memcpy(new_buf[0..total], buf[0..total]);
+            allocator.free(buf);
+            buf = new_buf;
+        }
+        const got = reader.readSliceShort(buf[total..]) catch |err| switch (err) {
+            error.ReadFailed => return err,
+        };
+        if (got == 0) break;
+        total += got;
+    }
+    return dispatch(allocator, buf[0..total], writer, Filters);
 }
 
 pub fn dispatch(

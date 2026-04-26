@@ -104,26 +104,30 @@ pub fn main(init: std.process.Init) !void {
     var stderr_file = std.Io.File.stderr();
     var stderr_writer = stderr_file.writer(io, &err_buf);
 
-    if (try setup.maybeRun(init.arena.allocator(), io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
-        try stdout_writer.interface.flush();
-        try stderr_writer.interface.flush();
-        if (code != 0) std.process.exit(code);
-        return;
-    }
-
-    // Fast path: no extra argv → stdin mode. Skip the wrapper-mode arena
-    // init entirely. args[0] is the program name; len 1 = stdin mode.
+    // Fast path: no extra argv → stdin mode. Skip setup check and
+    // wrapper-mode arena init entirely. Use a larger output buffer
+    // to reduce write syscalls for large passthrough data.
     if (args.len <= 1) {
+        var pipe_out_buf: [32768]u8 = undefined;
+        var pipe_stdout_writer = stdout_file.writer(io, &pipe_out_buf);
         var in_buf: [4096]u8 = undefined;
         var stdin_file = std.Io.File.stdin();
         var stdin_reader = stdin_file.reader(io, &in_buf);
         try pipeline.run(
             std.heap.page_allocator,
             &stdin_reader.interface,
-            &stdout_writer.interface,
+            &pipe_stdout_writer.interface,
             Filters,
         );
+        try pipe_stdout_writer.interface.flush();
+        return;
+    }
+
+    // Setup check: only needed with args (--setup, --unsetup, etc.)
+    if (try setup.maybeRun(init.arena.allocator(), io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
+        try stderr_writer.interface.flush();
+        if (code != 0) std.process.exit(code);
         return;
     }
 

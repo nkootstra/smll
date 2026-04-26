@@ -46,107 +46,16 @@ const Section = enum {
 };
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    // Phase 1: generate standard output into a buffer
-    var buf = Writer.Allocating.init(allocator);
-    defer buf.deinit();
-    try applyInner(allocator, stdout, stderr, &buf.writer);
-
-    // Phase 2: group consecutive entries with the same sigil and parent dir
-    try groupDirectories(buf.written(), writer);
+    _ = allocator;
+    _ = stderr;
+    try applyStreaming(stdout, writer);
 }
 
 const DIR_GROUP_THRESHOLD: usize = 3;
 
-fn groupDirectories(output: []const u8, writer: *Writer) !void {
-    var all_lines: [4096][]const u8 = undefined;
-    var line_count: usize = 0;
-    var lines = std.mem.splitScalar(u8, output, '\n');
-    while (lines.next()) |line| {
-        if (line.len == 0) continue;
-        if (line_count >= all_lines.len) break;
-        all_lines[line_count] = line;
-        line_count += 1;
-    }
-
-    var i: usize = 0;
-    while (i < line_count) {
-        const line = all_lines[i];
-        const parsed = parseSigilLine(line);
-        if (parsed == null) {
-            try writer.writeAll(line);
-            try writer.writeByte('\n');
-            i += 1;
-            continue;
-        }
-        const p = parsed.?;
-        const dir = parentDir(p.path);
-
-        if (dir.len == 0) {
-            try writer.writeAll(line);
-            try writer.writeByte('\n');
-            i += 1;
-            continue;
-        }
-
-        var run_end = i + 1;
-        while (run_end < line_count) {
-            const next_parsed = parseSigilLine(all_lines[run_end]) orelse break;
-            const next_dir = parentDir(next_parsed.path);
-            if (!std.mem.eql(u8, p.sigil, next_parsed.sigil) or
-                !std.mem.eql(u8, dir, next_dir)) break;
-            run_end += 1;
-        }
-        const run_len = run_end - i;
-
-        if (run_len >= DIR_GROUP_THRESHOLD) {
-            try writer.writeAll(p.sigil);
-            try writer.writeAll(" ");
-            try writer.writeAll(dir);
-            try writer.writeAll(" ×"); try writer.print("{d}\n", .{run_len});
-            i = run_end;
-        } else {
-            while (i < run_end) {
-                try writer.writeAll(all_lines[i]);
-                try writer.writeByte('\n');
-                i += 1;
-            }
-        }
-    }
-}
-
-const SigilLine = struct { sigil: []const u8, path: []const u8 };
-
-fn parseSigilLine(line: []const u8) ?SigilLine {
-    if (line.len < 3) return null;
-    if ((line[0] == 'A' or line[0] == 'S' or line[0] == 'D' or
-        line[0] == 'M' or line[0] == 'd' or line[0] == '?' or
-        line[0] == 'R') and line[1] == ' ')
-    {
-        return .{ .sigil = line[0..1], .path = line[2..] };
-    }
-    if (line.len >= 4 and line[2] == ' ') {
-        const s = line[0..2];
-        if (std.mem.eql(u8, s, "UU") or std.mem.eql(u8, s, "AU") or
-            std.mem.eql(u8, s, "UA") or std.mem.eql(u8, s, "DU") or
-            std.mem.eql(u8, s, "UD"))
-        {
-            return .{ .sigil = s, .path = line[3..] };
-        }
-    }
-    return null;
-}
-
-fn parentDir(path: []const u8) []const u8 {
-    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
-        return path[0 .. idx + 1];
-    }
-    return "";
-}
-
-fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    _ = allocator;
-    _ = stderr;
-    const input = stdout;
+/// Single-pass streaming apply: parses input lines, formats sigil output,
+/// and groups consecutive same-dir entries on the fly without buffering.
+fn applyStreaming(input: []const u8, writer: *Writer) !void {
     if (input.len == 0) return;
 
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -157,25 +66,26 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
     var ahead: ?[]const u8 = null;
     var behind: ?[]const u8 = null;
 
-    // First pass: collect branch and ahead/behind, write nothing yet.
-    // We need to emit the # line before all entries, so we do two passes.
-    // Actually, git status always emits "On branch X" first, so one pass works:
-    // buffer branch info until first content line, then flush.
-
-    // Reset and do single pass with deferred branch-line flush.
-    lines = std.mem.splitScalar(u8, input, '\n');
-    section = .none;
+    // Streaming directory grouping state
+    var run_sigil: u8 = 0;
+    var run_dir: []const u8 = "";
+    // Store pointers to sigil lines (they point into per-line stack buffers,
+    // so we re-derive them). Instead, store the original content lines and
+    // section to replay formatting.
+    var run_sections: [64]Section = undefined;
+    var run_contents: [64][]const u8 = undefined;
+    var run_len: usize = 0;
 
     while (lines.next()) |line| {
-        // Branch detection (first non-empty line).
+        // Branch detection
         if (!branch_written) {
-            if (std.mem.startsWith(u8, line, "On branch ")) {
+            if (line.len >= 10 and line[0] == 'O' and std.mem.startsWith(u8, line, "On branch ")) {
                 const b = line["On branch ".len..];
                 const copy_len = @min(b.len, branch_buf.len);
                 @memcpy(branch_buf[0..copy_len], b[0..copy_len]);
                 branch_len = copy_len;
                 continue;
-            } else if (std.mem.startsWith(u8, line, "HEAD detached at ")) {
+            } else if (line.len >= 17 and line[0] == 'H' and std.mem.startsWith(u8, line, "HEAD detached at ")) {
                 const ref = line["HEAD detached at ".len..];
                 const prefix = "HEAD:";
                 const copy_len = @min(prefix.len + ref.len, branch_buf.len);
@@ -183,97 +93,202 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
                 @memcpy(branch_buf[prefix.len..copy_len], ref[0..copy_len - prefix.len]);
                 branch_len = copy_len;
                 continue;
-            } else if (std.mem.startsWith(u8, line, "interactive rebase in progress")) {
+            } else if (line.len >= 30 and line[0] == 'i' and std.mem.startsWith(u8, line, "interactive rebase in progress")) {
                 const b = "rebase-in-progress";
                 @memcpy(branch_buf[0..b.len], b);
                 branch_len = b.len;
                 continue;
-            } else if (std.mem.startsWith(u8, line, "Your branch is ahead")) {
-                // "Your branch is ahead of 'origin/main' by 2 commits."
-                if (findAheadBehindCount(line, "by ")) |count| {
-                    ahead = count;
+            } else if (line.len > 0 and line[0] == 'Y') {
+                if (std.mem.startsWith(u8, line, "Your branch is ahead")) {
+                    if (findAheadBehindCount(line, "by ")) |count| ahead = count;
+                    continue;
+                } else if (std.mem.startsWith(u8, line, "Your branch is behind")) {
+                    if (findAheadBehindCount(line, "by ")) |count| behind = count;
+                    continue;
+                } else if (std.mem.startsWith(u8, line, "Your branch and")) {
+                    if (findDivergedCounts(line)) |counts| {
+                        ahead = counts[0];
+                        behind = counts[1];
+                    }
+                    continue;
                 }
-                continue;
-            } else if (std.mem.startsWith(u8, line, "Your branch is behind")) {
-                if (findAheadBehindCount(line, "by ")) |count| {
-                    behind = count;
-                }
-                continue;
-            } else if (std.mem.startsWith(u8, line, "Your branch and")) {
-                // "Your branch and 'origin/main' have diverged, and have X and Y different commits each."
-                if (findDivergedCounts(line)) |counts| {
-                    ahead = counts[0];
-                    behind = counts[1];
-                }
-                continue;
             }
         }
 
-        // Section header detection.
-        if (std.mem.eql(u8, line, "Changes to be committed:")) {
-            section = .staged;
-            continue;
-        } else if (std.mem.eql(u8, line, "Changes not staged for commit:")) {
-            section = .unstaged;
-            continue;
-        } else if (std.mem.eql(u8, line, "Untracked files:")) {
-            section = .untracked;
-            continue;
-        } else if (std.mem.eql(u8, line, "Unmerged paths:")) {
-            section = .unmerged;
-            continue;
-        }
+        // Section headers - first byte dispatch
+        if (line.len > 0) switch (line[0]) {
+            'C' => {
+                if (std.mem.eql(u8, line, "Changes to be committed:")) {
+                    section = .staged;
+                    continue;
+                } else if (std.mem.eql(u8, line, "Changes not staged for commit:")) {
+                    section = .unstaged;
+                    continue;
+                }
+            },
+            'U' => {
+                if (std.mem.eql(u8, line, "Untracked files:")) {
+                    section = .untracked;
+                    continue;
+                } else if (std.mem.eql(u8, line, "Unmerged paths:")) {
+                    section = .unmerged;
+                    continue;
+                }
+            },
+            else => {},
+        };
 
-        // Hint lines: "  (use "git ...")" — drop them.
         if (isHintLine(line)) continue;
-
-        // Blank lines, summary lines — drop them.
         if (std.mem.trim(u8, line, " \t").len == 0) continue;
-        if (std.mem.startsWith(u8, line, "no changes added to commit")) continue;
-        if (std.mem.startsWith(u8, line, "nothing to commit")) continue;
-        if (std.mem.startsWith(u8, line, "nothing added to commit")) continue;
-        if (std.mem.startsWith(u8, line, "You have unmerged paths")) continue;
-        if (std.mem.startsWith(u8, line, "All conflicts fixed")) continue;
+        if (line.len > 0) switch (line[0]) {
+            'n' => if (std.mem.startsWith(u8, line, "no changes added to commit") or
+                std.mem.startsWith(u8, line, "nothing to commit") or
+                std.mem.startsWith(u8, line, "nothing added to commit")) continue,
+            'Y' => if (std.mem.startsWith(u8, line, "You have unmerged paths")) continue,
+            'A' => if (std.mem.startsWith(u8, line, "All conflicts fixed")) continue,
+            else => {},
+        };
 
-        // Tab-indented content lines.
-        if (std.mem.startsWith(u8, line, "\t")) {
-            // Flush branch line before first content.
+        // Tab-indented content lines
+        if (line.len > 0 and line[0] == '\t') {
             if (!branch_written) {
                 try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
                 branch_written = true;
             }
 
-            const content = line[1..]; // strip leading tab
-            switch (section) {
-                .staged => try writeStagedEntry(writer, content),
-                .unstaged => try writeUnstagedEntry(writer, content),
-                .untracked => {
-                    try writer.writeAll("? ");
-                    try writer.writeAll(content);
-                    try writer.writeByte('\n');
-                },
-                .unmerged => try writeUnmergedEntry(writer, content),
-                .none => {
-                    // Content outside a known section — pass through.
+            const content = line[1..];
+            const sigil = sigilFor(section, content);
+            const path = pathFor(section, content);
+
+            if (sigil != 0 and path.len > 0) {
+                const dir = parentDir(path);
+                if (dir.len > 0 and run_len > 0 and sigil == run_sigil and
+                    std.mem.eql(u8, dir, run_dir))
+                {
+                    // Extend current run
+                    if (run_len < run_sections.len) {
+                        run_sections[run_len] = section;
+                        run_contents[run_len] = content;
+                        run_len += 1;
+                    }
+                } else {
+                    // Flush previous run, start new one
+                    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+                    run_sections[0] = section;
+                    run_contents[0] = content;
+                    run_len = 1;
+                    run_sigil = sigil;
+                    run_dir = if (dir.len > 0) dir else "";
+                }
+            } else {
+                try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+                run_len = 0;
+                run_sigil = 0;
+                writeSectionEntry(writer, section, content) catch {
                     try writer.writeAll(line);
                     try writer.writeByte('\n');
-                },
+                };
             }
             continue;
         }
 
-        // Any other non-empty line outside a section (e.g. "HEAD detached" body).
-        // If branch not yet written, these are upstream status lines we handle above.
-        // Otherwise pass through unknown lines.
         if (branch_written) {
+            try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+            run_len = 0;
+            run_sigil = 0;
             try writer.writeAll(line);
             try writer.writeByte('\n');
         }
     }
 
-    // If we parsed a branch but found no content (clean repo), still emit branch line.
+    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+
     if (!branch_written and branch_len > 0) {
         try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
+    }
+}
+
+fn sigilFor(section: Section, content: []const u8) u8 {
+    return switch (section) {
+        .staged => if (std.mem.startsWith(u8, content, "new file:")) 'A'
+        else if (std.mem.startsWith(u8, content, "deleted:")) 'D'
+        else if (std.mem.startsWith(u8, content, "renamed:")) 'R'
+        else 'S',
+        .unstaged => if (std.mem.startsWith(u8, content, "deleted:")) 'd' else 'M',
+        .untracked => '?',
+        .unmerged => 'U',
+        .none => 0,
+    };
+}
+
+fn pathFor(section: Section, content: []const u8) []const u8 {
+    return switch (section) {
+        .staged => {
+            if (std.mem.startsWith(u8, content, "modified:   ")) return content["modified:   ".len..];
+            if (std.mem.startsWith(u8, content, "new file:   ")) return content["new file:   ".len..];
+            if (std.mem.startsWith(u8, content, "deleted:    ")) return content["deleted:    ".len..];
+            if (std.mem.startsWith(u8, content, "renamed:    ")) return content["renamed:    ".len..];
+            return content;
+        },
+        .unstaged => {
+            if (std.mem.startsWith(u8, content, "modified:   ")) return content["modified:   ".len..];
+            if (std.mem.startsWith(u8, content, "deleted:    ")) return content["deleted:    ".len..];
+            return content;
+        },
+        .untracked => content,
+        .unmerged => {
+            if (std.mem.startsWith(u8, content, "both modified:   ")) return content["both modified:   ".len..];
+            if (std.mem.startsWith(u8, content, "added by us:    ")) return content["added by us:    ".len..];
+            if (std.mem.startsWith(u8, content, "added by them:  ")) return content["added by them:  ".len..];
+            if (std.mem.startsWith(u8, content, "deleted by us:  ")) return content["deleted by us:  ".len..];
+            if (std.mem.startsWith(u8, content, "deleted by them:")) return std.mem.trimStart(u8, content["deleted by them:".len..], " ");
+            return content;
+        },
+        .none => "",
+    };
+}
+
+fn parentDir(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
+        return path[0 .. idx + 1];
+    }
+    return "";
+}
+
+fn flushRun(writer: *Writer, sections: []const Section, contents: []const []const u8, sigil: u8, dir: []const u8) !void {
+    if (sections.len == 0) return;
+    if (sections.len >= DIR_GROUP_THRESHOLD and dir.len > 0) {
+        // Grouped output: "S src/filters/ ×5"
+        if (sigil == 'U') {
+            try writer.writeAll("UU ");
+        } else {
+            try writer.writeByte(sigil);
+            try writer.writeByte(' ');
+        }
+        try writer.writeAll(dir);
+        try writer.writeAll(" \xc3\x97");
+        try writer.print("{d}\n", .{sections.len});
+    } else {
+        for (sections, contents) |sec, content| {
+            writeSectionEntry(writer, sec, content) catch {};
+        }
+    }
+}
+
+fn writeSectionEntry(writer: *Writer, section: Section, content: []const u8) !void {
+    switch (section) {
+        .staged => try writeStagedEntry(writer, content),
+        .unstaged => try writeUnstagedEntry(writer, content),
+        .untracked => {
+            try writer.writeAll("? ");
+            try writer.writeAll(content);
+            try writer.writeByte('\n');
+        },
+        .unmerged => try writeUnmergedEntry(writer, content),
+        .none => {
+            try writer.writeAll(content);
+            try writer.writeByte('\n');
+        },
     }
 }
 
