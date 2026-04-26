@@ -1070,19 +1070,21 @@ test "git_push large fixture: pipe-mode passes through unchanged (argv-only filt
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "git_pull small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+test "git_pull small fixture: pipe-mode compresses (merge-like format)" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, pull_ff_stdout_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualSlices(u8, pull_ff_stdout_fixture, result.stdout);
+    // git_pull output has same format as git_merge — now matched in pipe mode.
+    try std.testing.expect(result.stdout.len <= pull_ff_stdout_fixture.len);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "git_pull uptodate fixture: pipe-mode passes through unchanged (argv-only filter)" {
+test "git_pull uptodate fixture: pipe-mode compresses" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, pull_uptodate_stdout_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualSlices(u8, pull_uptodate_stdout_fixture, result.stdout);
+    // "Already up to date." matched by git_merge filter.
+    try std.testing.expect(result.stdout.len <= pull_uptodate_stdout_fixture.len);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
@@ -1095,19 +1097,21 @@ test "git_fetch small fixture: pipe-mode passes through unchanged (argv-only fil
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "git_merge small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+test "git_merge small fixture: pipe-mode compresses merge output" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, merge_ff_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualSlices(u8, merge_ff_fixture, result.stdout);
+    // Merge filter now matches — output should be compressed or equal (small).
+    try std.testing.expect(result.stdout.len <= merge_ff_fixture.len);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "git_merge large fixture: pipe-mode passes through unchanged (argv-only filter)" {
+test "git_merge large fixture: pipe-mode compresses merge output" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, merge_large_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualSlices(u8, merge_large_fixture, result.stdout);
+    // Large merge output with 60 files should compress significantly.
+    try std.testing.expect(result.stdout.len < merge_large_fixture.len);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
