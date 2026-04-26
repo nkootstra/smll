@@ -41,7 +41,7 @@ const cat_compact = @import("cat_compact");
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
 // after git_status and before git_show — the branch output shape is distinct from
 // both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
+const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, cargo_test, jest, tsc, go_test, pytest, kubectl_compact, docker_compact, npm_install, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
 
 /// Pipe-mode wrapper for find_compact — detects `find -ls` tabular output.
 const FindCompactPipe = struct {

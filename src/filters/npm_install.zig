@@ -34,7 +34,11 @@ const KEEP_PREFIXES = [_][]const u8{
 pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "added ") != null and
         std.mem.find(u8, input, "packages") != null) return true;
-    if (std.mem.find(u8, input, "up to date") != null) return true;
+    // "up to date" alone is too broad (matches git pull "Already up to date.").
+    // Require npm-specific context: "up to date" + "audited" or "packages".
+    if (std.mem.find(u8, input, "up to date") != null and
+        (std.mem.find(u8, input, "audited") != null or
+        std.mem.find(u8, input, "packages") != null)) return true;
     if (std.mem.find(u8, input, "audited ") != null) return true;
     if (std.mem.find(u8, input, "npm error") != null) return true;
     if (std.mem.find(u8, input, "npm ERR!") != null) return true;

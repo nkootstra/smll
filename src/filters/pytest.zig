@@ -30,7 +30,15 @@ const KEEP_NEEDLES = [_][]const u8{
 
 pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "test session starts") != null) return true;
-    if (std.mem.find(u8, input, "collected ") != null) return true;
+    // "collected N item" — must have digits before "item" to avoid
+    // false positives on pip's "Installing collected packages:".
+    if (std.mem.find(u8, input, "collected ") != null) {
+        var it = std.mem.splitScalar(u8, input, '\n');
+        while (it.next()) |line| {
+            if (std.mem.find(u8, line, "collected ") != null and
+                std.mem.find(u8, line, " item") != null) return true;
+        }
+    }
     // Trailing summary like "====== 1 failed, 4 passed in 0.12s ======"
     if (std.mem.find(u8, input, "passed in ") != null) return true;
     if (std.mem.find(u8, input, "failed in ") != null) return true;
