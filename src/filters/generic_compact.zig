@@ -222,7 +222,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
 }
 
 /// Emit a line, truncating if it exceeds MAX_LINE_LEN bytes.
-const MAX_LINE_LEN: usize = 128;
+const MAX_LINE_LEN: usize = 100;
 
 fn emitTruncated(writer: *Writer, line: []const u8) !void {
     if (line.len > MAX_LINE_LEN) {
