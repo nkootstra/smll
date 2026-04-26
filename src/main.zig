@@ -35,6 +35,7 @@ const npm_install = @import("npm_install");
 const build_compact = @import("build_compact");
 const generic_compact = @import("generic_compact");
 const setup = @import("setup.zig");
+const cat_compact = @import("cat_compact");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
@@ -623,6 +624,21 @@ fn runWrapperInner(
             try writer.writeAll(stdout_slice);
             try stderr_writer.writeAll(stderr_slice);
         }
+        return exit_code;
+    }
+
+    // cat wrapper: compress code output, pass through data files.
+    if (std.mem.eql(u8, cmd_basename, "cat")) {
+        if (!lossless and cat_compact.matches(stdout_slice)) {
+            cat_compact.apply(allocator, stdout_slice, stderr_slice, writer, argv) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return 1;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
+        try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
 

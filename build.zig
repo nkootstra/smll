@@ -410,6 +410,12 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
     });
 
+    const cat_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/cat_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
     cargo_test_mod.addImport("ansi", ansi_mod);
     pytest_mod.addImport("ansi", ansi_mod);
     jest_mod.addImport("ansi", ansi_mod);
@@ -454,6 +460,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("npm_install", npm_install_mod);
     exe_mod.addImport("build_compact", build_compact_mod);
     exe_mod.addImport("generic_compact", generic_compact_mod);
+    exe_mod.addImport("cat_compact", cat_compact_mod);
     exe_mod.addImport("git_status", git_status_mod);
     exe_mod.addImport("git_diff", git_diff_mod);
     exe_mod.addImport("git_log", git_log_mod);
@@ -523,6 +530,7 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("npm_install", npm_install_mod);
     release_mod.addImport("build_compact", build_compact_mod);
     release_mod.addImport("generic_compact", generic_compact_mod);
+    release_mod.addImport("cat_compact", cat_compact_mod);
 
     const release_exe = b.addExecutable(.{
         .name = "smll",
@@ -644,6 +652,9 @@ pub fn build(b: *std.Build) void {
 
     const generic_compact_tests = b.addTest(.{ .root_module = generic_compact_mod });
     const run_generic_compact_tests = b.addRunArtifact(generic_compact_tests);
+
+    const cat_compact_tests = b.addTest(.{ .root_module = cat_compact_mod });
+    const run_cat_compact_tests = b.addRunArtifact(cat_compact_tests);
 
     const ansi_tests = b.addTest(.{ .root_module = ansi_mod });
     const run_ansi_tests = b.addRunArtifact(ansi_tests);
@@ -916,6 +927,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_npm_install_tests.step);
     test_step.dependOn(&run_build_compact_tests.step);
     test_step.dependOn(&run_generic_compact_tests.step);
+    test_step.dependOn(&run_cat_compact_tests.step);
     test_step.dependOn(&run_ansi_tests.step);
     test_step.dependOn(&run_sigil_rle_tests.step);
     test_step.dependOn(&run_validator_tests.step);

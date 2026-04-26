@@ -3,6 +3,7 @@ const std = @import("std");
 const Target = enum {
     claude,
     opencode,
+    cursor,
 };
 
 const Action = enum {
@@ -107,16 +108,17 @@ fn parseActionToken(token: []const u8) ?ParsedActionToken {
 fn parseTarget(s: []const u8) ?Target {
     if (std.mem.eql(u8, s, "claude")) return .claude;
     if (std.mem.eql(u8, s, "opencode")) return .opencode;
+    if (std.mem.eql(u8, s, "cursor")) return .cursor;
     return null;
 }
 
 fn printUsage(stderr: *std.Io.Writer) !void {
     try stderr.writeAll(
         \\Usage:
-        \\  smll --setup <claude|opencode> [--dry-run]
-        \\  smll --setup=<claude|opencode> [--dry-run]
-        \\  smll --unsetup <claude|opencode> [--dry-run]
-        \\  smll --unsetup=<claude|opencode> [--dry-run]
+        \\  smll --setup <claude|opencode|cursor> [--dry-run]
+        \\  smll --setup=<claude|opencode|cursor> [--dry-run]
+        \\  smll --unsetup <claude|opencode|cursor> [--dry-run]
+        \\  smll --unsetup=<claude|opencode|cursor> [--dry-run]
         \\
     );
 }
@@ -133,10 +135,12 @@ fn runAction(
         .setup => switch (opts.target) {
             .claude => try setupClaude(allocator, io, home, opts.dry_run, stdout, stderr),
             .opencode => try setupOpencode(allocator, io, home, opts.dry_run, stdout, stderr),
+            .cursor => try setupCursor(allocator, io, home, opts.dry_run, stdout, stderr),
         },
         .unsetup => switch (opts.target) {
             .claude => try unsetupClaude(allocator, io, home, opts.dry_run, stdout, stderr),
             .opencode => try unsetupOpencode(allocator, io, home, opts.dry_run, stdout, stderr),
+            .cursor => try unsetupCursor(allocator, io, home, opts.dry_run, stdout, stderr),
         },
     };
 }
@@ -379,6 +383,233 @@ fn unsetupOpencode(
     return 0;
 }
 
+fn setupCursor(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    home: []const u8,
+    dry_run: bool,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+) !u8 {
+    const hooks_json_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks.json", .{home});
+    defer allocator.free(hooks_json_path);
+
+    const hook_script_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks/smll-pretooluse.sh", .{home});
+    defer allocator.free(hook_script_path);
+
+    const hook_command = try std.fmt.allocPrint(allocator, "bash {s}", .{hook_script_path});
+    defer allocator.free(hook_command);
+
+    const existing = try readFileOptional(allocator, io, hooks_json_path);
+    defer if (existing) |buf| allocator.free(buf);
+
+    if (existing) |buf| {
+        if (containsRtkIntegration(buf)) {
+            try stderr.writeAll("smll setup (cursor): detected existing RTK integration in ~/.cursor/hooks.json\n");
+            try stderr.writeAll("Please remove RTK hooks first, then run smll --setup cursor again.\n");
+            return 1;
+        }
+    }
+
+    var hooks_json = loadOrCreateCursorHooksJson(allocator, existing) catch {
+        try stderr.writeAll("smll setup (cursor): hooks.json is not valid JSON\n");
+        return 1;
+    };
+    defer hooks_json.deinit();
+
+    const pa = hooks_json.arena.allocator();
+    const already_installed = try ensureCursorPreToolHook(pa, &hooks_json.value, hook_command);
+
+    if (!already_installed) {
+        try writeBackupIfExists(allocator, io, hooks_json_path, dry_run);
+        try writeJsonValueToPath(allocator, io, hooks_json_path, hooks_json.value, dry_run, stdout);
+    } else {
+        try stdout.writeAll("cursor hooks.json already contains smll hook\n");
+    }
+
+    const hook_script = buildCursorHookScript();
+    const existing_hook = try readFileOptional(allocator, io, hook_script_path);
+    defer if (existing_hook) |buf| allocator.free(buf);
+
+    const hook_same = if (existing_hook) |buf| std.mem.eql(u8, buf, hook_script) else false;
+    if (!hook_same) {
+        try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
+        if (dry_run) {
+            try stdout.print("[dry-run] would write {s}\n", .{hook_script_path});
+        } else {
+            try writeFileEnsuringParent(io, hook_script_path, hook_script);
+            try stdout.print("wrote {s}\n", .{hook_script_path});
+        }
+    } else {
+        try stdout.writeAll("cursor hook script already up to date\n");
+    }
+
+    if (!dry_run) try stdout.writeAll("done: cursor setup installed\n");
+    return 0;
+}
+
+fn unsetupCursor(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    home: []const u8,
+    dry_run: bool,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+) !u8 {
+    const hooks_json_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks.json", .{home});
+    defer allocator.free(hooks_json_path);
+
+    const hook_script_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks/smll-pretooluse.sh", .{home});
+    defer allocator.free(hook_script_path);
+
+    const hook_command = try std.fmt.allocPrint(allocator, "bash {s}", .{hook_script_path});
+    defer allocator.free(hook_command);
+
+    var changed = false;
+    const existing = try readFileOptional(allocator, io, hooks_json_path);
+    defer if (existing) |buf| allocator.free(buf);
+
+    if (existing) |_| {
+        var hooks_json = loadOrCreateCursorHooksJson(allocator, existing) catch {
+            try stderr.writeAll("smll unsetup (cursor): hooks.json is not valid JSON\n");
+            return 1;
+        };
+        defer hooks_json.deinit();
+
+        changed = try removeCursorPreToolHook(&hooks_json.value, hook_command);
+        if (changed) {
+            try writeBackupIfExists(allocator, io, hooks_json_path, dry_run);
+            try writeJsonValueToPath(allocator, io, hooks_json_path, hooks_json.value, dry_run, stdout);
+        } else {
+            try stdout.writeAll("cursor hooks.json: no smll hook entry found\n");
+        }
+    } else {
+        try stdout.writeAll("cursor hooks.json: file not found, nothing to remove\n");
+    }
+
+    const existing_hook = try readFileOptional(allocator, io, hook_script_path);
+    defer if (existing_hook) |buf| allocator.free(buf);
+    if (existing_hook != null) {
+        try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
+        if (dry_run) {
+            try stdout.print("[dry-run] would delete {s}\n", .{hook_script_path});
+        } else {
+            try deleteFileIfExists(io, hook_script_path);
+            try stdout.print("deleted {s}\n", .{hook_script_path});
+        }
+    } else {
+        try stdout.writeAll("cursor hook script: not found\n");
+    }
+
+    if (!dry_run) try stdout.writeAll("done: cursor unsetup complete\n");
+    return 0;
+}
+
+fn loadOrCreateCursorHooksJson(
+    allocator: std.mem.Allocator,
+    existing: ?[]const u8,
+) !std.json.Parsed(std.json.Value) {
+    if (existing) |buf| {
+        if (std.mem.trim(u8, buf, " \t\r\n").len == 0) {
+            return try std.json.parseFromSlice(std.json.Value, allocator, "{\"version\":1}", .{});
+        }
+        return try std.json.parseFromSlice(std.json.Value, allocator, buf, .{});
+    }
+    return try std.json.parseFromSlice(std.json.Value, allocator, "{\"version\":1}", .{});
+}
+
+fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_command: []const u8) !bool {
+    if (root.* != .object) return SetupError.InvalidSettingsJson;
+    const root_obj = &root.object;
+
+    // Ensure version field
+    if (!root_obj.contains("version")) {
+        try root_obj.put(pa, "version", .{ .integer = 1 });
+    }
+
+    const hooks_val = try ensureObjectField(pa, root_obj, "hooks");
+    if (hooks_val.* != .object) return SetupError.InvalidSettingsJson;
+    const hooks_obj = &hooks_val.object;
+
+    const pre_tool_use_val = try ensureArrayField(pa, hooks_obj, "preToolUse");
+    if (pre_tool_use_val.* != .array) return SetupError.InvalidSettingsJson;
+
+    // Check if already installed
+    for (pre_tool_use_val.array.items) |entry| {
+        if (entry != .object) continue;
+        const cmd = entry.object.get("command") orelse continue;
+        if (cmd != .string) continue;
+        if (std.mem.eql(u8, cmd.string, hook_command)) return true;
+    }
+
+    // Add new entry: { "command": "bash ~/.cursor/hooks/smll-pretooluse.sh", "matcher": "Shell" }
+    var entry_obj: std.json.ObjectMap = .empty;
+    try entry_obj.put(pa, "command", .{ .string = try pa.dupe(u8, hook_command) });
+    try entry_obj.put(pa, "matcher", .{ .string = try pa.dupe(u8, "Shell") });
+    try pre_tool_use_val.array.append(.{ .object = entry_obj });
+    return false;
+}
+
+fn removeCursorPreToolHook(root: *std.json.Value, hook_command: []const u8) !bool {
+    if (root.* != .object) return SetupError.InvalidSettingsJson;
+    const hooks_val = root.object.getPtr("hooks") orelse return false;
+    if (hooks_val.* != .object) return SetupError.InvalidSettingsJson;
+    const pre_val = hooks_val.object.getPtr("preToolUse") orelse return false;
+    if (pre_val.* != .array) return SetupError.InvalidSettingsJson;
+
+    var removed = false;
+    var i: usize = 0;
+    while (i < pre_val.array.items.len) {
+        const entry = pre_val.array.items[i];
+        if (entry != .object) { i += 1; continue; }
+        const cmd = entry.object.get("command") orelse { i += 1; continue; };
+        if (cmd != .string) { i += 1; continue; }
+        if (std.mem.eql(u8, cmd.string, hook_command)) {
+            _ = pre_val.array.swapRemove(i);
+            removed = true;
+            continue;
+        }
+        i += 1;
+    }
+    return removed;
+}
+
+fn buildCursorHookScript() []const u8 {
+    // Cursor's preToolUse hook receives JSON on stdin identical to Claude's format.
+    // Same script logic: block noisy commands unless prefixed with smll.
+    return
+    \\#!/usr/bin/env bash
+    \\set -euo pipefail
+    \\
+    \\if ! command -v jq >/dev/null 2>&1; then
+    \\  exit 0
+    \\fi
+    \\
+    \\payload="$(cat)"
+    \\cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
+    \\if [[ -z "$cmd" ]]; then
+    \\  exit 0
+    \\fi
+    \\
+    \\if [[ "$cmd" =~ ^[[:space:]]*smll([[:space:]]|$) ]]; then
+    \\  exit 0
+    \\fi
+    \\
+    \\trimmed="${cmd#"${cmd%%[![:space:]]*}"}"
+    \\first="${trimmed%%[[:space:]]*}"
+    \\
+    \\case "$first" in
+    \\  git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)
+    \\    printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$cmd"
+    \\    exit 0
+    \\    ;;
+    \\  *)
+    \\    exit 0
+    \\    ;;
+    \\esac
+    ;
+}
+
 fn loadOrCreateJsonObject(
     allocator: std.mem.Allocator,
     existing: ?[]const u8,
@@ -592,7 +823,7 @@ fn buildClaudeHookScript() []const u8 {
     \\first="${trimmed%%[[:space:]]*}"
     \\
     \\case "$first" in
-    \\  git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun)
+    \\  git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)
     \\    echo "smll hook: wrap noisy command with smll (example: smll $cmd)" >&2
     \\    exit 2
     \\    ;;
@@ -607,7 +838,7 @@ fn buildOpencodePluginScript() []const u8 {
     return
     \\const WRAPPED = new Set([
     \\  "git", "rg", "tree", "find", "docker", "kubectl", "gh", "ps", "ls", "du", "curl",
-    \\  "make", "cargo", "pytest", "jest", "vitest", "go", "tsc", "npm", "pnpm", "yarn", "bun",
+    \\  "make", "cargo", "pytest", "jest", "vitest", "go", "tsc", "npm", "pnpm", "yarn", "bun", "cat",
     \\]);
     \\
     \\export const SmllProxyPlugin = async () => {
