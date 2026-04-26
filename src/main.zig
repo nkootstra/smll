@@ -219,7 +219,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Record stats (best-effort, never fails the command).
     if (home.len > 0) {
-        stats.record(allocator, io, home, result.input_bytes, result.output_bytes);
+        stats.record(allocator, io, home, argv_buf[0..argv_count], result.input_bytes, result.output_bytes);
     }
 
     if (result.exit_code != 0) std.process.exit(result.exit_code);
