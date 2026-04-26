@@ -54,12 +54,13 @@ const FindCompactPipe = struct {
 };
 
 /// Pipe-mode wrapper for du_compact — detects `du` size+path output.
+/// Uses sort_desc=true in pipe mode to get top-N + prefix compression.
 const DuCompactPipe = struct {
     pub fn matches(input: []const u8) bool {
         return du_compact.matches(input);
     }
     pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
-        return du_compact.apply(allocator, input, stderr, writer, false);
+        return du_compact.apply(allocator, input, stderr, writer, true);
     }
 };
 
