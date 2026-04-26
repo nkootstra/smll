@@ -83,24 +83,42 @@ fn hasFailureMarker(s: []const u8) bool {
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 60;
+    const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+    // Sticky context: after a FAILED/ERROR line, keep subsequent lines
+    // (tracebacks, assertions, file paths) until we hit a blank line or
+    // a non-indented non-error line.
+    var in_error_context = false;
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len == 0) continue;
-        if (!shouldKeep(trimmed)) continue;
-        // Strip === padding from banner lines
-        const stripped = std.mem.trim(u8, trimmed, "= ");
-        if (stripped.len > 0) {
-            try out.appendSlice(allocator, stripped);
-        } else {
-            try out.appendSlice(allocator, trimmed);
+        if (trimmed.len == 0) {
+            if (in_error_context) {
+                in_error_context = false;
+            }
+            continue;
         }
-        try out.append(allocator, '\n');
-        kept.* += 1;
+        if (shouldKeep(trimmed)) {
+            in_error_context = true;
+            const stripped = std.mem.trim(u8, trimmed, "= ");
+            if (stripped.len > 0) {
+                try out.appendSlice(allocator, stripped);
+            } else {
+                try out.appendSlice(allocator, trimmed);
+            }
+            try out.append(allocator, '\n');
+            kept.* += 1;
+            continue;
+        }
+        // Keep traceback context: indented lines, file paths, assertion details.
+        if (in_error_context) {
+            try out.appendSlice(allocator, trimmed);
+            try out.append(allocator, '\n');
+            kept.* += 1;
+            continue;
+        }
     }
 }
 

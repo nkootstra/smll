@@ -86,25 +86,42 @@ fn hasFailureMarker(s: []const u8) bool {
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 80;
+    const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+    // Sticky context: after a FAIL/error line, keep subsequent lines
+    // (stack traces, expect/received, diffs) until blank or PASS line.
+    var in_error_context = false;
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len == 0) continue;
+        if (trimmed.len == 0) {
+            in_error_context = false;
+            continue;
+        }
         // Explicit drops (PASS-only noise).
-        if (std.mem.startsWith(u8, trimmed, "PASS ")) continue;
-        if (std.mem.startsWith(u8, trimmed, "PASS\t")) continue;
-        if (std.mem.startsWith(u8, trimmed, "✓ ")) continue;
+        if (std.mem.startsWith(u8, trimmed, "PASS ")) { in_error_context = false; continue; }
+        if (std.mem.startsWith(u8, trimmed, "PASS\t")) { in_error_context = false; continue; }
+        if (std.mem.startsWith(u8, trimmed, "\xe2\x9c\x93 ")) continue;
         if (std.mem.startsWith(u8, trimmed, "Snapshots:")) continue;
         if (std.mem.startsWith(u8, trimmed, "Time:")) continue;
         if (std.mem.startsWith(u8, trimmed, "Ran all")) continue;
-        if (!shouldKeep(trimmed)) continue;
-        try out.appendSlice(allocator, trimmed);
-        try out.append(allocator, '\n');
-        kept.* += 1;
+        if (shouldKeep(trimmed)) {
+            in_error_context = true;
+            try out.appendSlice(allocator, trimmed);
+            try out.append(allocator, '\n');
+            kept.* += 1;
+            continue;
+        }
+        // Keep context lines after failure: stack traces, expect/received,
+        // diff output, file paths.
+        if (in_error_context) {
+            try out.appendSlice(allocator, trimmed);
+            try out.append(allocator, '\n');
+            kept.* += 1;
+            continue;
+        }
     }
 }
 

@@ -93,7 +93,7 @@ fn isFuzzLine(line: []const u8) bool {
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize, has_bench_or_fuzz: *bool) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 80;
+    const head_cap: usize = 200;
     var pending: std.ArrayList(u8) = .empty;
     defer pending.deinit(allocator);
     var strip_buf: std.ArrayList(u8) = .empty;

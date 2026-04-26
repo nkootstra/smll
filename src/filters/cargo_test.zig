@@ -57,24 +57,66 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 80;
+    const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+    // "sticky" mode: after an error/warning line, keep subsequent context
+    // lines (file location, code snippet, pointer, help notes) until we
+    // hit a blank line or a non-context line.
+    var in_error_context = false;
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len == 0) continue;
-        if (!shouldKeep(trimmed)) continue;
+        if (trimmed.len == 0) {
+            in_error_context = false;
+            continue;
+        }
 
-        if (std.mem.startsWith(u8, trimmed, "test result:")) {
-            try writeCompactResult(allocator, trimmed, out);
-        } else {
+        if (shouldKeep(trimmed)) {
+            // Start sticky context for error/warning lines.
+            in_error_context = std.mem.startsWith(u8, trimmed, "error") or
+                std.mem.startsWith(u8, trimmed, "warning");
+
+            if (std.mem.startsWith(u8, trimmed, "test result:")) {
+                try writeCompactResult(allocator, trimmed, out);
+            } else {
+                try out.appendSlice(allocator, trimmed);
+                try out.append(allocator, '\n');
+            }
+            kept.* += 1;
+            continue;
+        }
+
+        // Keep context lines after error/warning: file locations (-->),
+        // code lines with line numbers, pointer lines (^^^), help (=),
+        // and pipe-prefixed context lines (|).
+        if (in_error_context and isErrorContext(trimmed)) {
             try out.appendSlice(allocator, trimmed);
             try out.append(allocator, '\n');
+            kept.* += 1;
+            continue;
         }
-        kept.* += 1;
+
+        in_error_context = false;
     }
+}
+
+/// Lines that are part of a compiler error/warning context block.
+fn isErrorContext(line: []const u8) bool {
+    if (line.len == 0) return false;
+    // "--> src/file.rs:42:5" — file location
+    if (std.mem.startsWith(u8, line, "-->")) return true;
+    // "= help: ..." or "= note: ..." — compiler hints
+    if (std.mem.startsWith(u8, line, "= ")) return true;
+    // Lines starting with a digit (line numbers like "42 | ...") or pipe
+    if (std.ascii.isDigit(line[0])) return true;
+    if (line[0] == '|') return true;
+    // "^^^" pointer lines, "---" underlines
+    if (line[0] == '^' or line[0] == '-') return true;
+    // "For more information about this error..." help line
+    if (std.mem.startsWith(u8, line, "For more info")) return true;
+    return false;
 }
 
 fn writeCompactResult(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !void {
