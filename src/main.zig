@@ -230,8 +230,13 @@ fn runWrapper(
     const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
     const output = capture.written();
 
-    // Write captured output to real stdout.
-    try writer.writeAll(output);
+    // When both stdout and stderr are empty, emit a short hint so agents
+    // always receive something back and don't loop retrying the command.
+    if (output.len == 0 and last_stderr_bytes == 0) {
+        try writer.writeAll("(no output)\n");
+    } else {
+        try writer.writeAll(output);
+    }
 
     // Input bytes = captured child stdout (before filtering). We approximate
     // with the output bytes when the filter expands (rare) or report what we
@@ -247,6 +252,7 @@ fn runWrapper(
 
 /// Set by runWrapperInner to communicate input bytes to runWrapper.
 var last_input_bytes: usize = 0;
+var last_stderr_bytes: usize = 0;
 
 fn runWrapperInner(
     allocator: std.mem.Allocator,
@@ -317,6 +323,9 @@ fn runWrapperInner(
         },
         else => return err,
     };
+
+    // Record stderr size for empty-output detection.
+    last_stderr_bytes = stderr_slice.len;
 
     const term = try child.wait(io);
     const exit_code: u8 = switch (term) {
@@ -672,11 +681,20 @@ fn runWrapperInner(
     const has_stat_or_name_flags = hasStatOrNameFlags(git_argv);
     if (std.meta.stringToEnum(KnownSubcommand, subcmd_str)) |subcmd| switch (subcmd) {
         .status => {
-            git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            // --short / -s produce already-compact porcelain output.
+            // Pass through raw — the long-form filter can't parse it.
+            if (hasArg(git_argv, "--short") or hasArg(git_argv, "-s") or
+                hasArg(git_argv, "--porcelain") or hasArg(git_argv, "-z"))
+            {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
-                return 1;
-            };
+            } else {
+                git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                    try stderr_writer.writeAll(stderr_slice);
+                    return 1;
+                };
+            }
         },
         .diff => {
             // --stat / --shortstat / --name-only / --name-status / --summary
