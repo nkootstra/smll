@@ -41,7 +41,19 @@ const cat_compact = @import("cat_compact");
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
 // after git_status and before git_show — the branch output shape is distinct from
 // both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit };
+const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, GenericCompactPipe };
+
+/// Pipe-mode wrapper for generic_compact — adapts its 3-arg apply() to the
+/// 4-arg signature expected by the pipe-mode filter dispatch.
+const GenericCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return generic_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        _ = stderr;
+        return generic_compact.apply(allocator, input, writer);
+    }
+};
 
 /// Pipe-mode wrapper that uses git_log.applyCompact instead of apply.
 /// This matches the v0.6 "lossy by default" posture for pipe mode.

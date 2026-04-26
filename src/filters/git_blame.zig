@@ -27,7 +27,28 @@ const util = @import("util");
 // matches() = false: pipe-mode blame input is rare and its shape (40-char hex prefix)
 // is ambiguous with other log output after SHA truncation. Argv-only dispatch is reliable.
 
-pub fn matches(input: []const u8) bool { _ = input; return false; }
+pub fn matches(input: []const u8) bool {
+    if (input.len < 60) return false;
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var checked: usize = 0;
+    var matched: usize = 0;
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (checked >= 5) break;
+        checked += 1;
+        // Blame line: [^]<hex-sha> (<author> ...
+        // Skip optional '^' boundary marker
+        var pos: usize = 0;
+        if (pos < line.len and line[pos] == '^') pos += 1;
+        var hex_end = pos;
+        while (hex_end < line.len and std.ascii.isHex(line[hex_end])) hex_end += 1;
+        if (hex_end - pos < 7) continue;
+        // After hex SHA, expect " (" or whitespace then "("
+        const rest = std.mem.trimStart(u8, line[hex_end..], " ");
+        if (rest.len > 0 and rest[0] == '(') matched += 1;
+    }
+    return checked >= 2 and matched * 2 >= checked;
+}
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
     _ = stderr;
@@ -255,15 +276,14 @@ fn str(allocator: Allocator, so: []const u8, se: []const u8) ![]u8 {
     return allocator.dupe(u8, out.written());
 }
 
-test "matches: always false" {
+test "matches: rejects non-blame input" {
     try std.testing.expect(!matches(""));
-    try std.testing.expect(!matches(fixture_simple));
-    try std.testing.expect(!matches("abc1234def567890abc1234def567890abc1234de (Author 2026-01-01 00:00:00 +0000 1) code\n"));
+    try std.testing.expect(!matches("plain text\nno blame here\n"));
 }
 
-test "pipe-mode safety" {
-    try std.testing.expect(!matches(fixture_simple));
-    try std.testing.expect(!matches(fixture_large));
+test "pipe-mode matches blame output" {
+    try std.testing.expect(matches(fixture_simple));
+    try std.testing.expect(matches(fixture_large));
 }
 
 test "empty" {

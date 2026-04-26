@@ -1150,19 +1150,25 @@ test "git_stash list fixture: pipe-mode passes through unchanged (argv-only filt
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "git_blame small fixture: pipe-mode passes through unchanged (argv-only filter)" {
+test "git_blame small fixture: pipe-mode compresses blame output" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, blame_simple_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualSlices(u8, blame_simple_fixture, result.stdout);
+    // Blame filter now matches in pipe mode and compresses output.
+    try std.testing.expect(result.stdout.len < blame_simple_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "b ") != null);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-test "git_blame large fixture: pipe-mode passes through unchanged (argv-only filter)" {
+test "git_blame large fixture: pipe-mode compresses blame output" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, blame_large_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualSlices(u8, blame_large_fixture, result.stdout);
+    // Blame filter now matches in pipe mode and compresses output.
+    // Output should be smaller than input.
+    try std.testing.expect(result.stdout.len < blame_large_fixture.len);
+    // Should contain the compact blame format markers ("b " prefix lines).
+    try std.testing.expect(std.mem.find(u8, result.stdout, "b ") != null);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 

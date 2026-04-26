@@ -21,7 +21,17 @@ const Writer = std.Io.Writer;
 pub const THRESHOLD_BYTES: usize = 16 * 1024;
 
 pub fn matches(input: []const u8) bool {
-    return input.len > THRESHOLD_BYTES;
+    if (input.len <= THRESHOLD_BYTES) return false;
+    // Reject binary data: check first 512 bytes for NUL or high-density non-ASCII.
+    const sample = input[0..@min(input.len, 512)];
+    var non_text: usize = 0;
+    for (sample) |c| {
+        if (c == 0) return false; // NUL byte → binary
+        if (c < 0x20 and c != '\n' and c != '\r' and c != '\t' and c != 0x1b) non_text += 1;
+    }
+    // >10% control chars → likely binary
+    if (non_text * 10 > sample.len) return false;
+    return true;
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
