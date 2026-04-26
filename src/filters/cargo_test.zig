@@ -284,3 +284,17 @@ test "apply: mixed unit tests + benchmarks" {
     // Passing unit test line dropped.
     try std.testing.expect(std.mem.find(u8, got, "tests::add   ... ok") == null);
 }
+
+test "apply: compiler error with ANSI preserves context" {
+    const input = "\x1b[0m\x1b[1m\x1b[38;5;9merror[E0308]\x1b[0m\x1b[1m: type mismatch\x1b[0m\n\x1b[0m  \x1b[1m\x1b[38;5;12m--> \x1b[0msrc/stream.rs:42:5\x1b[0m\n\x1b[0m   \x1b[1m\x1b[38;5;12m|\x1b[0m\n\x1b[0m\x1b[1m\x1b[38;5;12m42\x1b[0m \x1b[1m\x1b[38;5;12m|\x1b[0m     let x: u32 = \"hello\";\x1b[0m\n\x1b[0m   \x1b[1m\x1b[38;5;12m|\x1b[0m \x1b[1m\x1b[38;5;9m                  ^^^^^^^\x1b[0m expected u32\n\ntest result: FAILED. 0 passed; 1 failed\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, "", input, &out.writer);
+    const result = out.written();
+    // Must contain file location
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/stream.rs:42:5") != null);
+    // Must contain the code line  
+    try std.testing.expect(std.mem.indexOf(u8, result, "let x: u32") != null);
+    // Must contain the pointer
+    try std.testing.expect(std.mem.indexOf(u8, result, "^^^^^^^") != null);
+}
