@@ -41,7 +41,7 @@ const cat_compact = @import("cat_compact");
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
 // after git_status and before git_show — the branch output shape is distinct from
 // both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, FindCompactPipe, DuCompactPipe, GenericCompactPipe };
+const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
 
 /// Pipe-mode wrapper for find_compact — detects `find -ls` tabular output.
 const FindCompactPipe = struct {
@@ -60,6 +60,22 @@ const DuCompactPipe = struct {
     }
     pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
         return du_compact.apply(allocator, input, stderr, writer, false);
+    }
+};
+
+/// Pipe-mode wrapper for curl_compact — detects curl -v/vvv stderr output
+/// (lines starting with *, >, <). In pipe mode the verbose output comes as
+/// stdin, so we pass it as stderr to the filter.
+const CurlCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return curl_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        _ = stderr;
+        // In pipe mode, the curl -v output arrives as stdin (our `input`).
+        // curl_compact expects stdout (body) + stderr (verbose output).
+        // Pass empty stdout and the input as stderr.
+        return curl_compact.apply(allocator, "", input, writer);
     }
 };
 
