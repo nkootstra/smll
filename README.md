@@ -57,8 +57,10 @@ smll can install or remove safe defaults for popular agent CLIs:
 ```sh
 smll --setup claude
 smll --setup opencode
+smll --setup cursor
 smll --unsetup claude
 smll --unsetup opencode
+smll --unsetup cursor
 ```
 
 Use `--dry-run` to preview writes/deletes:
@@ -75,6 +77,9 @@ What setup does:
 - `opencode`: writes `~/.config/opencode/plugins/smll-proxy.js` and enables it
   in `~/.config/opencode/opencode.json`; the plugin rewrites matching Bash
   commands to `smll <command>`.
+- `cursor`: writes `~/.cursor/hooks.json` with a `preToolUse` hook and
+  `~/.cursor/hooks/smll-pretooluse.sh`; blocks noisy Shell commands unless
+  prefixed with `smll`.
 
 Safety behavior:
 - Existing files are backed up as `*.bak.smll` before changes.
@@ -114,6 +119,7 @@ and the wrapped command runs normally. Pipe mode (stdin) does not record stats.
 
 | Category | Commands | Default behavior |
 |---|---|---|
+| file read | `cat` | keep imports, signatures, types; elide function bodies |
 | git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | noise strip |
 | search / listing | `rg`, `tree` | noise strip |
 | filesystem walk | `find` / `find -ls` | strip metadata columns; collapse ≥3 paths/parent to count |
