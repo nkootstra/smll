@@ -53,17 +53,26 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
     var raw_lines = std.mem.splitScalar(u8, stdout, '\n');
     while (raw_lines.next()) |raw| {
         const clean = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
-        const line = std.mem.trimEnd(u8, clean, " \t\r");
-        if (line.len == 0) {
+        const trimmed = std.mem.trimEnd(u8, clean, " \t\r");
+        if (trimmed.len == 0) {
             try clean_lines.append(allocator, "");
+            continue;
+        }
+        // Interior whitespace collapse: 2+ spaces/tabs → single space,
+        // preserving leading indent (important for code/yaml/errors).
+        const line = try collapseInteriorWs(allocator, trimmed);
+        if (line.ptr != trimmed.ptr) {
+            try owned_strs.append(allocator, line);
         } else if (@intFromPtr(line.ptr) >= @intFromPtr(stdout.ptr) and (@intFromPtr(line.ptr) + line.len) <= (@intFromPtr(stdout.ptr) + stdout.len)) {
-            // Zero-copy: line is a slice into the original input (no ANSI was stripped)
-            try clean_lines.append(allocator, line);
+            // Zero-copy: unchanged slice into original input
         } else {
+            // From strip_buf — need to own it
             const owned = try allocator.dupe(u8, line);
             try owned_strs.append(allocator, owned);
             try clean_lines.append(allocator, owned);
+            continue;
         }
+        try clean_lines.append(allocator, line);
     }
 
     // Phase 2: Consecutive RLE with timestamp-aware comparison + global
@@ -265,6 +274,44 @@ fn linePrefix(line: []const u8) []const u8 {
 ///   HH:MM:SS prefix: "12:00:00 ..."
 /// Returns a slice into `line` starting after the timestamp + separator.
 /// If no timestamp is detected, returns the full line.
+/// Collapse interior whitespace runs (2+ spaces/tabs) to a single space.
+/// Preserves leading indent verbatim. Returns the original slice when no
+/// collapse is needed (zero-copy fast path).
+fn collapseInteriorWs(allocator: Allocator, line: []const u8) ![]u8 {
+    // Skip leading indent
+    var lead: usize = 0;
+    while (lead < line.len and (line[lead] == ' ' or line[lead] == '\t')) lead += 1;
+    // Scan for any interior multi-space run
+    var has_run = false;
+    var i = lead;
+    while (i < line.len) : (i += 1) {
+        if ((line[i] == ' ' or line[i] == '\t') and i + 1 < line.len and (line[i + 1] == ' ' or line[i + 1] == '\t')) {
+            has_run = true;
+            break;
+        }
+    }
+    if (!has_run) return @constCast(line);
+    // Build collapsed copy
+    var out = try allocator.alloc(u8, line.len);
+    @memcpy(out[0..lead], line[0..lead]);
+    var o = lead;
+    i = lead;
+    while (i < line.len) {
+        if (line[i] == ' ' or line[i] == '\t') {
+            out[o] = ' ';
+            o += 1;
+            while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
+        } else {
+            out[o] = line[i];
+            o += 1;
+            i += 1;
+        }
+    }
+    // Shrink to actual size
+    const result = allocator.realloc(out, o) catch out[0..o];
+    return result;
+}
+
 fn stripTimestamp(line: []const u8) []const u8 {
     // Quick check: line must start with a digit, '[', or uppercase letter
     if (line.len < 8) return line;
