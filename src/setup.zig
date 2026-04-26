@@ -218,17 +218,27 @@ fn setupOpencode(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    _ = stderr;
     const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy", .{home});
     defer allocator.free(plugin_dir);
     const index_path = try std.fmt.allocPrint(allocator, "{s}/index.ts", .{plugin_dir});
     defer allocator.free(index_path);
     const pkg_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{plugin_dir});
     defer allocator.free(pkg_path);
+    const config_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
+    defer allocator.free(config_path);
 
-    // OpenCode plugins must be npm packages with a package.json.
-    // Write the package structure, then tell the user to run
-    // `opencode plugin <path> -g` to register it.
+    // Check for RTK conflict.
+    const existing_config = try readFileOptional(allocator, io, config_path);
+    defer if (existing_config) |buf| allocator.free(buf);
+    if (existing_config) |buf| {
+        if (containsRtkIntegration(buf)) {
+            try stderr.writeAll("smll setup (opencode): detected existing RTK integration in opencode.json\n");
+            try stderr.writeAll("Please remove RTK plugin first, then run smll --setup opencode again.\n");
+            return 1;
+        }
+    }
+
+    // Write plugin package (index.ts + package.json).
     const plugin_script = buildOpencodePluginScript();
     const pkg_json = "{\"name\":\"smll-proxy\",\"version\":\"1.0.0\",\"type\":\"module\",\"main\":\"index.ts\"}\n";
 
@@ -251,12 +261,24 @@ fn setupOpencode(
         try stdout.writeAll("opencode plugin already up to date\n");
     }
 
-    if (!dry_run) {
-        try stdout.writeAll("done: opencode plugin written\n");
-        try stdout.writeAll("run: opencode plugin ");
-        try stdout.writeAll(plugin_dir);
-        try stdout.writeAll(" -g\n");
+    // Register plugin in opencode.json plugin array.
+    var config_json = loadOrCreateJsonObject(allocator, existing_config) catch {
+        try stderr.writeAll("smll setup (opencode): opencode.json is not valid JSON\n");
+        return 1;
+    };
+    defer config_json.deinit();
+
+    const pa = config_json.arena.allocator();
+    const already_registered = try ensureOpencodePluginEnabled(pa, &config_json.value, plugin_dir);
+
+    if (!already_registered) {
+        try writeBackupIfExists(allocator, io, config_path, dry_run);
+        try writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
+    } else {
+        try stdout.writeAll("opencode config already has smll plugin\n");
     }
+
+    if (!dry_run) try stdout.writeAll("done: opencode setup installed\n");
     return 0;
 }
 
