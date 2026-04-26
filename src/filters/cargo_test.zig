@@ -298,3 +298,18 @@ test "apply: compiler error with ANSI preserves context" {
     // Must contain the pointer
     try std.testing.expect(std.mem.indexOf(u8, result, "^^^^^^^") != null);
 }
+
+test "apply: stderr compiler error + stdout test results" {
+    // Simulates real cargo test: compiler error on stderr, test results on stdout.
+    // This is the actual case that was failing.
+    const stderr_input = "\x1b[0m\x1b[1m\x1b[38;5;9merror[E0308]\x1b[0m\x1b[0m\x1b[1m: type mismatch\x1b[0m\n\x1b[0m  \x1b[0m\x1b[0m\x1b[1m\x1b[38;5;12m--> \x1b[0m\x1b[0msrc/stream.rs:42:5\x1b[0m\n\x1b[0m   \x1b[0m\x1b[0m\x1b[1m\x1b[38;5;12m|\x1b[0m\n\x1b[0m\x1b[1m\x1b[38;5;12m42\x1b[0m \x1b[0m\x1b[0m\x1b[1m\x1b[38;5;12m| \x1b[0m\x1b[0m    let x: u32 = \"hello\";\x1b[0m\n\x1b[0m   \x1b[0m\x1b[0m\x1b[1m\x1b[38;5;12m|\x1b[0m \x1b[0m\x1b[0m\x1b[1m\x1b[38;5;9m                  ^^^^^^^ expected `u32`, found `&str`\x1b[0m\n";
+    const stdout_input = "running 1691 tests\ntest core::tests::test_a ... ok\ntest result: ok. 1691 passed; 0 failed; finished in 0.90s\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, stdout_input, stderr_input, &out.writer);
+    const result = out.written();
+    // Must contain file location from stderr
+    try std.testing.expect(std.mem.indexOf(u8, result, "src/stream.rs:42:5") != null);
+    // Must contain the pointer
+    try std.testing.expect(std.mem.indexOf(u8, result, "^^^^^^^") != null);
+}
