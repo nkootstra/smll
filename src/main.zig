@@ -93,6 +93,54 @@ fn hasStatOrNameFlags(argv: []const []const u8) bool {
         hasArg(argv, "--compact-summary");
 }
 
+/// Detect streaming/interactive commands that produce continuous output
+/// and must not be buffered. Returns true for watch modes, follow flags,
+/// dev servers, and other long-running stdout streamers.
+fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
+    // --watch / -w flag (vitest, jest, tsc, turbo, nodemon, etc.)
+    if (hasArg(argv, "--watch") or hasArg(argv, "-w")) return true;
+
+    // --follow / -f flag (docker logs, kubectl logs, tail)
+    if (hasArg(argv, "--follow") or hasArg(argv, "-f")) {
+        // Exception: find -f is not streaming, rg -f is not streaming.
+        // Only follow-capable commands should match.
+        if (std.mem.eql(u8, cmd_basename, "docker") or
+            std.mem.eql(u8, cmd_basename, "kubectl") or
+            std.mem.eql(u8, cmd_basename, "tail") or
+            std.mem.eql(u8, cmd_basename, "journalctl")) return true;
+    }
+
+    // Subcommand-based: watch, dev, serve, start
+    if (argv.len >= 2) {
+        const sub = argv[1];
+        // "turbo watch", "cargo watch", "gh run watch"
+        if (std.mem.eql(u8, sub, "watch")) return true;
+        // "npm run dev", "pnpm dev", etc.
+        if (std.mem.eql(u8, sub, "dev") or
+            std.mem.eql(u8, sub, "serve") or
+            std.mem.eql(u8, sub, "start")) return true;
+    }
+
+    // "npm run dev" → argv = ["npm", "run", "dev"]
+    if (argv.len >= 3) {
+        const sub = argv[1];
+        const arg2 = argv[2];
+        if (std.mem.eql(u8, sub, "run") or std.mem.eql(u8, sub, "exec")) {
+            if (std.mem.eql(u8, arg2, "dev") or
+                std.mem.eql(u8, arg2, "serve") or
+                std.mem.eql(u8, arg2, "start") or
+                std.mem.eql(u8, arg2, "watch")) return true;
+        }
+    }
+
+    // Inherently streaming commands
+    if (std.mem.eql(u8, cmd_basename, "tail") or
+        std.mem.eql(u8, cmd_basename, "nodemon") or
+        std.mem.eql(u8, cmd_basename, "watchman")) return true;
+
+    return false;
+}
+
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const environ = init.environ_map;
@@ -290,6 +338,26 @@ fn runWrapperInner(
         }
         break :blk null;
     };
+
+    // Detect streaming/interactive commands that must not be buffered.
+    // These get stdout+stderr inherited directly — no capture, no filtering.
+    const is_streaming = isStreamingCommand(cmd_basename, argv);
+    if (is_streaming) {
+        var child = std.process.spawn(io, .{
+            .argv = argv,
+            .stdin = .ignore,
+            .stdout = .inherit,
+            .stderr = .inherit,
+            .environ_map = spawn_env,
+        }) catch |err| return err;
+        defer child.kill(io);
+        const term = try child.wait(io);
+        return switch (term) {
+            .exited => |c| c,
+            .signal, .stopped, .unknown => 1,
+        };
+    }
+
     var child = std.process.spawn(io, .{
         .argv = argv,
         .stdin = .ignore,
