@@ -18,7 +18,7 @@ const Writer = std.Io.Writer;
 //     dup chatter collapse.
 //   • Errors fall open at the call site to raw passthrough + exit 1.
 
-pub const THRESHOLD_BYTES: usize = 8 * 1024;
+pub const THRESHOLD_BYTES: usize = 4 * 1024;
 
 pub fn matches(input: []const u8) bool {
     if (input.len <= THRESHOLD_BYTES) return false;

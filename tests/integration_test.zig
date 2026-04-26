@@ -1580,14 +1580,14 @@ test "generic-compact: unknown command with SMLL_LOSSLESS=1 bypasses compactor" 
     try std.testing.expectEqualSlices(u8, payload, result.stdout);
 }
 
-test "generic-compact: unknown command under 8 KiB passes through unchanged" {
+test "generic-compact: unknown command under 4 KiB passes through unchanged" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    // 4 KiB of identical lines — below the 8 KiB threshold, so matches()
+    // 2 KiB of identical lines — below the 4 KiB threshold, so matches()
     // returns false and the pipeline is skipped even though content is RLE-ready.
-    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 4 * 1024);
+    const payload = try buildLargeRepeatedPayload(allocator, "agent-log entry ok", 2 * 1024);
     defer allocator.free(payload);
 
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "xxunknownxx", payload);
