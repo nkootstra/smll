@@ -41,7 +41,37 @@ const cat_compact = @import("cat_compact");
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
 // after git_status and before git_show — the branch output shape is distinct from
 // both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, GenericCompactPipe };
+const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_blame, FindCompactPipe, DuCompactPipe, GenericCompactPipe };
+
+/// Pipe-mode wrapper for find_compact — detects `find -ls` tabular output.
+const FindCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return find_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return find_compact.apply(allocator, input, stderr, writer);
+    }
+};
+
+/// Pipe-mode wrapper for du_compact — detects `du` size+path output.
+const DuCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return du_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return du_compact.apply(allocator, input, stderr, writer, false);
+    }
+};
+
+/// Pipe-mode wrapper for build_compact — detects build progress chatter.
+const BuildCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return build_compact.matches(input, "");
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return build_compact.apply(allocator, input, stderr, writer);
+    }
+};
 
 /// Pipe-mode wrapper for generic_compact — adapts its 3-arg apply() to the
 /// 4-arg signature expected by the pipe-mode filter dispatch.
