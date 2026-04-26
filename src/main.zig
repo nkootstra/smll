@@ -733,7 +733,15 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            // No bespoke filter matched within the columnar block.
+            // Apply generic compactor for large non-tabular output (docker compose, etc.).
+            if (!lossless and generic_compact.matches(stdout_slice)) {
+                generic_compact.apply(allocator, stdout_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                };
+            } else {
+                try writer.writeAll(stdout_slice);
+            }
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
