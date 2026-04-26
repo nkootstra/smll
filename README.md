@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- ~240 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- ~250 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -81,6 +81,35 @@ Safety behavior:
 - If existing RTK integration is detected, setup aborts and asks you to remove
   RTK first (to avoid conflicting double-proxy behavior).
 
+## Token savings
+
+smll tracks how many bytes it saves per wrapped command. View cumulative stats
+with:
+
+```sh
+smll --stats
+```
+
+```
+smll stats
+
+  Commands wrapped:  142
+  Input (raw):       2.8 MB
+  Output (compact):  412.3 KB
+  Saved:             2.4 MB (85%)
+  Est. tokens saved: ~612.5K
+```
+
+Reset counters:
+
+```sh
+smll --stats --reset
+```
+
+Stats are stored locally in `~/.smll/stats.json` (~80 bytes). No network calls.
+Best-effort — if the file can't be read or written, smll silently skips stats
+and the wrapped command runs normally. Pipe mode (stdin) does not record stats.
+
 ## Supported commands
 
 | Category | Commands | Default behavior |
@@ -118,7 +147,8 @@ their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
 **Small, no deps, no telemetry.** The binary stays under 256 KB (Linux x86_64
-release). No network calls, no analytics, no config files.
+release). No network calls, no analytics. The only file smll writes is
+`~/.smll/stats.json` for local token-savings tracking (`--stats`).
 
 ## Migrating from v0.5
 
@@ -145,7 +175,7 @@ cp zig-out/release/smll /usr/local/bin/
 ## Development
 
 ```sh
-zig build test              # ~560 unit + integration tests
+zig build test              # ~600 unit + integration tests
 zig build release           # produces zig-out/release/smll
 ```
 
