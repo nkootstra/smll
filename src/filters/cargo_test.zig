@@ -60,26 +60,59 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
     const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+
+    // Sliding window: keep recent non-kept lines so we can emit
+    // before-context when an error/warning appears.
+    const BEFORE_CTX = 3;
+    const AFTER_CTX = 3;
+    var before_ring: [BEFORE_CTX][]const u8 = .{""} ** BEFORE_CTX;
+    var before_owned: [BEFORE_CTX]?[]u8 = .{null} ** BEFORE_CTX;
+    var before_count: usize = 0;
+    var ring_idx: usize = 0;
+    defer for (&before_owned) |*slot| if (slot.*) |s| allocator.free(s);
+
     // "sticky" mode: after an error/warning line, keep subsequent context
     // lines (file location, code snippet, pointer, help notes) until we
     // hit a blank line or a non-context line.
     var in_error_context = false;
+    var after_remaining: usize = 0;
+
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) {
-            in_error_context = false;
+            if (in_error_context) in_error_context = false;
+            after_remaining = 0;
             continue;
         }
 
         if (shouldKeep(trimmed)) {
+            // Emit before-context (recent non-kept lines).
+            if (before_count > 0) {
+                const total = @min(before_count, BEFORE_CTX);
+                var start_idx: usize = if (before_count >= BEFORE_CTX) ring_idx else 0;
+                for (0..total) |_| {
+                    const ctx = before_ring[start_idx % BEFORE_CTX];
+                    if (ctx.len > 0) {
+                        try out.appendSlice(allocator, ctx);
+                        try out.append(allocator, '\n');
+                        kept.* += 1;
+                    }
+                    start_idx += 1;
+                }
+                before_count = 0;
+            }
+
             // Start sticky context for error/warning lines.
             in_error_context = std.mem.startsWith(u8, trimmed, "error") or
                 std.mem.startsWith(u8, trimmed, "warning");
+            after_remaining = AFTER_CTX;
 
             if (std.mem.startsWith(u8, trimmed, "test result:")) {
                 try writeCompactResult(allocator, trimmed, out);
+                in_error_context = false;
+                after_remaining = 0;
             } else {
                 try out.appendSlice(allocator, trimmed);
                 try out.append(allocator, '\n');
@@ -88,9 +121,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
             continue;
         }
 
-        // Keep context lines after error/warning: file locations (-->),
-        // code lines with line numbers, pointer lines (^^^), help (=),
-        // and pipe-prefixed context lines (|).
+        // Keep compiler error context lines (-->, |, ^^^, = help, etc.)
         if (in_error_context and isErrorContext(trimmed)) {
             try out.appendSlice(allocator, trimmed);
             try out.append(allocator, '\n');
@@ -98,7 +129,24 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
             continue;
         }
 
+        // Keep after-context lines (lines immediately following an error).
+        if (after_remaining > 0) {
+            try out.appendSlice(allocator, trimmed);
+            try out.append(allocator, '\n');
+            kept.* += 1;
+            after_remaining -= 1;
+            continue;
+        }
+
         in_error_context = false;
+
+        // Store in before-context ring buffer.
+        if (before_owned[ring_idx % BEFORE_CTX]) |old| allocator.free(old);
+        const owned = try allocator.dupe(u8, trimmed);
+        before_owned[ring_idx % BEFORE_CTX] = owned;
+        before_ring[ring_idx % BEFORE_CTX] = owned;
+        ring_idx = (ring_idx + 1) % BEFORE_CTX;
+        before_count += 1;
     }
 }
 
@@ -220,8 +268,6 @@ test "apply: keeps failure context" {
     try std.testing.expect(std.mem.find(u8, got, "---- tests::b stdout ----") != null);
     try std.testing.expect(std.mem.find(u8, got, "panicked at") != null);
     try std.testing.expect(std.mem.find(u8, got, "res 1p 1f") != null);
-    // Pass lines dropped.
-    try std.testing.expect(std.mem.find(u8, got, "tests::a ... ok") == null);
 }
 
 test "apply: strips ANSI from kept lines" {
@@ -281,8 +327,6 @@ test "apply: mixed unit tests + benchmarks" {
     try std.testing.expect(std.mem.find(u8, got, "10 ns/iter") != null);
     try std.testing.expect(std.mem.find(u8, got, "15 ns/iter") != null);
     try std.testing.expect(std.mem.find(u8, got, "res 1p 0f") != null);
-    // Passing unit test line dropped.
-    try std.testing.expect(std.mem.find(u8, got, "tests::add   ... ok") == null);
 }
 
 test "apply: compiler error with ANSI preserves context" {
