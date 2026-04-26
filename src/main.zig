@@ -1,5 +1,6 @@
 const std = @import("std");
 const pipeline = @import("pipeline.zig");
+const stats = @import("stats.zig");
 const git_status = @import("git_status");
 const git_diff = @import("git_diff");
 const git_log = @import("git_log");
@@ -123,6 +124,15 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
+    const home = environ.get("HOME") orelse "";
+
+    // Stats display: --stats, --stats --reset
+    if (try stats.maybeRun(init.arena.allocator(), io, home, args, &stdout_writer.interface)) |code| {
+        try stdout_writer.interface.flush();
+        if (code != 0) std.process.exit(code);
+        return;
+    }
+
     // Setup check: only needed with args (--setup, --unsetup, etc.)
     if (try setup.maybeRun(init.arena.allocator(), io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
@@ -147,7 +157,7 @@ pub fn main(init: std.process.Init) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const code = try runWrapper(
+    const result = try runWrapper(
         allocator,
         io,
         environ,
@@ -157,7 +167,13 @@ pub fn main(init: std.process.Init) !void {
     );
     try stdout_writer.interface.flush();
     try stderr_writer.interface.flush();
-    if (code != 0) std.process.exit(code);
+
+    // Record stats (best-effort, never fails the command).
+    if (home.len > 0) {
+        stats.record(allocator, io, home, result.input_bytes, result.output_bytes);
+    }
+
+    if (result.exit_code != 0) std.process.exit(result.exit_code);
 }
 
 fn readAllStdin(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
@@ -193,7 +209,45 @@ const KnownSubcommand = enum(u8) {
     grep,
 };
 
+const WrapperResult = struct {
+    exit_code: u8,
+    input_bytes: usize,
+    output_bytes: usize,
+};
+
 fn runWrapper(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) !WrapperResult {
+    // Capture filter output in a buffer to measure output bytes for stats.
+    var capture = std.Io.Writer.Allocating.init(allocator);
+    defer capture.deinit();
+    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
+    const output = capture.written();
+
+    // Write captured output to real stdout.
+    try writer.writeAll(output);
+
+    // Input bytes = captured child stdout (before filtering). We approximate
+    // with the output bytes when the filter expands (rare) or report what we
+    // have. The actual input_bytes is stdout_slice.len inside runWrapperInner,
+    // but plumbing it out would require changing every return site. Instead,
+    // we track it via a module-level var that runWrapperInner sets.
+    return .{
+        .exit_code = exit_code,
+        .input_bytes = last_input_bytes,
+        .output_bytes = output.len,
+    };
+}
+
+/// Set by runWrapperInner to communicate input bytes to runWrapper.
+var last_input_bytes: usize = 0;
+
+fn runWrapperInner(
     allocator: std.mem.Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
@@ -248,6 +302,9 @@ fn runWrapper(
         },
         else => return err,
     };
+
+    // Record raw input size for stats tracking.
+    last_input_bytes = stdout_slice.len;
 
     var err_drain_buf: [4096]u8 = undefined;
     var stderr_reader = child.stderr.?.reader(io, &err_drain_buf);
