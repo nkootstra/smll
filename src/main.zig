@@ -1040,7 +1040,16 @@ fn runWrapperInner(
             }
         },
     } else {
-        try writer.writeAll(stdout_slice);
+        // Unknown git subcommand: apply generic compactor for large output.
+        if (!lossless and generic_compact.matches(stdout_slice)) {
+            generic_compact.apply(allocator, stdout_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return exit_code;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
         try stderr_writer.writeAll(stderr_slice);
     }
 
