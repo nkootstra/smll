@@ -219,29 +219,44 @@ fn setupOpencode(
     stderr: *std.Io.Writer,
 ) !u8 {
     _ = stderr;
-    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
-    defer allocator.free(plugin_path);
+    const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy", .{home});
+    defer allocator.free(plugin_dir);
+    const index_path = try std.fmt.allocPrint(allocator, "{s}/index.ts", .{plugin_dir});
+    defer allocator.free(index_path);
+    const pkg_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{plugin_dir});
+    defer allocator.free(pkg_path);
 
-    // OpenCode auto-discovers .ts files in ~/.config/opencode/plugins/.
-    // Just write the file — no config JSON modification needed.
+    // OpenCode plugins must be npm packages with a package.json.
+    // Write the package structure, then tell the user to run
+    // `opencode plugin <path> -g` to register it.
     const plugin_script = buildOpencodePluginScript();
-    const existing_plugin = try readFileOptional(allocator, io, plugin_path);
-    defer if (existing_plugin) |buf| allocator.free(buf);
+    const pkg_json = "{\"name\":\"smll-proxy\",\"version\":\"1.0.0\",\"type\":\"module\",\"main\":\"index.ts\"}\n";
 
-    const plugin_same = if (existing_plugin) |buf| std.mem.eql(u8, buf, plugin_script) else false;
-    if (!plugin_same) {
-        try writeBackupIfExists(allocator, io, plugin_path, dry_run);
+    const existing_index = try readFileOptional(allocator, io, index_path);
+    defer if (existing_index) |buf| allocator.free(buf);
+    const index_same = if (existing_index) |buf| std.mem.eql(u8, buf, plugin_script) else false;
+
+    if (!index_same) {
+        try writeBackupIfExists(allocator, io, index_path, dry_run);
         if (dry_run) {
-            try stdout.print("[dry-run] would write {s}\n", .{plugin_path});
+            try stdout.print("[dry-run] would write {s}\n", .{index_path});
+            try stdout.print("[dry-run] would write {s}\n", .{pkg_path});
         } else {
-            try writeFileEnsuringParent(io, plugin_path, plugin_script);
-            try stdout.print("wrote {s}\n", .{plugin_path});
+            try writeFileEnsuringParent(io, index_path, plugin_script);
+            try stdout.print("wrote {s}\n", .{index_path});
+            try writeFileEnsuringParent(io, pkg_path, pkg_json);
+            try stdout.print("wrote {s}\n", .{pkg_path});
         }
     } else {
         try stdout.writeAll("opencode plugin already up to date\n");
     }
 
-    if (!dry_run) try stdout.writeAll("done: opencode setup installed\n");
+    if (!dry_run) {
+        try stdout.writeAll("done: opencode plugin written\n");
+        try stdout.writeAll("run: opencode plugin ");
+        try stdout.writeAll(plugin_dir);
+        try stdout.writeAll(" -g\n");
+    }
     return 0;
 }
 
@@ -311,20 +326,30 @@ fn unsetupOpencode(
     stderr: *std.Io.Writer,
 ) !u8 {
     _ = stderr;
-    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
-    defer allocator.free(plugin_path);
+    const index_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy/index.ts", .{home});
+    defer allocator.free(index_path);
+    const pkg_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy/package.json", .{home});
+    defer allocator.free(pkg_path);
+    // Also clean up legacy single-file plugin if present.
+    const legacy_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
+    defer allocator.free(legacy_path);
 
-    const existing_plugin = try readFileOptional(allocator, io, plugin_path);
-    defer if (existing_plugin) |buf| allocator.free(buf);
-    if (existing_plugin != null) {
-        if (dry_run) {
-            try stdout.print("[dry-run] would delete {s}\n", .{plugin_path});
-        } else {
-            try deleteFileIfExists(io, plugin_path);
-            try stdout.print("deleted {s}\n", .{plugin_path});
+    var deleted_any = false;
+    for ([_][]const u8{ index_path, pkg_path, legacy_path }) |path| {
+        const existing = try readFileOptional(allocator, io, path);
+        defer if (existing) |buf| allocator.free(buf);
+        if (existing != null) {
+            if (dry_run) {
+                try stdout.print("[dry-run] would delete {s}\n", .{path});
+            } else {
+                try deleteFileIfExists(io, path);
+                try stdout.print("deleted {s}\n", .{path});
+            }
+            deleted_any = true;
         }
-    } else {
-        try stdout.writeAll("opencode plugin file: not found\n");
+    }
+    if (!deleted_any) {
+        try stdout.writeAll("opencode plugin: not found\n");
     }
 
     if (!dry_run) try stdout.writeAll("done: opencode unsetup complete\n");
