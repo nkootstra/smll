@@ -146,7 +146,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 256 KB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 288 KB (Linux x86_64
 release). No network calls, no analytics. The only file smll writes is
 `~/.smll/stats.json` for local token-savings tracking (`--stats`).
 
