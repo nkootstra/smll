@@ -201,13 +201,13 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
                 repeats += 1;
                 pos += k;
             }
-            if (repeats >= 5 and repeats * k > best_repeats * best_k) {
+            if (repeats >= 3 and repeats * k > best_repeats * best_k) {
                 best_k = k;
                 best_repeats = repeats;
             }
         }
 
-        if (best_k > 0 and best_repeats >= 5) {
+        if (best_k > 0 and best_repeats >= 3) {
             // Emit first block, then summary
             for (0..best_k) |j| {
                 try emitTruncated(writer, output_lines.items[i + j]);
