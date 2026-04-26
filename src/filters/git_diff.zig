@@ -142,7 +142,10 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
                     try writer.writeAll(coords);
                 }
                 if (ctx.len > 0) {
-                    try writer.writeAll(ctx); // ctx already starts with space if non-empty
+                    // Truncate function context to save tokens while
+                    // keeping enough for agents to identify the function.
+                    const max_ctx = @min(ctx.len, 30);
+                    try writer.writeAll(ctx[0..max_ctx]);
                 }
                 first_out = false;
             } else {
