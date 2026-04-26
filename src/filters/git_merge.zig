@@ -127,6 +127,8 @@ fn applyInner(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) 
         }
         try w.writeAll("@ merge "); try w.writeAll(strat); try w.writeByte('\n');
         try emitBody(&it, w);
+    } else if (std.mem.startsWith(u8, first, "Already up to date")) {
+        try w.writeAll("up to date\n");
     } else {
         try emitConflicts(&it, w);
     }
