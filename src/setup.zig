@@ -221,7 +221,7 @@ fn setupOpencode(
     const config_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
     defer allocator.free(config_path);
 
-    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.js", .{home});
+    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
     defer allocator.free(plugin_path);
 
     const existing_config = try readFileOptional(allocator, io, config_path);
@@ -340,7 +340,7 @@ fn unsetupOpencode(
     const config_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
     defer allocator.free(config_path);
 
-    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.js", .{home});
+    const plugin_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
     defer allocator.free(plugin_path);
 
     var changed_config = false;
@@ -841,18 +841,21 @@ fn buildOpencodePluginScript() []const u8 {
     \\  "make", "cargo", "pytest", "jest", "vitest", "go", "tsc", "npm", "pnpm", "yarn", "bun", "cat",
     \\]);
     \\
-    \\export const SmllProxyPlugin = async () => {
+    \\export const SmllProxyPlugin = async ({ $ }) => {
     \\  return {
     \\    "tool.execute.before": async (input, output) => {
-    \\      if (input.tool !== "bash") return;
-    \\      const command = (output?.args?.command ?? "").trim();
+    \\      const tool = String(input?.tool ?? "").toLowerCase();
+    \\      if (tool !== "bash" && tool !== "shell") return;
+    \\      const args = output?.args;
+    \\      if (!args || typeof args !== "object") return;
+    \\      const command = (args.command ?? "").trim();
     \\      if (!command) return;
     \\      if (/^smll(\\s|$)/.test(command)) return;
     \\
     \\      const first = command.split(/\\s+/)[0];
     \\      if (!WRAPPED.has(first)) return;
     \\
-    \\      output.args.command = `smll ${command}`;
+    \\      args.command = `smll ${command}`;
     \\    },
     \\  };
     \\};
