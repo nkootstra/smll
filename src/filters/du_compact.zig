@@ -198,7 +198,7 @@ fn computeBytes(num: []const u8, unit: u8) ?u64 {
     // du sizes are small decimals (e.g. "1.2", "234") — integer arithmetic suffices.
     const dot = std.mem.indexOfScalar(u8, num, '.');
     const int_part_str = if (dot) |d| num[0..d] else num;
-    const int_part = std.fmt.parseInt(u64, int_part_str, 10) catch return null;
+    const int_part = parseU64(int_part_str) orelse return null;
     // Fractional: at most one decimal digit matters for 2-sig-fig rounding.
     // Represent the value as (int_part * 10 + frac_digit) / 10 * multiplier.
     const frac_digit: u64 = if (dot) |d| blk: {
@@ -211,6 +211,16 @@ fn computeBytes(num: []const u8, unit: u8) ?u64 {
     // (int_part * 10 + frac_digit) * multiplier / 10
     const tenths = int_part *| 10 +| frac_digit; // saturating add
     return tenths *| (multiplier / 10) +| (tenths *| (multiplier % 10) / 10);
+}
+
+fn parseU64(s: []const u8) ?u64 {
+    if (s.len == 0) return null;
+    var v: u64 = 0;
+    for (s) |c| {
+        if (c < '0' or c > '9') return null;
+        v = v *| 10 +| (c - '0');
+    }
+    return v;
 }
 
 fn emitRoundedLine(writer: *Writer, row: Parsed) !void {

@@ -306,7 +306,7 @@ fn parseDate(line: []const u8, buf: *[10]u8) bool {
     const year_str = it.next() orelse return false;
 
     const month = monthNumber(month_abbr) orelse return false;
-    const day = std.fmt.parseInt(u8, day_str, 10) catch return false;
+    const day = parseU8(day_str) orelse return false;
     if (day < 1 or day > 31) return false;
     if (year_str.len != 4) return false;
     for (year_str) |c| if (!std.ascii.isDigit(c)) return false;
@@ -322,6 +322,16 @@ fn parseDate(line: []const u8, buf: *[10]u8) bool {
     buf[8] = '0' + day / 10;
     buf[9] = '0' + day % 10;
     return true;
+}
+
+fn parseU8(s: []const u8) ?u8 {
+    if (s.len == 0 or s.len > 3) return null;
+    var v: u16 = 0;
+    for (s) |c| {
+        if (c < '0' or c > '9') return null;
+        v = v * 10 + (c - '0');
+    }
+    return if (v <= 255) @intCast(v) else null;
 }
 
 fn monthNumber(abbr: []const u8) ?u8 {
