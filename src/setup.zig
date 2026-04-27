@@ -1,5 +1,86 @@
 const std = @import("std");
 
+// --- Minimal JSON value types (replaces std.json.Value to shrink binary) ---
+
+const JKV = struct { key: []const u8, val: JValue };
+
+const JObject = struct {
+    items: std.ArrayList(JKV),
+
+    const empty: JObject = .{ .items = .empty };
+
+    fn get(self: JObject, key: []const u8) ?JValue {
+        for (self.items.items) |kv| if (std.mem.eql(u8, kv.key, key)) return kv.val;
+        return null;
+    }
+    fn getPtr(self: *JObject, key: []const u8) ?*JValue {
+        for (self.items.items) |*kv| if (std.mem.eql(u8, kv.key, key)) return &kv.val;
+        return null;
+    }
+    fn put(self: *JObject, pa: std.mem.Allocator, key: []const u8, val: JValue) !void {
+        for (self.items.items) |*kv| {
+            if (std.mem.eql(u8, kv.key, key)) { kv.val = val; return; }
+        }
+        try self.items.append(pa, .{ .key = key, .val = val });
+    }
+    fn contains(self: JObject, key: []const u8) bool {
+        return self.get(key) != null;
+    }
+    fn iterator(self: *const JObject) Iterator {
+        return .{ .items = self.items.items, .pos = 0 };
+    }
+    const Iterator = struct {
+        items: []const JKV,
+        pos: usize,
+        fn next(self: *Iterator) ?struct { key_ptr: *const []const u8, value_ptr: *const JValue } {
+            if (self.pos >= self.items.len) return null;
+            const kv = &self.items[self.pos];
+            self.pos += 1;
+            return .{ .key_ptr = &kv.key, .value_ptr = &kv.val };
+        }
+    };
+};
+
+const JArray = struct {
+    items: []JValue = &.{},
+    list: std.ArrayList(JValue) = .empty,
+    pa: std.mem.Allocator = undefined,
+
+    fn init(pa: std.mem.Allocator) JArray {
+        return .{ .pa = pa };
+    }
+    fn append(self: *JArray, val: JValue) !void {
+        try self.list.append(self.pa, val);
+        self.items = self.list.items;
+    }
+    fn swapRemove(self: *JArray, idx: usize) JValue {
+        const val = self.list.items[idx];
+        _ = self.list.swapRemove(idx);
+        self.items = self.list.items;
+        return val;
+    }
+};
+
+const JValue = union(enum) {
+    null,
+    bool: bool,
+    integer: i64,
+    string: []const u8,
+    array: JArray,
+    object: JObject,
+};
+
+const JParsed = struct {
+    arena: *std.heap.ArenaAllocator,
+    value: JValue,
+
+    fn deinit(self: JParsed) void {
+        const alloc = self.arena.child_allocator;
+        self.arena.deinit();
+        alloc.destroy(self.arena);
+    }
+};
+
 /// Concatenate two byte slices into allocator-owned memory.
 fn concat2(allocator: std.mem.Allocator, a: []const u8, b: []const u8) ![]u8 {
     const buf = try allocator.alloc(u8, a.len + b.len);
@@ -511,7 +592,7 @@ fn unsetupCursor(
 fn loadOrCreateCursorHooksJson(
     allocator: std.mem.Allocator,
     existing: ?[]const u8,
-) !std.json.Parsed(std.json.Value) {
+) !JParsed {
     const input = blk: {
         if (existing) |buf| {
             if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk "{\"version\":1}";
@@ -522,7 +603,7 @@ fn loadOrCreateCursorHooksJson(
     return try miniJsonParse(allocator, input);
 }
 
-fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_command: []const u8) !bool {
+fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *JValue, hook_command: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidSettingsJson;
     const root_obj = &root.object;
 
@@ -547,14 +628,14 @@ fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_co
     }
 
     // Add new entry: { "command": "bash ~/.cursor/hooks/smll-pretooluse.sh", "matcher": "Shell" }
-    var entry_obj: std.json.ObjectMap = .empty;
+    var entry_obj: JObject = .empty;
     try entry_obj.put(pa, "command", .{ .string = try pa.dupe(u8, hook_command) });
     try entry_obj.put(pa, "matcher", .{ .string = try pa.dupe(u8, "Shell") });
     try pre_tool_use_val.array.append(.{ .object = entry_obj });
     return false;
 }
 
-fn removeCursorPreToolHook(root: *std.json.Value, hook_command: []const u8) !bool {
+fn removeCursorPreToolHook(root: *JValue, hook_command: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidSettingsJson;
     const hooks_val = root.object.getPtr("hooks") orelse return false;
     if (hooks_val.* != .object) return SetupError.InvalidSettingsJson;
@@ -593,7 +674,7 @@ fn buildCursorHookScript() []const u8 {
 fn loadOrCreateJsonObject(
     allocator: std.mem.Allocator,
     existing: ?[]const u8,
-) !std.json.Parsed(std.json.Value) {
+) !JParsed {
     const input = blk: {
         if (existing) |buf| {
             if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk "{}";
@@ -604,7 +685,7 @@ fn loadOrCreateJsonObject(
     return try miniJsonParse(allocator, input);
 }
 
-fn ensureClaudePreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_command: []const u8) !bool {
+fn ensureClaudePreToolHook(pa: std.mem.Allocator, root: *JValue, hook_command: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidSettingsJson;
     const root_obj = &root.object;
 
@@ -617,15 +698,15 @@ fn ensureClaudePreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_co
 
     if (claudePreToolHookExists(pre_tool_use_val.array.items, hook_command)) return true;
 
-    var cmd_obj: std.json.ObjectMap = .empty;
+    var cmd_obj: JObject = .empty;
     try cmd_obj.put(pa, "type", .{ .string = try pa.dupe(u8, "command") });
     try cmd_obj.put(pa, "command", .{ .string = try pa.dupe(u8, hook_command) });
     try cmd_obj.put(pa, "timeout", .{ .integer = 10 });
 
-    var hook_handlers = std.json.Array.init(pa);
+    var hook_handlers = JArray.init(pa);
     try hook_handlers.append(.{ .object = cmd_obj });
 
-    var matcher_obj: std.json.ObjectMap = .empty;
+    var matcher_obj: JObject = .empty;
     try matcher_obj.put(pa, "matcher", .{ .string = try pa.dupe(u8, "Bash") });
     try matcher_obj.put(pa, "hooks", .{ .array = hook_handlers });
 
@@ -633,7 +714,7 @@ fn ensureClaudePreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_co
     return false;
 }
 
-fn removeClaudePreToolHook(root: *std.json.Value, hook_command: []const u8) !bool {
+fn removeClaudePreToolHook(root: *JValue, hook_command: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidSettingsJson;
     const hooks_val = root.object.getPtr("hooks") orelse return false;
     if (hooks_val.* != .object) return SetupError.InvalidSettingsJson;
@@ -655,7 +736,7 @@ fn removeClaudePreToolHook(root: *std.json.Value, hook_command: []const u8) !boo
     return changed;
 }
 
-fn isClaudeHookEntryForCommand(entry: std.json.Value, hook_command: []const u8) bool {
+fn isClaudeHookEntryForCommand(entry: JValue, hook_command: []const u8) bool {
     if (entry != .object) return false;
     const hooks_val = entry.object.get("hooks") orelse return false;
     if (hooks_val != .array) return false;
@@ -670,14 +751,14 @@ fn isClaudeHookEntryForCommand(entry: std.json.Value, hook_command: []const u8) 
     return false;
 }
 
-fn claudePreToolHookExists(entries: []const std.json.Value, hook_command: []const u8) bool {
+fn claudePreToolHookExists(entries: []const JValue, hook_command: []const u8) bool {
     for (entries) |entry| {
         if (isClaudeHookEntryForCommand(entry, hook_command)) return true;
     }
     return false;
 }
 
-fn ensureOpencodePluginEnabled(pa: std.mem.Allocator, root: *std.json.Value, plugin_path: []const u8) !bool {
+fn ensureOpencodePluginEnabled(pa: std.mem.Allocator, root: *JValue, plugin_path: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidConfigJson;
     const root_obj = &root.object;
     const plugin_val = try ensureArrayField(pa, root_obj, "plugin");
@@ -691,7 +772,7 @@ fn ensureOpencodePluginEnabled(pa: std.mem.Allocator, root: *std.json.Value, plu
     return false;
 }
 
-fn removeOpencodePluginEntry(root: *std.json.Value, plugin_path: []const u8) !bool {
+fn removeOpencodePluginEntry(root: *JValue, plugin_path: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidConfigJson;
     const plugin_val = root.object.getPtr("plugin") orelse return false;
     if (plugin_val.* != .array) return SetupError.InvalidConfigJson;
@@ -711,15 +792,15 @@ fn removeOpencodePluginEntry(root: *std.json.Value, plugin_path: []const u8) !bo
     return changed;
 }
 
-fn ensureObjectField(pa: std.mem.Allocator, obj: *std.json.ObjectMap, key: []const u8) !*std.json.Value {
+fn ensureObjectField(pa: std.mem.Allocator, obj: *JObject, key: []const u8) !*JValue {
     if (obj.getPtr(key)) |v| return v;
     try obj.put(pa, key, .{ .object = .empty });
     return obj.getPtr(key).?;
 }
 
-fn ensureArrayField(pa: std.mem.Allocator, obj: *std.json.ObjectMap, key: []const u8) !*std.json.Value {
+fn ensureArrayField(pa: std.mem.Allocator, obj: *JObject, key: []const u8) !*JValue {
     if (obj.getPtr(key)) |v| return v;
-    const arr = std.json.Array.init(pa);
+    const arr = JArray.init(pa);
     try obj.put(pa, key, .{ .array = arr });
     return obj.getPtr(key).?;
 }
@@ -760,8 +841,8 @@ fn deleteFileIfExists(io: std.Io, path: []const u8) !void {
     };
 }
 
-/// Minimal JSON serializer for std.json.Value — avoids pulling in std.json.Stringify.
-fn writeJsonValue(w: *std.Io.Writer, val: std.json.Value, depth: usize) !void {
+/// Minimal JSON serializer for JValue — avoids pulling in std.json.Stringify.
+fn writeJsonValue(w: *std.Io.Writer, val: JValue, depth: usize) !void {
     switch (val) {
         .null => try w.writeAll("null"),
         .bool => |b| try w.writeAll(if (b) "true" else "false"),
@@ -823,7 +904,6 @@ fn writeJsonValue(w: *std.Io.Writer, val: std.json.Value, depth: usize) !void {
             try writeIndent(w, depth);
             try w.writeByte('}');
         },
-        else => try w.writeAll("null"),
     }
 }
 
@@ -836,7 +916,7 @@ fn writeJsonValueToPath(
     allocator: std.mem.Allocator,
     io: std.Io,
     path: []const u8,
-    value: std.json.Value,
+    value: JValue,
     dry_run: bool,
     stdout: *std.Io.Writer,
 ) !void {
@@ -923,10 +1003,10 @@ test "containsRtkIntegration detects common RTK markers" {
     try std.testing.expect(!containsRtkIntegration("plugin: smll-proxy"));
 }
 
-/// Minimal JSON parser producing std.json.Value. Handles objects, arrays,
+/// Minimal JSON parser producing JValue. Handles objects, arrays,
 /// strings, integers, booleans, and null — sufficient for settings/hooks JSON.
 /// Replaces std.json.parseFromSlice to avoid pulling in the full std.json parser.
-fn miniJsonParse(child_allocator: std.mem.Allocator, input: []const u8) !std.json.Parsed(std.json.Value) {
+fn miniJsonParse(child_allocator: std.mem.Allocator, input: []const u8) !JParsed {
     const arena = try child_allocator.create(std.heap.ArenaAllocator);
     arena.* = std.heap.ArenaAllocator.init(child_allocator);
     errdefer {
@@ -945,7 +1025,7 @@ fn skipWs(input: []const u8, pos: *usize) void {
 
 const JsonParseError = error{ UnexpectedEndOfInput, OutOfMemory };
 
-fn parseValue(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+fn parseValue(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!JValue {
     skipWs(input, pos);
     if (pos.* >= input.len) return error.UnexpectedEndOfInput;
     return switch (input[pos.*]) {
@@ -960,9 +1040,9 @@ fn parseValue(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseEr
     };
 }
 
-fn parseObject(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+fn parseObject(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!JValue {
     pos.* += 1; // skip {
-    var obj: std.json.ObjectMap = .empty;
+    var obj: JObject = .empty;
     skipWs(input, pos);
     if (pos.* < input.len and input[pos.*] == '}') { pos.* += 1; return .{ .object = obj }; }
     while (pos.* < input.len) {
@@ -981,9 +1061,9 @@ fn parseObject(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseE
     return .{ .object = obj };
 }
 
-fn parseArray(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+fn parseArray(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!JValue {
     pos.* += 1; // skip [
-    var arr = std.json.Array.init(pa);
+    var arr = JArray.init(pa);
     skipWs(input, pos);
     if (pos.* < input.len and input[pos.*] == ']') { pos.* += 1; return .{ .array = arr }; }
     while (pos.* < input.len) {
@@ -1023,7 +1103,7 @@ fn parseString(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseE
     return buf[0..o];
 }
 
-fn parseNumber(input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+fn parseNumber(input: []const u8, pos: *usize) JsonParseError!JValue {
     const start = pos.*;
     if (input[pos.*] == '-') pos.* += 1;
     while (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') pos.* += 1;
