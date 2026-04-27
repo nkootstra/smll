@@ -578,38 +578,14 @@ fn removeCursorPreToolHook(root: *std.json.Value, hook_command: []const u8) !boo
 }
 
 fn buildCursorHookScript() []const u8 {
-    // Cursor's preToolUse hook receives JSON on stdin identical to Claude's format.
-    // Same script logic: block noisy commands unless prefixed with smll.
     return
     \\#!/usr/bin/env bash
     \\set -euo pipefail
-    \\
-    \\if ! command -v jq >/dev/null 2>&1; then
-    \\  exit 0
-    \\fi
-    \\
-    \\payload="$(cat)"
-    \\cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
-    \\if [[ -z "$cmd" ]]; then
-    \\  exit 0
-    \\fi
-    \\
-    \\if [[ "$cmd" =~ ^[[:space:]]*smll([[:space:]]|$) ]]; then
-    \\  exit 0
-    \\fi
-    \\
-    \\trimmed="${cmd#"${cmd%%[![:space:]]*}"}"
-    \\first="${trimmed%%[[:space:]]*}"
-    \\
-    \\case "$first" in
-    \\  git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)
-    \\    printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$cmd"
-    \\    exit 0
-    \\    ;;
-    \\  *)
-    \\    exit 0
-    \\    ;;
-    \\esac
+    \\command -v jq>/dev/null 2>&1||exit 0
+    \\p="$(cat)";c="$(printf '%s' "$p"|jq -r '.tool_input.command // ""')"
+    \\[ -z "$c" ]&&exit 0;[[ "$c" =~ ^[[:space:]]*smll([[:space:]]|$) ]]&&exit 0
+    \\t="${c#"${c%%[![:space:]]*}"}";f="${t%%[[:space:]]*}"
+    \\case "$f" in git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$c";exit 0;;*)exit 0;;esac
     ;
 }
 
@@ -879,61 +855,18 @@ fn buildClaudeHookScript() []const u8 {
     return
     \\#!/usr/bin/env bash
     \\set -euo pipefail
-    \\
-    \\if ! command -v jq >/dev/null 2>&1; then
-    \\  exit 0
-    \\fi
-    \\
-    \\payload="$(cat)"
-    \\cmd="$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')"
-    \\if [[ -z "$cmd" ]]; then
-    \\  exit 0
-    \\fi
-    \\
-    \\if [[ "$cmd" =~ ^[[:space:]]*smll([[:space:]]|$) ]]; then
-    \\  exit 0
-    \\fi
-    \\
-    \\trimmed="${cmd#"${cmd%%[![:space:]]*}"}"
-    \\first="${trimmed%%[[:space:]]*}"
-    \\
-    \\case "$first" in
-    \\  git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)
-    \\    echo "smll hook: wrap noisy command with smll (example: smll $cmd)" >&2
-    \\    exit 2
-    \\    ;;
-    \\  *)
-    \\    exit 0
-    \\    ;;
-    \\esac
+    \\command -v jq>/dev/null 2>&1||exit 0
+    \\p="$(cat)";c="$(printf '%s' "$p"|jq -r '.tool_input.command // ""')"
+    \\[ -z "$c" ]&&exit 0;[[ "$c" =~ ^[[:space:]]*smll([[:space:]]|$) ]]&&exit 0
+    \\t="${c#"${c%%[![:space:]]*}"}";f="${t%%[[:space:]]*}"
+    \\case "$f" in git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)echo "smll hook: wrap noisy command with smll (example: smll $c)">&2;exit 2;;*)exit 0;;esac
     ;
 }
 
 fn buildOpencodePluginScript() []const u8 {
     return
-    \\const WRAPPED = new Set([
-    \\  "git", "rg", "tree", "find", "docker", "kubectl", "gh", "ps", "ls", "du", "curl",
-    \\  "make", "cargo", "pytest", "jest", "vitest", "go", "tsc", "npm", "pnpm", "yarn", "bun", "cat",
-    \\]);
-    \\
-    \\export const SmllProxyPlugin = async ({ $ }) => {
-    \\  return {
-    \\    "tool.execute.before": async (input, output) => {
-    \\      const tool = String(input?.tool ?? "").toLowerCase();
-    \\      if (tool !== "bash" && tool !== "shell") return;
-    \\      const args = output?.args;
-    \\      if (!args || typeof args !== "object") return;
-    \\      const command = (args.command ?? "").trim();
-    \\      if (!command) return;
-    \\      if (/^smll(\\s|$)/.test(command)) return;
-    \\
-    \\      const first = command.split(/\\s+/)[0];
-    \\      if (!WRAPPED.has(first)) return;
-    \\
-    \\      args.command = `smll ${command}`;
-    \\    },
-    \\  };
-    \\};
+    \\const W=new Set(["git","rg","tree","find","docker","kubectl","gh","ps","ls","du","curl","make","cargo","pytest","jest","vitest","go","tsc","npm","pnpm","yarn","bun","cat"]);
+    \\export const SmllProxyPlugin=async({$})=>({"tool.execute.before":async(i,o)=>{const t=String(i?.tool??"").toLowerCase();if(t!=="bash"&&t!=="shell")return;const a=o?.args;if(!a||typeof a!=="object")return;const c=(a.command??"").trim();if(!c||/^smll(\\s|$)/.test(c))return;const f=c.split(/\\s+/)[0];if(W.has(f))a.command=`smll ${c}`}});
     ;
 }
 
