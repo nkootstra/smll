@@ -546,7 +546,7 @@ pub fn build(b: *std.Build) void {
         .root_module = release_mod,
     });
     // macOS `strip` removes more symbols than Zig's built-in strip.
-    const strip_step = b.addSystemCommand(&.{ "strip", "-x" });
+    const strip_step = b.addSystemCommand(&.{ "strip" });
     strip_step.addFileArg(release_exe.getEmittedBin());
     const install_release = b.addInstallArtifact(release_exe, .{
         .dest_dir = .{ .override = .{ .custom = "release" } },
