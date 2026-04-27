@@ -634,15 +634,19 @@ fn removeCursorPreToolHook(root: *JValue, hook_command: []const u8) !bool {
     return removed;
 }
 
-fn buildCursorHookScript() []const u8 {
-    return
+const hook_prefix =
     \\#!/usr/bin/env bash
     \\set -euo pipefail
     \\command -v jq>/dev/null 2>&1||exit 0
     \\p="$(cat)";c="$(printf '%s' "$p"|jq -r '.tool_input.command // ""')"
     \\[ -z "$c" ]&&exit 0;[[ "$c" =~ ^[[:space:]]*smll([[:space:]]|$) ]]&&exit 0
     \\t="${c#"${c%%[![:space:]]*}"}";f="${t%%[[:space:]]*}"
-    \\case "$f" in git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$c";exit 0;;*)exit 0;;esac
+    \\case "$f" in git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)
+;
+
+fn buildCursorHookScript() []const u8 {
+    return hook_prefix ++
+    \\printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$c";exit 0;;*)exit 0;;esac
     ;
 }
 
@@ -909,14 +913,8 @@ fn writeJsonValueToPath(
 }
 
 fn buildClaudeHookScript() []const u8 {
-    return
-    \\#!/usr/bin/env bash
-    \\set -euo pipefail
-    \\command -v jq>/dev/null 2>&1||exit 0
-    \\p="$(cat)";c="$(printf '%s' "$p"|jq -r '.tool_input.command // ""')"
-    \\[ -z "$c" ]&&exit 0;[[ "$c" =~ ^[[:space:]]*smll([[:space:]]|$) ]]&&exit 0
-    \\t="${c#"${c%%[![:space:]]*}"}";f="${t%%[[:space:]]*}"
-    \\case "$f" in git|rg|tree|find|docker|kubectl|gh|ps|ls|du|curl|make|cargo|pytest|jest|vitest|go|tsc|npm|pnpm|yarn|bun|cat)echo "smll hook: wrap noisy command with smll (example: smll $c)">&2;exit 2;;*)exit 0;;esac
+    return hook_prefix ++
+    \\echo "smll hook: wrap noisy command with smll (example: smll $c)">&2;exit 2;;*)exit 0;;esac
     ;
 }
 
