@@ -400,15 +400,18 @@ fn runWrapperInner(
     else
         outer_cmd;
 
-    var ls_env: std.process.Environ.Map = undefined;
-    var ls_env_inited = false;
-    defer if (ls_env_inited) ls_env.deinit();
+    var ls_env_old_lc_all: ?[]const u8 = null;
+    var ls_env_modified = false;
+    defer if (ls_env_modified) {
+        // Restore original LC_ALL (best-effort, single-threaded so safe).
+        @constCast(environ).put("LC_ALL", ls_env_old_lc_all orelse "") catch {};
+    };
     const spawn_env: ?*const std.process.Environ.Map = blk: {
         if (std.mem.eql(u8, cmd_basename, "ls")) {
-            ls_env = try environ.clone(allocator);
-            ls_env_inited = true;
-            try ls_env.put("LC_ALL", "C");
-            break :blk &ls_env;
+            ls_env_old_lc_all = environ.get("LC_ALL");
+            @constCast(environ).put("LC_ALL", "C") catch break :blk null;
+            ls_env_modified = true;
+            break :blk environ;
         }
         break :blk null;
     };
