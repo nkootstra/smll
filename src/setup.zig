@@ -262,7 +262,7 @@ fn setupClaude(
         try writeBackupIfExists(allocator, io, settings_path, dry_run);
         try writeJsonValueToPath(allocator, io, settings_path, settings_json.value, dry_run, stdout);
     } else {
-        try stdout.writeAll("claude settings already contain smll hook\n");
+        try stdout.writeAll("already installed\n");
     }
 
     const hook_script = buildClaudeHookScript();
@@ -276,7 +276,7 @@ fn setupClaude(
         try stdout.writeAll("hook up to date\n");
     }
 
-    if (!dry_run) try stdout.writeAll("done: claude setup installed\n");
+    if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
 
@@ -331,10 +331,10 @@ fn setupOpencode(
         try writeBackupIfExists(allocator, io, config_path, dry_run);
         try writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
     } else {
-        try stdout.writeAll("opencode config already has smll plugin\n");
+        try stdout.writeAll("already installed\n");
     }
 
-    if (!dry_run) try stdout.writeAll("done: opencode setup installed\n");
+    if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
 
@@ -371,10 +371,10 @@ fn unsetupClaude(
             try writeBackupIfExists(allocator, io, settings_path, dry_run);
             try writeJsonValueToPath(allocator, io, settings_path, settings_json.value, dry_run, stdout);
         } else {
-            try stdout.writeAll("claude settings: no smll hook entry found\n");
+            try stdout.writeAll("no hook found\n");
         }
     } else {
-        try stdout.writeAll("claude settings: file not found, nothing to remove\n");
+        try stdout.writeAll("not found\n");
     }
 
     const existing_hook = try readFileOptional(allocator, io, hook_script_path);
@@ -383,7 +383,7 @@ fn unsetupClaude(
         try deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
     }
 
-    if (!dry_run) try stdout.writeAll("done: claude unsetup complete\n");
+    if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
 
@@ -414,7 +414,7 @@ fn unsetupOpencode(
         }
     }
 
-    if (!dry_run) try stdout.writeAll("done: opencode unsetup complete\n");
+    if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
 
@@ -453,7 +453,7 @@ fn setupCursor(
         try writeBackupIfExists(allocator, io, hooks_json_path, dry_run);
         try writeJsonValueToPath(allocator, io, hooks_json_path, hooks_json.value, dry_run, stdout);
     } else {
-        try stdout.writeAll("cursor hooks.json already contains smll hook\n");
+        try stdout.writeAll("already installed\n");
     }
 
     const hook_script = buildCursorHookScript();
@@ -467,7 +467,7 @@ fn setupCursor(
         try stdout.writeAll("hook up to date\n");
     }
 
-    if (!dry_run) try stdout.writeAll("done: cursor setup installed\n");
+    if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
 
@@ -504,10 +504,10 @@ fn unsetupCursor(
             try writeBackupIfExists(allocator, io, hooks_json_path, dry_run);
             try writeJsonValueToPath(allocator, io, hooks_json_path, hooks_json.value, dry_run, stdout);
         } else {
-            try stdout.writeAll("cursor hooks.json: no smll hook entry found\n");
+            try stdout.writeAll("no hook found\n");
         }
     } else {
-        try stdout.writeAll("cursor hooks.json: file not found, nothing to remove\n");
+        try stdout.writeAll("not found\n");
     }
 
     const existing_hook = try readFileOptional(allocator, io, hook_script_path);
@@ -516,7 +516,7 @@ fn unsetupCursor(
         try deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
     }
 
-    if (!dry_run) try stdout.writeAll("done: cursor unsetup complete\n");
+    if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
 
