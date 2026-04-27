@@ -371,19 +371,20 @@ fn stripTimestamp(line: []const u8) []const u8 {
     }
 
     // Syslog: "Mon DD [YYYY ]HH:MM:SS" — starts with 3-letter month abbreviation
-    if (c0 >= 'A' and c0 <= 'Z' and line.len >= 3) {
-        const months = [_][]const u8{
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    if (c0 >= 'A' and c0 <= 'Z' and line.len > 4 and line[3] == ' ') {
+        // Check 3-letter month: Jan..Dec all have unique (c0,c2) pairs
+        const is_month = switch (c0) {
+            'J' => (line[1] == 'a' or line[1] == 'u'), // Jan, Jun, Jul
+            'F' => line[1] == 'e', // Feb
+            'M' => (line[1] == 'a'), // Mar, May
+            'A' => (line[1] == 'p' or line[1] == 'u'), // Apr, Aug
+            'S' => line[1] == 'e', // Sep
+            'O' => line[1] == 'c', // Oct
+            'N' => line[1] == 'o', // Nov
+            'D' => line[1] == 'e', // Dec
+            else => false,
         };
-        var is_month = false;
-        for (months) |m| {
-            if (std.mem.startsWith(u8, line, m)) {
-                is_month = true;
-                break;
-            }
-        }
-        if (is_month and line.len > 4 and line[3] == ' ') {
+        if (is_month) {
             // "Apr 23 12:00:00 ..." or "Apr 23 2026 12:00:00 ..."
             // Scan for HH:MM:SS pattern (NN:NN:NN)
             var i: usize = 4;
