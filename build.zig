@@ -554,6 +554,7 @@ pub fn build(b: *std.Build) void {
         "-lSystem",
         "-no_data_const",
         "-dead_strip",
+        "-no_exported_symbols",
         "-syslibroot",
     });
     ld_step.addDirectoryArg(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" });
