@@ -271,7 +271,18 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
         // Sort by saved bytes descending.
         var indices: [MAX_TRACKED_CMDS]usize = undefined;
         for (0..s.cmd_count) |i| indices[i] = i;
-        std.mem.sort(usize, indices[0..s.cmd_count], s.by_cmd[0..s.cmd_count], cmpBySaved);
+        // Insertion sort — MAX_TRACKED_CMDS is 32, avoids pulling std.mem.sort.
+        {
+            var si: usize = 1;
+            while (si < s.cmd_count) : (si += 1) {
+                const key = indices[si];
+                var sj: usize = si;
+                while (sj > 0 and cmpBySaved(s.by_cmd[0..s.cmd_count], key, indices[sj - 1])) : (sj -= 1) {
+                    indices[sj] = indices[sj - 1];
+                }
+                indices[sj] = key;
+            }
+        }
 
         for (indices[0..s.cmd_count]) |idx| {
             const entry = &s.by_cmd[idx];
