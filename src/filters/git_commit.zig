@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -101,7 +102,7 @@ fn groupFileEntries(output: []const u8, writer: *Writer) !void {
                     try writer.writeAll(sigil);
                     try writer.writeAll(" ");
                     try writer.writeAll(dir);
-                    try writer.writeAll(" ×"); try writer.print("{d}\n", .{run_end - i});
+                    try writer.writeAll(" ×"); try ansi.writeDecimal(writer, run_end - i); try writer.writeByte('\n');
                     i = run_end;
                     continue;
                 }

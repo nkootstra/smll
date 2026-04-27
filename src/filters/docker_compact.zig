@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -58,7 +59,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         break :blk "m";
     };
 
-    try writer.print("d{d}{s}", .{ count, state });
+    try writer.writeByte('d'); try ansi.writeDecimal(writer, count); try writer.writeAll(state);
 
     // Second pass: emit name, image, and status for each container.
     var emit = std.mem.splitScalar(u8, stdout, '\n');

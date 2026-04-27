@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -106,7 +107,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             if (!first) try writer.writeByte('\n');
             first = false;
             try writer.writeAll(parent);
-            try writer.print("/ ({d} entries)", .{count});
+            try writer.writeAll("/ ("); try ansi.writeDecimal(writer, count); try writer.writeAll(" entries)");
         } else {
             for (entries.items[i..j]) |e| {
                 if (!first) try writer.writeByte('\n');

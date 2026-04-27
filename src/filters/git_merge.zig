@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const util = @import("util");
@@ -62,12 +63,12 @@ fn groupMergeEntries(output: []const u8, w: *Writer) !void {
             if (run_end - i >= 3) {
                 if (is_stat) {
                     try w.writeAll(d);
-                    try w.writeAll(" ×"); try w.print("{d}\n", .{run_end - i});
+                    try w.writeAll(" ×"); try ansi.writeDecimal(w, run_end - i); try w.writeByte('\n');
                 } else {
                     // Preserve the sigil (+ or -)
                     try w.writeAll(line[0..2]);
                     try w.writeAll(d);
-                    try w.writeAll(" ×"); try w.print("{d}\n", .{run_end - i});
+                    try w.writeAll(" ×"); try ansi.writeDecimal(w, run_end - i); try w.writeByte('\n');
                 }
                 i = run_end;
                 continue;

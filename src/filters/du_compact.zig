@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -124,7 +125,7 @@ pub fn apply(
         }
         try writer.writeByte('\n');
         try emitHumanSize(writer, remaining_bytes);
-        try writer.print("\t(+{d})\n", .{rows.items.len - TOP_N});
+        try writer.writeAll("\t(+"); try ansi.writeDecimal(writer, rows.items.len - TOP_N); try writer.writeAll(")\n");
     } else if (rows.items.len > 0) {
         try writer.writeByte('\n');
     }
@@ -237,7 +238,7 @@ fn emitHumanSize(writer: *Writer, bytes: u64) !void {
         const k = bytes / (1024 / 10); // tenths of KiB = bytes / 102
         try emitTenths(writer, k, 'K');
     } else {
-        try writer.print("{d}", .{bytes});
+        try ansi.writeDecimal(writer, bytes);
     }
 }
 

@@ -425,6 +425,15 @@ pub fn build(b: *std.Build) void {
     npm_install_mod.addImport("ansi", ansi_mod);
     generic_compact_mod.addImport("ansi", ansi_mod);
     build_compact_mod.addImport("ansi", ansi_mod);
+    cat_compact_mod.addImport("ansi", ansi_mod);
+    curl_compact_mod.addImport("ansi", ansi_mod);
+    docker_compact_mod.addImport("ansi", ansi_mod);
+    du_compact_mod.addImport("ansi", ansi_mod);
+    find_compact_mod.addImport("ansi", ansi_mod);
+    git_blame_mod.addImport("ansi", ansi_mod);
+    git_commit_mod.addImport("ansi", ansi_mod);
+    git_merge_mod.addImport("ansi", ansi_mod);
+    kubectl_compact_mod.addImport("ansi", ansi_mod);
 
     const sigil_rle_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/sigil_rle.zig"),
