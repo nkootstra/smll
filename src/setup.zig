@@ -766,8 +766,8 @@ fn writeBackupIfExists(allocator: std.mem.Allocator, io: std.Io, path: []const u
 }
 
 fn writeFileEnsuringParent(io: std.Io, path: []const u8, data: []const u8) !void {
-    if (std.fs.path.dirname(path)) |parent| {
-        try std.Io.Dir.cwd().createDirPath(io, parent);
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
+        try std.Io.Dir.cwd().createDirPath(io, path[0..idx]);
     }
     try std.Io.Dir.cwd().writeFile(io, .{
         .sub_path = path,
