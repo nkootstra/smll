@@ -5,18 +5,6 @@ const Writer = std.Io.Writer;
 
 /// Cumulative token-savings stats stored in ~/.smll/stats.json.
 /// Best-effort: stats failures never block command execution.
-///
-/// JSON format:
-/// {
-///   "commands": 142,
-///   "input_bytes": 2456789,
-///   "output_bytes": 412345,
-///   "by_cmd": {
-///     "git status": { "n": 30, "in": 45000, "out": 3000 },
-///     "git diff":   { "n": 12, "in": 120000, "out": 24000 },
-///     ...
-///   }
-/// }
 
 const stats_dir = ".smll";
 const stats_file = ".smll/stats.json";
@@ -47,7 +35,34 @@ pub const CmdEntry = struct {
     }
 };
 
-/// Build a command label from argv: "git status", "docker ps", "cat", etc.
+// --- helpers to avoid std.fmt ---
+
+fn writeU64(w: *Writer, val: u64) !void {
+    var buf: [20]u8 = undefined;
+    var n = val;
+    var i: usize = buf.len;
+    if (n == 0) { try w.writeByte('0'); return; }
+    while (n > 0) { i -= 1; buf[i] = @intCast('0' + n % 10); n /= 10; }
+    try w.writeAll(buf[i..]);
+}
+
+fn writeU64Padded(w: *Writer, val: u64, width: usize) !void {
+    var buf: [20]u8 = undefined;
+    var n = val;
+    var i: usize = buf.len;
+    if (n == 0) { i -= 1; buf[i] = '0'; } else while (n > 0) { i -= 1; buf[i] = @intCast('0' + n % 10); n /= 10; }
+    const digits = buf.len - i;
+    if (digits < width) { var pad = width - digits; while (pad > 0) : (pad -= 1) try w.writeByte(' '); }
+    try w.writeAll(buf[i..]);
+}
+
+fn joinPath(allocator: Allocator, a: []const u8, b: []const u8) ![]u8 {
+    const buf = try allocator.alloc(u8, a.len + 1 + b.len);
+    @memcpy(buf[0..a.len], a);
+    buf[a.len] = '/';
+    @memcpy(buf[a.len + 1 ..], b);
+    return buf;
+}
 
 /// Record a completed command's byte counts. Best-effort.
 pub fn record(allocator: Allocator, io: Io, home: []const u8, argv: []const []const u8, input_bytes: usize, output_bytes: usize) void {
@@ -55,9 +70,9 @@ pub fn record(allocator: Allocator, io: Io, home: []const u8, argv: []const []co
 }
 
 fn recordInner(allocator: Allocator, io: Io, home: []const u8, argv: []const []const u8, input_bytes: usize, output_bytes: usize) !void {
-    const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, stats_file });
+    const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
-    const dir_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, stats_dir });
+    const dir_path = try joinPath(allocator, home, stats_dir);
     defer allocator.free(dir_path);
 
     var s = load(allocator, io, path);
@@ -65,17 +80,12 @@ fn recordInner(allocator: Allocator, io: Io, home: []const u8, argv: []const []c
     s.input_bytes += input_bytes;
     s.output_bytes += output_bytes;
 
-    // Build command label: "git status", "docker ps", "cat", etc.
     var label_buf: [64]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
 
-    // Find or create per-command entry.
     var found: ?*CmdEntry = null;
     for (s.by_cmd[0..s.cmd_count]) |*entry| {
-        if (std.mem.eql(u8, entry.nameSlice(), label)) {
-            found = entry;
-            break;
-        }
+        if (std.mem.eql(u8, entry.nameSlice(), label)) { found = entry; break; }
     }
     if (found == null and s.cmd_count < MAX_TRACKED_CMDS) {
         const entry = &s.by_cmd[s.cmd_count];
@@ -99,7 +109,6 @@ fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
     const cmd = argv[0];
     const basename = if (std.mem.findScalarLast(u8, cmd, '/')) |idx| cmd[idx + 1 ..] else cmd;
 
-    // For multi-word commands, include subcommand.
     if (argv.len >= 2) {
         const sub = argv[1];
         if (sub.len > 0 and sub[0] != '-') {
@@ -113,8 +122,13 @@ fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
                 std.mem.eql(u8, basename, "bun") or
                 std.mem.eql(u8, basename, "pnpm"))
             {
-                const result = std.fmt.bufPrint(buf, "{s} {s}", .{ basename, sub }) catch return basename;
-                return result;
+                if (basename.len + 1 + sub.len <= buf.len) {
+                    @memcpy(buf[0..basename.len], basename);
+                    buf[basename.len] = ' ';
+                    @memcpy(buf[basename.len + 1 ..][0..sub.len], sub);
+                    return buf[0 .. basename.len + 1 + sub.len];
+                }
+                return basename;
             }
         }
     }
@@ -134,11 +148,9 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
 
     var s: Stats = .{};
     // Hand-rolled parser for the fixed stats JSON schema.
-    // Avoids pulling in std.json.parseFromSlice.
     s.commands = findJsonU64(data, "\"commands\":");
     s.input_bytes = findJsonU64(data, "\"input_bytes\":");
     s.output_bytes = findJsonU64(data, "\"output_bytes\":");
-    // Parse by_cmd entries.
     const by_cmd_marker = "\"by_cmd\":{";
     const by_cmd_start = std.mem.find(u8, data, by_cmd_marker) orelse return s;
     var pos = by_cmd_start + by_cmd_marker.len;
@@ -171,7 +183,6 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
     return s;
 }
 
-/// Find a key:number pattern in JSON text and return the number.
 fn findJsonU64(data: []const u8, key: []const u8) u64 {
     const idx = std.mem.find(u8, data, key) orelse return 0;
     var pos = idx + key.len;
@@ -188,22 +199,28 @@ fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8
     const cwd = Io.Dir.cwd();
     try cwd.createDirPath(io, dir_path);
 
-    // Build JSON manually — avoids pulling in the stringify machinery.
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
     const w = &out.writer;
-    try w.print("{{\"commands\":{d},\"input_bytes\":{d},\"output_bytes\":{d}", .{
-        s.commands, s.input_bytes, s.output_bytes,
-    });
+    try w.writeAll("{\"commands\":");
+    try writeU64(w, s.commands);
+    try w.writeAll(",\"input_bytes\":");
+    try writeU64(w, s.input_bytes);
+    try w.writeAll(",\"output_bytes\":");
+    try writeU64(w, s.output_bytes);
     if (s.cmd_count > 0) {
         try w.writeAll(",\"by_cmd\":{");
         for (s.by_cmd[0..s.cmd_count], 0..) |entry, i| {
             if (i > 0) try w.writeByte(',');
             try w.writeByte('"');
             try w.writeAll(entry.nameSlice());
-            try w.print("\":{{\"n\":{d},\"in\":{d},\"out\":{d}}}", .{
-                entry.stats.n, entry.stats.in_bytes, entry.stats.out_bytes,
-            });
+            try w.writeAll("\":{\"n\":");
+            try writeU64(w, entry.stats.n);
+            try w.writeAll(",\"in\":");
+            try writeU64(w, entry.stats.in_bytes);
+            try w.writeAll(",\"out\":");
+            try writeU64(w, entry.stats.out_bytes);
+            try w.writeByte('}');
         }
         try w.writeByte('}');
     }
@@ -225,7 +242,7 @@ pub fn maybeRun(
 
     for (args[2..]) |arg| {
         if (std.mem.eql(u8, arg, "--reset")) {
-            try reset(io, home);
+            try reset(allocator, io, home);
             try stdout.writeAll("stats reset\n");
             return 0;
         }
@@ -235,14 +252,14 @@ pub fn maybeRun(
     return 0;
 }
 
-fn reset(io: Io, home: []const u8) !void {
-    var path_buf: [512]u8 = undefined;
-    const path = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ home, stats_file }) catch return;
+fn reset(allocator: Allocator, io: Io, home: []const u8) !void {
+    const path = try joinPath(allocator, home, stats_file);
+    defer allocator.free(path);
     Io.Dir.cwd().deleteFile(io, path) catch {};
 }
 
 fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !void {
-    const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, stats_file });
+    const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
     const s = load(allocator, io, path);
 
@@ -255,32 +272,26 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
     const pct = if (s.input_bytes > 0) (saved * 100) / s.input_bytes else 0;
     const tokens_saved = saved / 4;
 
-    // Header.
     try stdout.writeAll("\n  smll stats\n");
     try stdout.writeAll("  ──────────────────────────────────────\n");
-    try stdout.print("  Commands:      {}\n", .{s.commands});
-    try stdout.print("  Input:         {} bytes (", .{s.input_bytes});
+    try stdout.writeAll("  Commands:      "); try writeU64(stdout, s.commands); try stdout.writeByte('\n');
+    try stdout.writeAll("  Input:         "); try writeU64(stdout, s.input_bytes); try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, s.input_bytes);
-    try stdout.writeAll(")\n");
-    try stdout.print("  Output:        {} bytes (", .{s.output_bytes});
+    try stdout.writeAll(")\n  Output:        "); try writeU64(stdout, s.output_bytes); try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, s.output_bytes);
-    try stdout.writeAll(")\n");
-    try stdout.print("  Saved:         {} bytes (", .{saved});
+    try stdout.writeAll(")\n  Saved:         "); try writeU64(stdout, saved); try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, saved);
-    try stdout.print(", {d}%)\n", .{pct});
+    try stdout.writeAll(", "); try writeU64(stdout, pct); try stdout.writeAll("%)\n");
     try stdout.writeAll("  Tokens saved:  ~");
     try writeHumanCount(stdout, tokens_saved);
-    try stdout.print(" (~{})\n", .{tokens_saved});
+    try stdout.writeAll(" (~"); try writeU64(stdout, tokens_saved); try stdout.writeAll(")\n");
 
-    // Per-command table sorted by savings descending.
     if (s.cmd_count > 0) {
         try stdout.writeAll("\n  Command              Runs     Input    Output   Saved\n");
         try stdout.writeAll("  ──────────────────────────────────────────────────────\n");
 
-        // Sort by saved bytes descending.
         var indices: [MAX_TRACKED_CMDS]usize = undefined;
         for (0..s.cmd_count) |i| indices[i] = i;
-        // Insertion sort — MAX_TRACKED_CMDS is 32, avoids pulling std.mem.sort.
         {
             var si: usize = 1;
             while (si < s.cmd_count) : (si += 1) {
@@ -305,7 +316,6 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
             else
                 0;
 
-            // Pad command name to 20 chars.
             const name = entry.nameSlice();
             try stdout.writeAll("  ");
             try stdout.writeAll(name);
@@ -313,11 +323,15 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
                 var pad: usize = 20 - name.len;
                 while (pad > 0) : (pad -= 1) try stdout.writeByte(' ');
             }
-            try stdout.print(" {d: >4}  ", .{entry.stats.n});
+            try stdout.writeByte(' ');
+            try writeU64Padded(stdout, entry.stats.n, 4);
+            try stdout.writeAll("  ");
             try writeHumanBytesFixed(stdout, entry.stats.in_bytes);
             try stdout.writeAll("  ");
             try writeHumanBytesFixed(stdout, entry.stats.out_bytes);
-            try stdout.print("   {d: >2}%\n", .{cmd_pct});
+            try stdout.writeAll("   ");
+            try writeU64Padded(stdout, cmd_pct, 2);
+            try stdout.writeAll("%\n");
         }
     }
     try stdout.writeByte('\n');
@@ -337,40 +351,33 @@ fn cmpBySaved(entries: []const CmdEntry, a: usize, b: usize) bool {
 
 fn writeHumanBytes(w: *Writer, bytes: u64) !void {
     if (bytes < 1024) {
-        try w.print("{d} B", .{bytes});
+        try writeU64(w, bytes); try w.writeAll(" B");
     } else if (bytes < 1024 * 1024) {
-        try w.print("{d}.{d} KB", .{ bytes / 1024, (bytes % 1024) * 10 / 1024 });
+        try writeU64(w, bytes / 1024); try w.writeByte('.'); try writeU64(w, (bytes % 1024) * 10 / 1024); try w.writeAll(" KB");
     } else if (bytes < 1024 * 1024 * 1024) {
-        const mb = bytes / (1024 * 1024);
-        const frac = (bytes % (1024 * 1024)) * 10 / (1024 * 1024);
-        try w.print("{d}.{d} MB", .{ mb, frac });
+        try writeU64(w, bytes / (1024 * 1024)); try w.writeByte('.'); try writeU64(w, (bytes % (1024 * 1024)) * 10 / (1024 * 1024)); try w.writeAll(" MB");
     } else {
-        const gb = bytes / (1024 * 1024 * 1024);
-        const frac = (bytes % (1024 * 1024 * 1024)) * 10 / (1024 * 1024 * 1024);
-        try w.print("{d}.{d} GB", .{ gb, frac });
+        try writeU64(w, bytes / (1024 * 1024 * 1024)); try w.writeByte('.'); try writeU64(w, (bytes % (1024 * 1024 * 1024)) * 10 / (1024 * 1024 * 1024)); try w.writeAll(" GB");
     }
 }
 
-/// Fixed-width human bytes for table columns (8 chars).
 fn writeHumanBytesFixed(w: *Writer, bytes: u64) !void {
     if (bytes < 1024) {
-        try w.print("{d: >5} B ", .{bytes});
+        try writeU64Padded(w, bytes, 5); try w.writeAll(" B ");
     } else if (bytes < 1024 * 1024) {
-        try w.print("{d: >4}.{d} KB", .{ bytes / 1024, (bytes % 1024) * 10 / 1024 });
+        try writeU64Padded(w, bytes / 1024, 4); try w.writeByte('.'); try writeU64(w, (bytes % 1024) * 10 / 1024); try w.writeAll(" KB");
     } else {
-        const mb = bytes / (1024 * 1024);
-        const frac = (bytes % (1024 * 1024)) * 10 / (1024 * 1024);
-        try w.print("{d: >4}.{d} MB", .{ mb, frac });
+        try writeU64Padded(w, bytes / (1024 * 1024), 4); try w.writeByte('.'); try writeU64(w, (bytes % (1024 * 1024)) * 10 / (1024 * 1024)); try w.writeAll(" MB");
     }
 }
 
 fn writeHumanCount(w: *Writer, n: u64) !void {
     if (n < 1000) {
-        try w.print("{d}", .{n});
+        try writeU64(w, n);
     } else if (n < 1_000_000) {
-        try w.print("{d}.{d}K", .{ n / 1000, (n % 1000) / 100 });
+        try writeU64(w, n / 1000); try w.writeByte('.'); try writeU64(w, (n % 1000) / 100); try w.writeByte('K');
     } else {
-        try w.print("{d}.{d}M", .{ n / 1_000_000, (n % 1_000_000) / 100_000 });
+        try writeU64(w, n / 1_000_000); try w.writeByte('.'); try writeU64(w, (n % 1_000_000) / 100_000); try w.writeByte('M');
     }
 }
 
