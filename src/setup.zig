@@ -271,15 +271,9 @@ fn setupClaude(
 
     const hook_same = if (existing_hook) |buf| std.mem.eql(u8, buf, hook_script) else false;
     if (!hook_same) {
-        try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
-        if (dry_run) {
-            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        } else {
-            try writeFileEnsuringParent(io, hook_script_path, hook_script);
-            try stdout.writeAll("wrote ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        }
+        try writeOrReport(allocator, io, hook_script_path, hook_script, dry_run, stdout);
     } else {
-        try stdout.writeAll("claude hook script already up to date\n");
+        try stdout.writeAll("hook up to date\n");
     }
 
     if (!dry_run) try stdout.writeAll("done: claude setup installed\n");
@@ -317,18 +311,10 @@ fn setupOpencode(
     const index_same = if (existing_index) |buf| std.mem.eql(u8, buf, plugin_script) else false;
 
     if (!index_same) {
-        try writeBackupIfExists(allocator, io, index_path, dry_run);
-        if (dry_run) {
-            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(index_path); try stdout.writeByte('\n');
-            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(pkg_path); try stdout.writeByte('\n');
-        } else {
-            try writeFileEnsuringParent(io, index_path, plugin_script);
-            try stdout.writeAll("wrote ");  try stdout.writeAll(index_path); try stdout.writeByte('\n');
-            try writeFileEnsuringParent(io, pkg_path, pkg_json);
-            try stdout.writeAll("wrote ");  try stdout.writeAll(pkg_path); try stdout.writeByte('\n');
-        }
+        try writeOrReport(allocator, io, index_path, plugin_script, dry_run, stdout);
+        try writeOrReport(allocator, io, pkg_path, pkg_json, dry_run, stdout);
     } else {
-        try stdout.writeAll("opencode plugin already up to date\n");
+        try stdout.writeAll("plugin up to date\n");
     }
 
     // Register plugin in opencode.json plugin array.
@@ -394,15 +380,7 @@ fn unsetupClaude(
     const existing_hook = try readFileOptional(allocator, io, hook_script_path);
     defer if (existing_hook) |buf| allocator.free(buf);
     if (existing_hook != null) {
-        try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
-        if (dry_run) {
-            try stdout.writeAll("[dry-run] would delete ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        } else {
-            try deleteFileIfExists(io, hook_script_path);
-            try stdout.writeAll("deleted ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        }
-    } else {
-        try stdout.writeAll("claude hook script: not found\n");
+        try deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
     }
 
     if (!dry_run) try stdout.writeAll("done: claude unsetup complete\n");
@@ -431,17 +409,9 @@ fn unsetupOpencode(
         const existing = try readFileOptional(allocator, io, path);
         defer if (existing) |buf| allocator.free(buf);
         if (existing != null) {
-            if (dry_run) {
-                try stdout.writeAll("[dry-run] would delete ");  try stdout.writeAll(path); try stdout.writeByte('\n');
-            } else {
-                try deleteFileIfExists(io, path);
-                try stdout.writeAll("deleted ");  try stdout.writeAll(path); try stdout.writeByte('\n');
-            }
+            try deleteOrReport(allocator, io, path, dry_run, stdout);
             deleted_any = true;
         }
-    }
-    if (!deleted_any) {
-        try stdout.writeAll("opencode plugin: not found\n");
     }
 
     if (!dry_run) try stdout.writeAll("done: opencode unsetup complete\n");
@@ -492,15 +462,9 @@ fn setupCursor(
 
     const hook_same = if (existing_hook) |buf| std.mem.eql(u8, buf, hook_script) else false;
     if (!hook_same) {
-        try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
-        if (dry_run) {
-            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        } else {
-            try writeFileEnsuringParent(io, hook_script_path, hook_script);
-            try stdout.writeAll("wrote ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        }
+        try writeOrReport(allocator, io, hook_script_path, hook_script, dry_run, stdout);
     } else {
-        try stdout.writeAll("cursor hook script already up to date\n");
+        try stdout.writeAll("hook up to date\n");
     }
 
     if (!dry_run) try stdout.writeAll("done: cursor setup installed\n");
@@ -549,15 +513,7 @@ fn unsetupCursor(
     const existing_hook = try readFileOptional(allocator, io, hook_script_path);
     defer if (existing_hook) |buf| allocator.free(buf);
     if (existing_hook != null) {
-        try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
-        if (dry_run) {
-            try stdout.writeAll("[dry-run] would delete ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        } else {
-            try deleteFileIfExists(io, hook_script_path);
-            try stdout.writeAll("deleted ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
-        }
-    } else {
-        try stdout.writeAll("cursor hook script: not found\n");
+        try deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
     }
 
     if (!dry_run) try stdout.writeAll("done: cursor unsetup complete\n");
@@ -811,6 +767,28 @@ fn writeFileEnsuringParent(io: std.Io, path: []const u8, data: []const u8) !void
         .sub_path = path,
         .data = data,
     });
+}
+
+/// Write or dry-run a file, with backup and status output.
+fn writeOrReport(allocator: std.mem.Allocator, io: std.Io, path: []const u8, data: []const u8, dry_run: bool, stdout: *std.Io.Writer) !void {
+    try writeBackupIfExists(allocator, io, path, dry_run);
+    if (dry_run) {
+        try stdout.writeAll("[dry-run] would write "); try stdout.writeAll(path); try stdout.writeByte('\n');
+    } else {
+        try writeFileEnsuringParent(io, path, data);
+        try stdout.writeAll("wrote "); try stdout.writeAll(path); try stdout.writeByte('\n');
+    }
+}
+
+/// Delete or dry-run a file, with backup and status output.
+fn deleteOrReport(allocator: std.mem.Allocator, io: std.Io, path: []const u8, dry_run: bool, stdout: *std.Io.Writer) !void {
+    try writeBackupIfExists(allocator, io, path, dry_run);
+    if (dry_run) {
+        try stdout.writeAll("[dry-run] would delete "); try stdout.writeAll(path); try stdout.writeByte('\n');
+    } else {
+        try deleteFileIfExists(io, path);
+        try stdout.writeAll("deleted "); try stdout.writeAll(path); try stdout.writeByte('\n');
+    }
 }
 
 fn deleteFileIfExists(io: std.Io, path: []const u8) !void {
