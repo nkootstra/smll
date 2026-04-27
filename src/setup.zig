@@ -782,6 +782,78 @@ fn deleteFileIfExists(io: std.Io, path: []const u8) !void {
     };
 }
 
+/// Minimal JSON serializer for std.json.Value — avoids pulling in std.json.Stringify.
+fn writeJsonValue(w: *std.Io.Writer, val: std.json.Value, depth: usize) !void {
+    switch (val) {
+        .null => try w.writeAll("null"),
+        .bool => |b| try w.writeAll(if (b) "true" else "false"),
+        .integer => |i| {
+            if (i < 0) {
+                try w.writeByte('-');
+                var n: u64 = @intCast(-i);
+                var buf: [20]u8 = undefined;
+                var pos: usize = buf.len;
+                if (n == 0) { pos -= 1; buf[pos] = '0'; } else while (n > 0) { pos -= 1; buf[pos] = @intCast('0' + n % 10); n /= 10; }
+                try w.writeAll(buf[pos..]);
+            } else {
+                var n: u64 = @intCast(i);
+                var buf: [20]u8 = undefined;
+                var pos: usize = buf.len;
+                if (n == 0) { pos -= 1; buf[pos] = '0'; } else while (n > 0) { pos -= 1; buf[pos] = @intCast('0' + n % 10); n /= 10; }
+                try w.writeAll(buf[pos..]);
+            }
+        },
+        .string => |s| {
+            try w.writeByte('"');
+            for (s) |c| {
+                switch (c) {
+                    '"' => try w.writeAll("\\\""),
+                    '\\' => try w.writeAll("\\\\"),
+                    '\n' => try w.writeAll("\\n"),
+                    '\r' => try w.writeAll("\\r"),
+                    '\t' => try w.writeAll("\\t"),
+                    else => try w.writeByte(c),
+                }
+            }
+            try w.writeByte('"');
+        },
+        .array => |arr| {
+            try w.writeAll("[\n");
+            for (arr.items, 0..) |item, idx| {
+                try writeIndent(w, depth + 1);
+                try writeJsonValue(w, item, depth + 1);
+                if (idx + 1 < arr.items.len) try w.writeByte(',');
+                try w.writeByte('\n');
+            }
+            try writeIndent(w, depth);
+            try w.writeByte(']');
+        },
+        .object => |obj| {
+            try w.writeAll("{\n");
+            var it = obj.iterator();
+            var first = true;
+            while (it.next()) |kv| {
+                if (!first) try w.writeAll(",\n");
+                first = false;
+                try writeIndent(w, depth + 1);
+                try w.writeByte('"');
+                try w.writeAll(kv.key_ptr.*);
+                try w.writeAll("\": ");
+                try writeJsonValue(w, kv.value_ptr.*, depth + 1);
+            }
+            if (!first) try w.writeByte('\n');
+            try writeIndent(w, depth);
+            try w.writeByte('}');
+        },
+        else => try w.writeAll("null"),
+    }
+}
+
+fn writeIndent(w: *std.Io.Writer, depth: usize) !void {
+    var i: usize = 0;
+    while (i < depth) : (i += 1) try w.writeAll("  ");
+}
+
 fn writeJsonValueToPath(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -792,7 +864,7 @@ fn writeJsonValueToPath(
 ) !void {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try std.json.Stringify.value(value, .{ .whitespace = .indent_2 }, &out.writer);
+    try writeJsonValue(&out.writer, value, 0);
     try out.writer.writeByte('\n');
 
     if (dry_run) {
