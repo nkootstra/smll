@@ -545,9 +545,13 @@ pub fn build(b: *std.Build) void {
         .name = "smll",
         .root_module = release_mod,
     });
+    // macOS `strip` removes more symbols than Zig's built-in strip.
+    const strip_step = b.addSystemCommand(&.{ "strip", "-x" });
+    strip_step.addFileArg(release_exe.getEmittedBin());
     const install_release = b.addInstallArtifact(release_exe, .{
         .dest_dir = .{ .override = .{ .custom = "release" } },
     });
+    install_release.step.dependOn(&strip_step.step);
     const release_step = b.step("release", "Build stripped ReleaseSmall binary into zig-out/release/");
     release_step.dependOn(&install_release.step);
 
