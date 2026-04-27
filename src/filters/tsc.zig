@@ -67,10 +67,9 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
     }
 }
 
-/// Compress `path:L:C - error TSnnnn: <message>` → `path:L:C TSnnnn`.
-/// Returns true when a line was written. If the line looks like a tsc error
-/// but can't be parsed, falls back to writing the raw line so we never drop
-/// actionable content.
+/// Compress `path:L:C - error TSnnnn: <message>` → `path:L:C TSnnnn: <message>`.
+/// Drops the " - error " boilerplate but keeps the code and message.
+/// Returns true when a line was written.
 fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayList(u8)) !bool {
     const marker = " - error TS";
     const idx = std.mem.find(u8, line, marker) orelse {
@@ -85,12 +84,11 @@ fn writeCompressedError(allocator: Allocator, line: []const u8, out: *std.ArrayL
     };
     const path_lc = line[0..idx];
     const code_start = idx + 9; // past " - error "
-    var code_end = code_start;
-    while (code_end < line.len and line[code_end] != ':') code_end += 1;
-    const code = line[code_start..code_end];
+    // Keep the full TScode: message — just drop the " - error " prefix.
+    const rest = line[code_start..];
     try out.appendSlice(allocator, path_lc);
     try out.append(allocator, ' ');
-    try out.appendSlice(allocator, code);
+    try out.appendSlice(allocator, rest);
     try out.append(allocator, '\n');
     return true;
 }
@@ -119,15 +117,16 @@ test "apply: fixture compresses errors to locations + codes" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
-    // Transformed form: path:L:C TSnnnn (message dropped).
-    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:42:5 TS2322") != null);
+    // Transformed form: path:L:C TSnnnn: message (boilerplate " - error " removed).
+    try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:42:5 TS2322: Type 'string' is not assignable") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/api/client.ts:58:12 TS2339") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/components/Button.tsx:15:7 TS2345") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:8:3 TS7006") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/utils/format.ts:14:10 TS2304") != null);
     try std.testing.expect(std.mem.find(u8, got, "Found 5 errors in 3 files.") != null);
-    // Message text dropped.
-    try std.testing.expect(std.mem.find(u8, got, "is not assignable") == null);
+    // Message text is preserved (agents need it for understanding errors).
+    try std.testing.expect(std.mem.find(u8, got, "is not assignable") != null);
+    // Boilerplate " - error TS" prefix removed.
     try std.testing.expect(std.mem.find(u8, got, "- error TS") == null);
     // Caret and code-context lines dropped.
     try std.testing.expect(std.mem.find(u8, got, "~~~~~~") == null);
@@ -151,7 +150,7 @@ test "apply: strips ANSI" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     try std.testing.expect(std.mem.find(u8, out.written(), "\x1b") == null);
-    try std.testing.expect(std.mem.find(u8, out.written(), "src/a.ts:1:1 TS2322") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "src/a.ts:1:1 TS2322: x") != null);
 }
 
 test "apply: malformed error line falls back to raw" {
