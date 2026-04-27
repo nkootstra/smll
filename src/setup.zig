@@ -1,5 +1,13 @@
 const std = @import("std");
 
+/// Concatenate two byte slices into allocator-owned memory.
+fn concat2(allocator: std.mem.Allocator, a: []const u8, b: []const u8) ![]u8 {
+    const buf = try allocator.alloc(u8, a.len + b.len);
+    @memcpy(buf[0..a.len], a);
+    @memcpy(buf[a.len..], b);
+    return buf;
+}
+
 const Target = enum {
     claude,
     opencode,
@@ -153,13 +161,13 @@ fn setupClaude(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const settings_path = try std.fmt.allocPrint(allocator, "{s}/.claude/settings.json", .{home});
+    const settings_path = try concat2(allocator, home, "/.claude/settings.json");
     defer allocator.free(settings_path);
 
-    const hook_script_path = try std.fmt.allocPrint(allocator, "{s}/.claude/hooks/smll-pretooluse.sh", .{home});
+    const hook_script_path = try concat2(allocator, home, "/.claude/hooks/smll-pretooluse.sh");
     defer allocator.free(hook_script_path);
 
-    const hook_command = try std.fmt.allocPrint(allocator, "bash {s}", .{hook_script_path});
+    const hook_command = try concat2(allocator, "bash ", hook_script_path);
     defer allocator.free(hook_command);
 
     const existing_settings = try readFileOptional(allocator, io, settings_path);
@@ -197,10 +205,10 @@ fn setupClaude(
     if (!hook_same) {
         try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
         if (dry_run) {
-            try stdout.print("[dry-run] would write {s}\n", .{hook_script_path});
+            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         } else {
             try writeFileEnsuringParent(io, hook_script_path, hook_script);
-            try stdout.print("wrote {s}\n", .{hook_script_path});
+            try stdout.writeAll("wrote ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         }
     } else {
         try stdout.writeAll("claude hook script already up to date\n");
@@ -218,13 +226,13 @@ fn setupOpencode(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const plugin_dir = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy", .{home});
+    const plugin_dir = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy");
     defer allocator.free(plugin_dir);
-    const index_path = try std.fmt.allocPrint(allocator, "{s}/index.ts", .{plugin_dir});
+    const index_path = try concat2(allocator, plugin_dir, "/index.ts");
     defer allocator.free(index_path);
-    const pkg_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{plugin_dir});
+    const pkg_path = try concat2(allocator, plugin_dir, "/package.json");
     defer allocator.free(pkg_path);
-    const config_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/opencode.json", .{home});
+    const config_path = try concat2(allocator, home, "/.config/opencode/opencode.json");
     defer allocator.free(config_path);
 
     // Check for RTK conflict.
@@ -249,13 +257,13 @@ fn setupOpencode(
     if (!index_same) {
         try writeBackupIfExists(allocator, io, index_path, dry_run);
         if (dry_run) {
-            try stdout.print("[dry-run] would write {s}\n", .{index_path});
-            try stdout.print("[dry-run] would write {s}\n", .{pkg_path});
+            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(index_path); try stdout.writeByte('\n');
+            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(pkg_path); try stdout.writeByte('\n');
         } else {
             try writeFileEnsuringParent(io, index_path, plugin_script);
-            try stdout.print("wrote {s}\n", .{index_path});
+            try stdout.writeAll("wrote ");  try stdout.writeAll(index_path); try stdout.writeByte('\n');
             try writeFileEnsuringParent(io, pkg_path, pkg_json);
-            try stdout.print("wrote {s}\n", .{pkg_path});
+            try stdout.writeAll("wrote ");  try stdout.writeAll(pkg_path); try stdout.writeByte('\n');
         }
     } else {
         try stdout.writeAll("opencode plugin already up to date\n");
@@ -290,13 +298,13 @@ fn unsetupClaude(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const settings_path = try std.fmt.allocPrint(allocator, "{s}/.claude/settings.json", .{home});
+    const settings_path = try concat2(allocator, home, "/.claude/settings.json");
     defer allocator.free(settings_path);
 
-    const hook_script_path = try std.fmt.allocPrint(allocator, "{s}/.claude/hooks/smll-pretooluse.sh", .{home});
+    const hook_script_path = try concat2(allocator, home, "/.claude/hooks/smll-pretooluse.sh");
     defer allocator.free(hook_script_path);
 
-    const hook_command = try std.fmt.allocPrint(allocator, "bash {s}", .{hook_script_path});
+    const hook_command = try concat2(allocator, "bash ", hook_script_path);
     defer allocator.free(hook_command);
 
     var changed_settings = false;
@@ -326,10 +334,10 @@ fn unsetupClaude(
     if (existing_hook != null) {
         try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
         if (dry_run) {
-            try stdout.print("[dry-run] would delete {s}\n", .{hook_script_path});
+            try stdout.writeAll("[dry-run] would delete ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         } else {
             try deleteFileIfExists(io, hook_script_path);
-            try stdout.print("deleted {s}\n", .{hook_script_path});
+            try stdout.writeAll("deleted ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         }
     } else {
         try stdout.writeAll("claude hook script: not found\n");
@@ -348,12 +356,12 @@ fn unsetupOpencode(
     stderr: *std.Io.Writer,
 ) !u8 {
     _ = stderr;
-    const index_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy/index.ts", .{home});
+    const index_path = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy/index.ts");
     defer allocator.free(index_path);
-    const pkg_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy/package.json", .{home});
+    const pkg_path = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy/package.json");
     defer allocator.free(pkg_path);
     // Also clean up legacy single-file plugin if present.
-    const legacy_path = try std.fmt.allocPrint(allocator, "{s}/.config/opencode/plugins/smll-proxy.ts", .{home});
+    const legacy_path = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy.ts");
     defer allocator.free(legacy_path);
 
     var deleted_any = false;
@@ -362,10 +370,10 @@ fn unsetupOpencode(
         defer if (existing) |buf| allocator.free(buf);
         if (existing != null) {
             if (dry_run) {
-                try stdout.print("[dry-run] would delete {s}\n", .{path});
+                try stdout.writeAll("[dry-run] would delete ");  try stdout.writeAll(path); try stdout.writeByte('\n');
             } else {
                 try deleteFileIfExists(io, path);
-                try stdout.print("deleted {s}\n", .{path});
+                try stdout.writeAll("deleted ");  try stdout.writeAll(path); try stdout.writeByte('\n');
             }
             deleted_any = true;
         }
@@ -386,13 +394,13 @@ fn setupCursor(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const hooks_json_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks.json", .{home});
+    const hooks_json_path = try concat2(allocator, home, "/.cursor/hooks.json");
     defer allocator.free(hooks_json_path);
 
-    const hook_script_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks/smll-pretooluse.sh", .{home});
+    const hook_script_path = try concat2(allocator, home, "/.cursor/hooks/smll-pretooluse.sh");
     defer allocator.free(hook_script_path);
 
-    const hook_command = try std.fmt.allocPrint(allocator, "bash {s}", .{hook_script_path});
+    const hook_command = try concat2(allocator, "bash ", hook_script_path);
     defer allocator.free(hook_command);
 
     const existing = try readFileOptional(allocator, io, hooks_json_path);
@@ -430,10 +438,10 @@ fn setupCursor(
     if (!hook_same) {
         try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
         if (dry_run) {
-            try stdout.print("[dry-run] would write {s}\n", .{hook_script_path});
+            try stdout.writeAll("[dry-run] would write ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         } else {
             try writeFileEnsuringParent(io, hook_script_path, hook_script);
-            try stdout.print("wrote {s}\n", .{hook_script_path});
+            try stdout.writeAll("wrote ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         }
     } else {
         try stdout.writeAll("cursor hook script already up to date\n");
@@ -451,13 +459,13 @@ fn unsetupCursor(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    const hooks_json_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks.json", .{home});
+    const hooks_json_path = try concat2(allocator, home, "/.cursor/hooks.json");
     defer allocator.free(hooks_json_path);
 
-    const hook_script_path = try std.fmt.allocPrint(allocator, "{s}/.cursor/hooks/smll-pretooluse.sh", .{home});
+    const hook_script_path = try concat2(allocator, home, "/.cursor/hooks/smll-pretooluse.sh");
     defer allocator.free(hook_script_path);
 
-    const hook_command = try std.fmt.allocPrint(allocator, "bash {s}", .{hook_script_path});
+    const hook_command = try concat2(allocator, "bash ", hook_script_path);
     defer allocator.free(hook_command);
 
     var changed = false;
@@ -487,10 +495,10 @@ fn unsetupCursor(
     if (existing_hook != null) {
         try writeBackupIfExists(allocator, io, hook_script_path, dry_run);
         if (dry_run) {
-            try stdout.print("[dry-run] would delete {s}\n", .{hook_script_path});
+            try stdout.writeAll("[dry-run] would delete ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         } else {
             try deleteFileIfExists(io, hook_script_path);
-            try stdout.print("deleted {s}\n", .{hook_script_path});
+            try stdout.writeAll("deleted ");  try stdout.writeAll(hook_script_path); try stdout.writeByte('\n');
         }
     } else {
         try stdout.writeAll("cursor hook script: not found\n");
@@ -752,7 +760,7 @@ fn writeBackupIfExists(allocator: std.mem.Allocator, io: std.Io, path: []const u
     defer if (existing) |buf| allocator.free(buf);
     if (existing == null or dry_run) return;
 
-    const backup_path = try std.fmt.allocPrint(allocator, "{s}.bak.smll", .{path});
+    const backup_path = try concat2(allocator, path, ".bak.smll");
     defer allocator.free(backup_path);
     try writeFileEnsuringParent(io, backup_path, existing.?);
 }
@@ -788,10 +796,10 @@ fn writeJsonValueToPath(
     try out.writer.writeByte('\n');
 
     if (dry_run) {
-        try stdout.print("[dry-run] would update {s}\n", .{path});
+        try stdout.writeAll("[dry-run] would update ");  try stdout.writeAll(path); try stdout.writeByte('\n');
     } else {
         try writeFileEnsuringParent(io, path, out.written());
-        try stdout.print("updated {s}\n", .{path});
+        try stdout.writeAll("updated ");  try stdout.writeAll(path); try stdout.writeByte('\n');
     }
 }
 
