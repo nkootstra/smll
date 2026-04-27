@@ -28,24 +28,13 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stdout;
-
     if (stderr.len == 0) return;
-
-    var lines = std.mem.splitScalar(u8, stderr, '\n');
-    while (lines.next()) |line| {
-        if (line.len == 0) continue;
-        if (std.mem.startsWith(u8, line, "Everything up-to-date")) {
-            try writer.writeAll("= up-to-date\n");
-            continue;
-        }
-        if (std.mem.startsWith(u8, line, "To ")) continue;
-        if (util.isGitProgressLine(line)) continue;
-        if (try util.handleBracketRef(line, writer)) continue;
-        const trimmed = std.mem.trimStart(u8, line, " \t");
-        if (util.isRefUpdateLine(trimmed)) {
-            try util.writeRefUpdateLine(trimmed, writer, '>');
-        }
+    // Check for up-to-date before processing ref lines.
+    if (std.mem.find(u8, stderr, "Everything up-to-date") != null) {
+        try writer.writeAll("= up-to-date\n");
+        return;
     }
+    try util.processRefStderr(stderr, writer, '>', "To ", "");
 }
 
 // ---------------------------------------------------------------------------

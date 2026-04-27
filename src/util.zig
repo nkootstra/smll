@@ -50,6 +50,25 @@ pub fn handleBracketRef(line: []const u8, writer: *std.Io.Writer) !bool {
     return false;
 }
 
+/// Generic processor for git remote-transfer stderr lines.
+/// Skips progress lines, handles bracket refs ([new branch], etc.),
+/// and emits ref-update lines with the given sigil.
+pub fn processRefStderr(stderr: []const u8, writer: *std.Io.Writer, sigil: u8, skip_prefix: []const u8, skip_needle: []const u8) !void {
+    if (stderr.len == 0) return;
+    var lines = std.mem.splitScalar(u8, stderr, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (skip_prefix.len > 0 and std.mem.startsWith(u8, line, skip_prefix)) continue;
+        if (isGitProgressLine(line)) continue;
+        if (skip_needle.len > 0 and std.mem.find(u8, line, skip_needle) != null) continue;
+        if (try handleBracketRef(line, writer)) continue;
+        const trimmed = std.mem.trimStart(u8, line, " \t");
+        if (isRefUpdateLine(trimmed)) {
+            try writeRefUpdateLine(trimmed, writer, sigil);
+        }
+    }
+}
+
 /// True when `s` is exactly 40 hexadecimal characters — the shape of a git SHA-1.
 pub fn isHex40(s: []const u8) bool {
     if (s.len != 40) return false;

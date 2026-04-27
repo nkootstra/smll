@@ -27,21 +27,7 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stdout;
-
-    if (stderr.len == 0) return;
-
-    var lines = std.mem.splitScalar(u8, stderr, '\n');
-    while (lines.next()) |line| {
-        if (line.len == 0) continue;
-        if (std.mem.startsWith(u8, line, "From ")) continue;
-        if (util.isGitProgressLine(line)) continue;
-        if (std.mem.find(u8, line, "-> FETCH_HEAD") != null) continue;
-        if (try util.handleBracketRef(line, writer)) continue;
-        const trimmed = std.mem.trimStart(u8, line, " \t");
-        if (util.isRefUpdateLine(trimmed)) {
-            try util.writeRefUpdateLine(trimmed, writer, '<');
-        }
-    }
+    try util.processRefStderr(stderr, writer, '<', "From ", "-> FETCH_HEAD");
 }
 
 // ---------------------------------------------------------------------------
