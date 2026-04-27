@@ -133,46 +133,55 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
     defer allocator.free(data);
 
     var s: Stats = .{};
-    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, data, .{});
-    defer parsed.deinit();
-
-    if (parsed.value != .object) return s;
-    if (parsed.value.object.get("commands")) |v| {
-        if (v == .integer) s.commands = @intCast(@max(0, v.integer));
-    }
-    if (parsed.value.object.get("input_bytes")) |v| {
-        if (v == .integer) s.input_bytes = @intCast(@max(0, v.integer));
-    }
-    if (parsed.value.object.get("output_bytes")) |v| {
-        if (v == .integer) s.output_bytes = @intCast(@max(0, v.integer));
-    }
-    // Load per-command stats.
-    if (parsed.value.object.get("by_cmd")) |by_cmd| {
-        if (by_cmd == .object) {
-            var it = by_cmd.object.iterator();
-            while (it.next()) |kv| {
-                if (s.cmd_count >= MAX_TRACKED_CMDS) break;
-                const name = kv.key_ptr.*;
-                const val = kv.value_ptr.*;
-                if (val != .object) continue;
-                var entry = &s.by_cmd[s.cmd_count];
-                const copy_len = @min(name.len, entry.name.len);
-                @memcpy(entry.name[0..copy_len], name[0..copy_len]);
-                entry.name_len = copy_len;
-                if (val.object.get("n")) |v| {
-                    if (v == .integer) entry.stats.n = @intCast(@max(0, v.integer));
-                }
-                if (val.object.get("in")) |v| {
-                    if (v == .integer) entry.stats.in_bytes = @intCast(@max(0, v.integer));
-                }
-                if (val.object.get("out")) |v| {
-                    if (v == .integer) entry.stats.out_bytes = @intCast(@max(0, v.integer));
-                }
-                s.cmd_count += 1;
-            }
+    // Hand-rolled parser for the fixed stats JSON schema.
+    // Avoids pulling in std.json.parseFromSlice.
+    s.commands = findJsonU64(data, "\"commands\":");
+    s.input_bytes = findJsonU64(data, "\"input_bytes\":");
+    s.output_bytes = findJsonU64(data, "\"output_bytes\":");
+    // Parse by_cmd entries.
+    const by_cmd_marker = "\"by_cmd\":{";
+    const by_cmd_start = std.mem.find(u8, data, by_cmd_marker) orelse return s;
+    var pos = by_cmd_start + by_cmd_marker.len;
+    while (pos < data.len and s.cmd_count < MAX_TRACKED_CMDS) {
+        while (pos < data.len and (data[pos] == ' ' or data[pos] == ',' or data[pos] == '\n' or data[pos] == '\r' or data[pos] == '\t')) pos += 1;
+        if (pos >= data.len or data[pos] == '}') break;
+        if (data[pos] != '"') break;
+        pos += 1;
+        const key_start = pos;
+        while (pos < data.len and data[pos] != '"') pos += 1;
+        const key = data[key_start..pos];
+        if (pos < data.len) pos += 1;
+        while (pos < data.len and data[pos] != '{') pos += 1;
+        if (pos >= data.len) break;
+        const obj_start = pos;
+        var depth: usize = 0;
+        while (pos < data.len) : (pos += 1) {
+            if (data[pos] == '{') { depth += 1; } else if (data[pos] == '}') { depth -= 1; if (depth == 0) { pos += 1; break; } }
         }
+        const obj_slice = data[obj_start..pos];
+        var entry = &s.by_cmd[s.cmd_count];
+        const copy_len = @min(key.len, entry.name.len);
+        @memcpy(entry.name[0..copy_len], key[0..copy_len]);
+        entry.name_len = copy_len;
+        entry.stats.n = findJsonU64(obj_slice, "\"n\":");
+        entry.stats.in_bytes = findJsonU64(obj_slice, "\"in\":");
+        entry.stats.out_bytes = findJsonU64(obj_slice, "\"out\":");
+        s.cmd_count += 1;
     }
     return s;
+}
+
+/// Find a key:number pattern in JSON text and return the number.
+fn findJsonU64(data: []const u8, key: []const u8) u64 {
+    const idx = std.mem.find(u8, data, key) orelse return 0;
+    var pos = idx + key.len;
+    while (pos < data.len and (data[pos] == ' ' or data[pos] == '\t')) pos += 1;
+    var val: u64 = 0;
+    while (pos < data.len and data[pos] >= '0' and data[pos] <= '9') {
+        val = val *| 10 +| (data[pos] - '0');
+        pos += 1;
+    }
+    return val;
 }
 
 fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8, s: Stats) !void {

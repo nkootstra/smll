@@ -512,13 +512,14 @@ fn loadOrCreateCursorHooksJson(
     allocator: std.mem.Allocator,
     existing: ?[]const u8,
 ) !std.json.Parsed(std.json.Value) {
-    if (existing) |buf| {
-        if (std.mem.trim(u8, buf, " \t\r\n").len == 0) {
-            return try std.json.parseFromSlice(std.json.Value, allocator, "{\"version\":1}", .{});
+    const input = blk: {
+        if (existing) |buf| {
+            if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk "{\"version\":1}";
+            break :blk buf;
         }
-        return try std.json.parseFromSlice(std.json.Value, allocator, buf, .{});
-    }
-    return try std.json.parseFromSlice(std.json.Value, allocator, "{\"version\":1}", .{});
+        break :blk "{\"version\":1}";
+    };
+    return try miniJsonParse(allocator, input);
 }
 
 fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_command: []const u8) !bool {
@@ -593,13 +594,14 @@ fn loadOrCreateJsonObject(
     allocator: std.mem.Allocator,
     existing: ?[]const u8,
 ) !std.json.Parsed(std.json.Value) {
-    if (existing) |buf| {
-        if (std.mem.trim(u8, buf, " \t\r\n").len == 0) {
-            return try std.json.parseFromSlice(std.json.Value, allocator, "{}", .{});
+    const input = blk: {
+        if (existing) |buf| {
+            if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk "{}";
+            break :blk buf;
         }
-        return try std.json.parseFromSlice(std.json.Value, allocator, buf, .{});
-    }
-    return try std.json.parseFromSlice(std.json.Value, allocator, "{}", .{});
+        break :blk "{}";
+    };
+    return try miniJsonParse(allocator, input);
 }
 
 fn ensureClaudePreToolHook(pa: std.mem.Allocator, root: *std.json.Value, hook_command: []const u8) !bool {
@@ -919,4 +921,131 @@ test "containsRtkIntegration detects common RTK markers" {
     try std.testing.expect(containsRtkIntegration("plugin: run-toolkit"));
     try std.testing.expect(containsRtkIntegration("{\"name\":\"rtk\"}"));
     try std.testing.expect(!containsRtkIntegration("plugin: smll-proxy"));
+}
+
+/// Minimal JSON parser producing std.json.Value. Handles objects, arrays,
+/// strings, integers, booleans, and null — sufficient for settings/hooks JSON.
+/// Replaces std.json.parseFromSlice to avoid pulling in the full std.json parser.
+fn miniJsonParse(child_allocator: std.mem.Allocator, input: []const u8) !std.json.Parsed(std.json.Value) {
+    const arena = try child_allocator.create(std.heap.ArenaAllocator);
+    arena.* = std.heap.ArenaAllocator.init(child_allocator);
+    errdefer {
+        arena.deinit();
+        child_allocator.destroy(arena);
+    }
+    const pa = arena.allocator();
+    var pos: usize = 0;
+    const value = try parseValue(pa, input, &pos);
+    return .{ .arena = arena, .value = value };
+}
+
+fn skipWs(input: []const u8, pos: *usize) void {
+    while (pos.* < input.len and (input[pos.*] == ' ' or input[pos.*] == '\t' or input[pos.*] == '\n' or input[pos.*] == '\r')) pos.* += 1;
+}
+
+const JsonParseError = error{ UnexpectedEndOfInput, OutOfMemory };
+
+fn parseValue(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+    skipWs(input, pos);
+    if (pos.* >= input.len) return error.UnexpectedEndOfInput;
+    return switch (input[pos.*]) {
+        '{' => try parseObject(pa, input, pos),
+        '[' => try parseArray(pa, input, pos),
+        '"' => .{ .string = try parseString(pa, input, pos) },
+        't' => blk: { pos.* += 4; break :blk .{ .bool = true }; },
+        'f' => blk: { pos.* += 5; break :blk .{ .bool = false }; },
+        'n' => blk: { pos.* += 4; break :blk .null; },
+        '-', '0'...'9' => try parseNumber(input, pos),
+        else => error.UnexpectedEndOfInput,
+    };
+}
+
+fn parseObject(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+    pos.* += 1; // skip {
+    var obj: std.json.ObjectMap = .empty;
+    skipWs(input, pos);
+    if (pos.* < input.len and input[pos.*] == '}') { pos.* += 1; return .{ .object = obj }; }
+    while (pos.* < input.len) {
+        skipWs(input, pos);
+        const key = try parseString(pa, input, pos);
+        skipWs(input, pos);
+        if (pos.* < input.len and input[pos.*] == ':') pos.* += 1;
+        const val = try parseValue(pa, input, pos);
+        try obj.put(pa, key, val);
+        skipWs(input, pos);
+        if (pos.* < input.len and input[pos.*] == ',') { pos.* += 1; continue; }
+        break;
+    }
+    skipWs(input, pos);
+    if (pos.* < input.len and input[pos.*] == '}') pos.* += 1;
+    return .{ .object = obj };
+}
+
+fn parseArray(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+    pos.* += 1; // skip [
+    var arr = std.json.Array.init(pa);
+    skipWs(input, pos);
+    if (pos.* < input.len and input[pos.*] == ']') { pos.* += 1; return .{ .array = arr }; }
+    while (pos.* < input.len) {
+        const val = try parseValue(pa, input, pos);
+        try arr.append(val);
+        skipWs(input, pos);
+        if (pos.* < input.len and input[pos.*] == ',') { pos.* += 1; continue; }
+        break;
+    }
+    skipWs(input, pos);
+    if (pos.* < input.len and input[pos.*] == ']') pos.* += 1;
+    return .{ .array = arr };
+}
+
+fn parseString(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseError![]const u8 {
+    if (pos.* >= input.len or input[pos.*] != '"') return error.UnexpectedEndOfInput;
+    pos.* += 1;
+    const start = pos.*;
+    var has_escape = false;
+    while (pos.* < input.len and input[pos.*] != '"') {
+        if (input[pos.*] == '\\') { has_escape = true; pos.* += 2; } else pos.* += 1;
+    }
+    const raw = input[start..pos.*];
+    if (pos.* < input.len) pos.* += 1; // skip closing "
+    if (!has_escape) return raw;
+    // Unescape
+    var buf = try pa.alloc(u8, raw.len);
+    var i: usize = 0;
+    var o: usize = 0;
+    while (i < raw.len) {
+        if (raw[i] == '\\' and i + 1 < raw.len) {
+            i += 1;
+            buf[o] = switch (raw[i]) { 'n' => '\n', 'r' => '\r', 't' => '\t', else => raw[i] };
+            o += 1; i += 1;
+        } else { buf[o] = raw[i]; o += 1; i += 1; }
+    }
+    return buf[0..o];
+}
+
+fn parseNumber(input: []const u8, pos: *usize) JsonParseError!std.json.Value {
+    const start = pos.*;
+    if (input[pos.*] == '-') pos.* += 1;
+    while (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') pos.* += 1;
+    // Skip fractional / exponent parts (treat as integer if no fraction)
+    if (pos.* < input.len and input[pos.*] == '.') {
+        pos.* += 1;
+        while (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') pos.* += 1;
+    }
+    if (pos.* < input.len and (input[pos.*] == 'e' or input[pos.*] == 'E')) {
+        pos.* += 1;
+        if (pos.* < input.len and (input[pos.*] == '+' or input[pos.*] == '-')) pos.* += 1;
+        while (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') pos.* += 1;
+    }
+    const num_str = input[start..pos.*];
+    // Parse as integer
+    var neg = false;
+    var idx: usize = 0;
+    if (num_str[0] == '-') { neg = true; idx = 1; }
+    var val: i64 = 0;
+    while (idx < num_str.len and num_str[idx] >= '0' and num_str[idx] <= '9') {
+        val = val *| 10 +| (num_str[idx] - '0');
+        idx += 1;
+    }
+    return .{ .integer = if (neg) -val else val };
 }
