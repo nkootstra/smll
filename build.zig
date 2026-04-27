@@ -541,24 +541,24 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("generic_compact", generic_compact_mod);
     release_mod.addImport("cat_compact", cat_compact_mod);
 
-    // Build object file, then link with system ld -no_data_const to eliminate
-    // the __DATA_CONST segment (saves 16KB from page alignment waste).
-    const release_obj = b.addObject(.{
-        .name = "smll",
-        .root_module = release_mod,
-    });
-    const ld_step = b.addSystemCommand(&.{"ld", "-o"});
-    const release_bin = ld_step.addOutputFileArg("smll");
-    ld_step.addFileArg(release_obj.getEmittedBin());
-    ld_step.addArgs(&.{
-        "-lSystem",
-        "-no_data_const",
-        "-dead_strip",
-        "-no_exported_symbols",
-        "-syslibroot",
-    });
-    ld_step.addDirectoryArg(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" });
-    // macOS `strip` removes more symbols than Zig's built-in strip.
+    // On macOS: build object file, then link with system ld -no_data_const to
+    // eliminate the __DATA_CONST segment (saves 16KB from page alignment waste).
+    // On other platforms: use standard executable linking.
+    const is_macos = target.result.os.tag == .macos;
+    const release_bin = blk: {
+        if (is_macos) {
+            const release_obj = b.addObject(.{ .name = "smll", .root_module = release_mod });
+            const ld_cmd = b.addSystemCommand(&.{"ld", "-o"});
+            const bin = ld_cmd.addOutputFileArg("smll");
+            ld_cmd.addFileArg(release_obj.getEmittedBin());
+            ld_cmd.addArgs(&.{ "-lSystem", "-no_data_const", "-dead_strip", "-no_exported_symbols", "-syslibroot" });
+            ld_cmd.addDirectoryArg(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" });
+            break :blk bin;
+        } else {
+            const rel_exe = b.addExecutable(.{ .name = "smll", .root_module = release_mod });
+            break :blk rel_exe.getEmittedBin();
+        }
+    };
     const strip_step = b.addSystemCommand(&.{ "strip" });
     strip_step.addFileArg(release_bin);
     const install_release = b.addInstallFile(release_bin, "release/smll");
