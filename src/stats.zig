@@ -264,7 +264,7 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
     const tokens_saved = saved / 4;
 
     try stdout.writeAll("\n  smll stats\n");
-    try stdout.writeAll("  ──────────────────────────────────────\n");
+    try stdout.writeAll("  --------------------------------------\n");
     try stdout.writeAll("  Commands:      "); try writeU64(stdout, s.commands); try stdout.writeByte('\n');
     try stdout.writeAll("  Input:         "); try writeU64(stdout, s.input_bytes); try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, s.input_bytes);
@@ -279,7 +279,7 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
 
     if (s.cmd_count > 0) {
         try stdout.writeAll("\n  Command              Runs     Input    Output   Saved\n");
-        try stdout.writeAll("  ──────────────────────────────────────────────────────\n");
+        try stdout.writeAll("  ------------------------------------------------------\n");
 
         var indices: [MAX_TRACKED_CMDS]usize = undefined;
         for (0..s.cmd_count) |i| indices[i] = i;
