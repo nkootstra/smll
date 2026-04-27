@@ -1,5 +1,55 @@
 const std = @import("std");
 
+/// True when `line` is a git transfer progress line that should be filtered.
+pub fn isGitProgressLine(line: []const u8) bool {
+    if (line.len == 0) return false;
+    return switch (line[0]) {
+        'r' => std.mem.startsWith(u8, line, "remote"),
+        'C' => std.mem.startsWith(u8, line, "Counting") or std.mem.startsWith(u8, line, "Compressing"),
+        'R' => std.mem.startsWith(u8, line, "Receiving") or std.mem.startsWith(u8, line, "Resolving"),
+        'W' => std.mem.startsWith(u8, line, "Writing objects"),
+        'T' => std.mem.startsWith(u8, line, "Total "),
+        'D' => std.mem.startsWith(u8, line, "Delta "),
+        else => false,
+    };
+}
+
+/// Handle bracket-tagged ref lines like [new branch], [deleted], [rejected].
+/// Returns true if the line was handled.
+pub fn handleBracketRef(line: []const u8, writer: *std.Io.Writer) !bool {
+    if (std.mem.find(u8, line, "[new branch]") != null or
+        std.mem.find(u8, line, "[new tag]") != null)
+    {
+        const bracket_end = std.mem.find(u8, line, "]") orelse return false;
+        const after = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
+        try writer.writeAll("+ new ");
+        try writer.writeAll(after);
+        try writer.writeByte('\n');
+        return true;
+    }
+    if (std.mem.find(u8, line, "[deleted]") != null) {
+        const bracket_end = std.mem.find(u8, line, "]") orelse return false;
+        const ref = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
+        if (ref.len > 0) {
+            try writer.writeAll("- deleted ");
+            try writer.writeAll(ref);
+            try writer.writeByte('\n');
+        }
+        return true;
+    }
+    if (std.mem.find(u8, line, "[rejected]") != null) {
+        const bracket_end = std.mem.find(u8, line, "]") orelse return false;
+        const rest = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
+        if (rest.len > 0) {
+            try writer.writeAll("! rejected ");
+            try writer.writeAll(rest);
+            try writer.writeByte('\n');
+        }
+        return true;
+    }
+    return false;
+}
+
 /// True when `s` is exactly 40 hexadecimal characters — the shape of a git SHA-1.
 pub fn isHex40(s: []const u8) bool {
     if (s.len != 40) return false;

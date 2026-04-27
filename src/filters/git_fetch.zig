@@ -34,45 +34,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         if (std.mem.startsWith(u8, line, "From ")) continue;
-        if (std.mem.startsWith(u8, line, "remote")) continue;
-        if (std.mem.startsWith(u8, line, "Counting") or
-            std.mem.startsWith(u8, line, "Compressing") or
-            std.mem.startsWith(u8, line, "Receiving") or
-            std.mem.startsWith(u8, line, "Resolving") or
-            std.mem.startsWith(u8, line, "Total ") or
-            std.mem.startsWith(u8, line, "Delta ")) continue;
+        if (util.isGitProgressLine(line)) continue;
         if (std.mem.find(u8, line, "-> FETCH_HEAD") != null) continue;
-
-        if (std.mem.find(u8, line, "[new branch]") != null or
-            std.mem.find(u8, line, "[new tag]") != null)
-        {
-            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
-            const after_bracket = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
-            try writer.writeAll("+ new ");
-            try writer.writeAll(after_bracket);
-            try writer.writeByte('\n');
-            continue;
-        }
-        if (std.mem.find(u8, line, "[deleted]") != null) {
-            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
-            const ref = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
-            if (ref.len > 0) {
-                try writer.writeAll("- deleted ");
-                try writer.writeAll(ref);
-                try writer.writeByte('\n');
-            }
-            continue;
-        }
-        if (std.mem.find(u8, line, "[rejected]") != null) {
-            const bracket_end = std.mem.find(u8, line, "]") orelse continue;
-            const rest = std.mem.trim(u8, line[bracket_end + 1 ..], " \t");
-            if (rest.len > 0) {
-                try writer.writeAll("! rejected ");
-                try writer.writeAll(rest);
-                try writer.writeByte('\n');
-            }
-            continue;
-        }
+        if (try util.handleBracketRef(line, writer)) continue;
         const trimmed = std.mem.trimStart(u8, line, " \t");
         if (util.isRefUpdateLine(trimmed)) {
             try util.writeRefUpdateLine(trimmed, writer, '<');
