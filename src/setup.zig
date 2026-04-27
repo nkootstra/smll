@@ -202,14 +202,7 @@ fn parseTarget(s: []const u8) ?Target {
 }
 
 fn printUsage(stderr: *std.Io.Writer) !void {
-    try stderr.writeAll(
-        \\Usage:
-        \\  smll --setup <claude|opencode|cursor> [--dry-run]
-        \\  smll --setup=<claude|opencode|cursor> [--dry-run]
-        \\  smll --unsetup <claude|opencode|cursor> [--dry-run]
-        \\  smll --unsetup=<claude|opencode|cursor> [--dry-run]
-        \\
-    );
+    try stderr.writeAll("Usage: smll --[un]setup[=]<claude|opencode|cursor> [--dry-run]\n");
 }
 
 fn runAction(
@@ -254,16 +247,10 @@ fn setupClaude(
     const existing_settings = try readFileOptional(allocator, io, settings_path);
     defer if (existing_settings) |buf| allocator.free(buf);
 
-    if (existing_settings) |buf| {
-        if (containsRtkIntegration(buf)) {
-            try stderr.writeAll("smll setup (claude): detected existing RTK integration in ~/.claude/settings.json\n");
-            try stderr.writeAll("Please remove RTK hooks first, then run smll --setup claude again.\n");
-            return 1;
-        }
-    }
+    if (try checkRtkConflict(existing_settings, "claude", "settings.json", stderr)) return 1;
 
     var settings_json = loadOrCreateJsonObject(allocator, existing_settings) catch {
-        try stderr.writeAll("smll setup (claude): settings.json is not valid JSON\n");
+        try writeJsonError(stderr, "settings.json");
         return 1;
     };
     defer settings_json.deinit();
@@ -319,13 +306,7 @@ fn setupOpencode(
     // Check for RTK conflict.
     const existing_config = try readFileOptional(allocator, io, config_path);
     defer if (existing_config) |buf| allocator.free(buf);
-    if (existing_config) |buf| {
-        if (containsRtkIntegration(buf)) {
-            try stderr.writeAll("smll setup (opencode): detected existing RTK integration in opencode.json\n");
-            try stderr.writeAll("Please remove RTK plugin first, then run smll --setup opencode again.\n");
-            return 1;
-        }
-    }
+    if (try checkRtkConflict(existing_config, "opencode", "opencode.json", stderr)) return 1;
 
     // Write plugin package (index.ts + package.json).
     const plugin_script = buildOpencodePluginScript();
@@ -352,7 +333,7 @@ fn setupOpencode(
 
     // Register plugin in opencode.json plugin array.
     var config_json = loadOrCreateJsonObject(allocator, existing_config) catch {
-        try stderr.writeAll("smll setup (opencode): opencode.json is not valid JSON\n");
+        try writeJsonError(stderr, "opencode.json");
         return 1;
     };
     defer config_json.deinit();
@@ -394,7 +375,7 @@ fn unsetupClaude(
 
     if (existing_settings) |_| {
         var settings_json = loadOrCreateJsonObject(allocator, existing_settings) catch {
-            try stderr.writeAll("smll unsetup (claude): settings.json is not valid JSON\n");
+            try writeJsonError(stderr, "settings.json");
             return 1;
         };
         defer settings_json.deinit();
@@ -487,16 +468,10 @@ fn setupCursor(
     const existing = try readFileOptional(allocator, io, hooks_json_path);
     defer if (existing) |buf| allocator.free(buf);
 
-    if (existing) |buf| {
-        if (containsRtkIntegration(buf)) {
-            try stderr.writeAll("smll setup (cursor): detected existing RTK integration in ~/.cursor/hooks.json\n");
-            try stderr.writeAll("Please remove RTK hooks first, then run smll --setup cursor again.\n");
-            return 1;
-        }
-    }
+    if (try checkRtkConflict(existing, "cursor", "hooks.json", stderr)) return 1;
 
     var hooks_json = loadOrCreateCursorHooksJson(allocator, existing) catch {
-        try stderr.writeAll("smll setup (cursor): hooks.json is not valid JSON\n");
+        try writeJsonError(stderr, "hooks.json");
         return 1;
     };
     defer hooks_json.deinit();
@@ -555,7 +530,7 @@ fn unsetupCursor(
 
     if (existing) |_| {
         var hooks_json = loadOrCreateCursorHooksJson(allocator, existing) catch {
-            try stderr.writeAll("smll unsetup (cursor): hooks.json is not valid JSON\n");
+            try writeJsonError(stderr, "hooks.json");
             return 1;
         };
         defer hooks_json.deinit();
@@ -950,6 +925,22 @@ fn buildOpencodePluginScript() []const u8 {
     \\const W=new Set(["git","rg","tree","find","docker","kubectl","gh","ps","ls","du","curl","make","cargo","pytest","jest","vitest","go","tsc","npm","pnpm","yarn","bun","cat"]);
     \\export const SmllProxyPlugin=async({$})=>({"tool.execute.before":async(i,o)=>{const t=String(i?.tool??"").toLowerCase();if(t!=="bash"&&t!=="shell")return;const a=o?.args;if(!a||typeof a!=="object")return;const c=(a.command??"").trim();if(!c||/^smll(\\s|$)/.test(c))return;const f=c.split(/\\s+/)[0];if(W.has(f))a.command=`smll ${c}`}});
     ;
+}
+
+fn writeJsonError(stderr: *std.Io.Writer, file: []const u8) !void {
+    try stderr.writeAll(file);
+    try stderr.writeAll(": invalid JSON\n");
+}
+
+fn checkRtkConflict(data: ?[]const u8, target: []const u8, file: []const u8, stderr: *std.Io.Writer) !bool {
+    const buf = data orelse return false;
+    if (!containsRtkIntegration(buf)) return false;
+    try stderr.writeAll("RTK detected in ");
+    try stderr.writeAll(file);
+    try stderr.writeAll(". Remove RTK first, then run smll --setup ");
+    try stderr.writeAll(target);
+    try stderr.writeAll(" again.\n");
+    return true;
 }
 
 fn containsRtkIntegration(s: []const u8) bool {
