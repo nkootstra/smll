@@ -46,15 +46,6 @@ fn writeU64(w: *Writer, val: u64) !void {
     try w.writeAll(buf[i..]);
 }
 
-fn writeU64Padded(w: *Writer, val: u64, width: usize) !void {
-    var buf: [20]u8 = undefined;
-    var n = val;
-    var i: usize = buf.len;
-    if (n == 0) { i -= 1; buf[i] = '0'; } else while (n > 0) { i -= 1; buf[i] = @intCast('0' + n % 10); n /= 10; }
-    const digits = buf.len - i;
-    if (digits < width) { var pad = width - digits; while (pad > 0) : (pad -= 1) try w.writeByte(' '); }
-    try w.writeAll(buf[i..]);
-}
 
 fn joinPath(allocator: Allocator, a: []const u8, b: []const u8) ![]u8 {
     const buf = try allocator.alloc(u8, a.len + 1 + b.len);
@@ -324,13 +315,13 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
                 while (pad > 0) : (pad -= 1) try stdout.writeByte(' ');
             }
             try stdout.writeByte(' ');
-            try writeU64Padded(stdout, entry.stats.n, 4);
-            try stdout.writeAll("  ");
-            try writeHumanBytesFixed(stdout, entry.stats.in_bytes);
-            try stdout.writeAll("  ");
-            try writeHumanBytesFixed(stdout, entry.stats.out_bytes);
-            try stdout.writeAll("   ");
-            try writeU64Padded(stdout, cmd_pct, 2);
+            try writeU64(stdout, entry.stats.n);
+            try stdout.writeByte('\t');
+            try writeHumanBytes(stdout, entry.stats.in_bytes);
+            try stdout.writeByte('\t');
+            try writeHumanBytes(stdout, entry.stats.out_bytes);
+            try stdout.writeByte('\t');
+            try writeU64(stdout, cmd_pct);
             try stdout.writeAll("%\n");
         }
     }
@@ -361,15 +352,6 @@ fn writeHumanBytes(w: *Writer, bytes: u64) !void {
     }
 }
 
-fn writeHumanBytesFixed(w: *Writer, bytes: u64) !void {
-    if (bytes < 1024) {
-        try writeU64Padded(w, bytes, 5); try w.writeAll(" B ");
-    } else if (bytes < 1024 * 1024) {
-        try writeU64Padded(w, bytes / 1024, 4); try w.writeByte('.'); try writeU64(w, (bytes % 1024) * 10 / 1024); try w.writeAll(" KB");
-    } else {
-        try writeU64Padded(w, bytes / (1024 * 1024), 4); try w.writeByte('.'); try writeU64(w, (bytes % (1024 * 1024)) * 10 / (1024 * 1024)); try w.writeAll(" MB");
-    }
-}
 
 fn writeHumanCount(w: *Writer, n: u64) !void {
     if (n < 1000) {
