@@ -168,14 +168,14 @@ test "apply: emits @ hunk sigil on simple show" {
     try std.testing.expect(std.mem.find(u8, out, "+line1") != null);
 }
 
-test "apply: compact format drops body text on body show" {
+test "apply: compact format preserves body text on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
     // Subject preserved in compact header
     try std.testing.expect(std.mem.find(u8, out, "feat: extend a.txt") != null);
-    // Body is dropped in compact mode
-    try std.testing.expect(std.mem.find(u8, out, "This body explains") == null);
+    // Body is now preserved (agents need context)
+    try std.testing.expect(std.mem.find(u8, out, "This body explains") != null);
     // Diff is still present
     try std.testing.expect(std.mem.find(u8, out, "d a.txt") != null);
 }
