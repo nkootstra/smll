@@ -361,6 +361,21 @@ fn runWrapper(
 var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
 
+/// Write stdout with generic_compact fallback: if the specific filter didn't
+/// match but the output is large enough, apply generic_compact rather than
+/// passing through raw. This catches commands inside bespoke dispatch blocks
+/// whose specific filter rejects the output shape.
+fn writeWithFallback(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !void {
+    if (generic_compact.matches(stdout_slice)) {
+        generic_compact.apply(allocator, stdout_slice, writer) catch {
+            try writer.writeAll(stdout_slice);
+            return;
+        };
+    } else {
+        try writer.writeAll(stdout_slice);
+    }
+}
+
 fn runWrapperInner(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -511,7 +526,7 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            try writeWithFallback(allocator, stdout_slice, writer);
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
@@ -533,7 +548,7 @@ fn runWrapperInner(
             return exit_code;
         }
         if (std.mem.eql(u8, cmd_basename, "tree")) {
-            try writer.writeAll(stdout_slice);
+            try writeWithFallback(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
@@ -603,7 +618,7 @@ fn runWrapperInner(
                 return exit_code;
             }
         }
-        try writer.writeAll(stdout_slice);
+        try writeWithFallback(allocator, stdout_slice, writer);
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
     }
@@ -638,7 +653,7 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            try writeWithFallback(allocator, stdout_slice, writer);
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
@@ -649,11 +664,8 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "ls")) {
         if (!lossless and ls_compact.matches(stdout_slice)) {
             ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
-                // ParsedNothing: content was present but parser extracted nothing
-                // (e.g. eza/exa/lsd date format, non-English locale). Fall through
-                // to raw passthrough instead of returning empty/misleading output.
                 if (err == error.ParsedNothing) {
-                    try writer.writeAll(stdout_slice);
+                    try writeWithFallback(allocator, stdout_slice, writer);
                 } else {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
@@ -661,7 +673,7 @@ fn runWrapperInner(
                 }
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            try writeWithFallback(allocator, stdout_slice, writer);
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
@@ -766,7 +778,7 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            try writeWithFallback(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
         }
         return exit_code;
@@ -781,7 +793,7 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            try writeWithFallback(allocator, stdout_slice, writer);
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
