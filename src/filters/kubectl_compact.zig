@@ -56,7 +56,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
     try writer.print("k{d}{s}", .{ count, agg });
 
-    // Pass 2: emit names (annotate unhealthy).
+    // Pass 2: emit names with ready status for all pods.
     var pass2 = std.mem.splitScalar(u8, stdout, '\n');
     _ = pass2.next(); // skip header
     while (pass2.next()) |line| {
@@ -65,15 +65,19 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
+        const status = fieldAt(line, status_col);
+        const ready = fieldAt(line, ready_col);
         if (!isHealthyRunning(line, ready_col, status_col)) {
-            const status = fieldAt(line, status_col);
-            const ready = fieldAt(line, ready_col);
+            // Unhealthy: show ready + status
             try writer.writeByte('(');
-            if (!readyIsFull(ready)) {
-                try writer.writeAll(ready);
-                try writer.writeByte(',');
-            }
+            try writer.writeAll(ready);
+            try writer.writeByte(',');
             try writer.writeAll(status);
+            try writer.writeByte(')');
+        } else {
+            // Healthy: show ready count to confirm health
+            try writer.writeByte('(');
+            try writer.writeAll(ready);
             try writer.writeByte(')');
         }
     }
@@ -169,7 +173,8 @@ test "apply: mixed state annotates unhealthy pods" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.startsWith(u8, got, "k3m"));
-    try std.testing.expect(std.mem.find(u8, got, "pod-ok ") != null or std.mem.endsWith(u8, got, "pod-ok\n"));
+    // Healthy pods now show ready status too
+    try std.testing.expect(std.mem.find(u8, got, "pod-ok(1/1)") != null);
     try std.testing.expect(std.mem.find(u8, got, "pod-bad(0/1,CrashLoopBackOff)") != null);
     try std.testing.expect(std.mem.find(u8, got, "pod-pend(0/1,Pending)") != null);
 }

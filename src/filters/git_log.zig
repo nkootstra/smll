@@ -58,6 +58,7 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
     var sha7: [7]u8 = undefined;
     var sha7_valid = false;
     var subject_emitted = false;
+    var in_body = false;
     var first_out = true;
 
     while (lines.next()) |line| {
@@ -65,28 +66,46 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
             sha7 = util.sha7(line["commit ".len..][0..40]);
             sha7_valid = true;
             subject_emitted = false;
+            in_body = false;
             continue;
         }
-        if (subject_emitted or !sha7_valid) continue;
-        // Accept the first 4-space-indented non-empty line as subject.
-        if (!std.mem.startsWith(u8, line, "    ")) continue;
-        const subject = std.mem.trim(u8, line[4..], " \t\r");
-        if (subject.len == 0) continue;
-        // Batch output: combine sha7 + space into single write.
-        var hdr: [9]u8 = undefined;
-        if (!first_out) {
-            hdr[0] = '\n';
-            @memcpy(hdr[1..8], &sha7);
-            hdr[8] = ' ';
-            try writer.writeAll(&hdr);
-        } else {
-            @memcpy(hdr[0..7], &sha7);
-            hdr[7] = ' ';
-            try writer.writeAll(hdr[0..8]);
+        if (!sha7_valid) continue;
+        // Skip header lines (Author:, Date:, Merge:)
+        if (!subject_emitted) {
+            if (!std.mem.startsWith(u8, line, "    ")) continue;
+            const subject = std.mem.trim(u8, line[4..], " \t\r");
+            if (subject.len == 0) continue;
+            // Emit sha7 + subject
+            var hdr: [9]u8 = undefined;
+            if (!first_out) {
+                hdr[0] = '\n';
+                @memcpy(hdr[1..8], &sha7);
+                hdr[8] = ' ';
+                try writer.writeAll(&hdr);
+            } else {
+                @memcpy(hdr[0..7], &sha7);
+                hdr[7] = ' ';
+                try writer.writeAll(hdr[0..8]);
+            }
+            try writer.writeAll(subject);
+            first_out = false;
+            subject_emitted = true;
+            in_body = true;
+            continue;
         }
-        try writer.writeAll(subject);
-        first_out = false;
-        subject_emitted = true;
+        // Body lines: 4-space-indented text after subject
+        if (in_body and std.mem.startsWith(u8, line, "    ")) {
+            const body_line = std.mem.trim(u8, line[4..], " \t\r");
+            if (body_line.len > 0) {
+                try writer.writeByte('\n');
+                try writer.writeAll("  ");
+                try writer.writeAll(body_line);
+            }
+        } else if (line.len == 0 and in_body) {
+            // Blank line between subject and body — skip
+        } else {
+            in_body = false;
+        }
     }
     if (!first_out) try writer.writeByte('\n');
 }
@@ -450,7 +469,7 @@ test "apply: preserves trailing newline when input has one" {
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
 }
 
-test "applyCompact: emits sha7 + subject, drops body/date/author" {
+test "applyCompact: emits sha7 + subject + body, drops date/author" {
     const allocator = std.testing.allocator;
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -463,8 +482,8 @@ test "applyCompact: emits sha7 + subject, drops body/date/author" {
     // Date + author stripped
     try std.testing.expect(std.mem.find(u8, got, "2026-04-18") == null);
     try std.testing.expect(std.mem.find(u8, got, "Alice Anderson") == null);
-    // Body stripped
-    try std.testing.expect(std.mem.find(u8, got, "This body explains") == null);
+    // Body preserved (agents need context)
+    try std.testing.expect(std.mem.find(u8, got, "This body explains") != null);
     // Strictly smaller than default apply
     const lossless = try applyToString(allocator, linear_fixture);
     defer allocator.free(lossless);

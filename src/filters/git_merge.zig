@@ -13,7 +13,18 @@ const util = @import("util");
 //   ! failed                      "Automatic merge failed"
 // matches() = false (argv-only dispatch).
 
-pub fn matches(input: []const u8) bool { _ = input; return false; }
+pub fn matches(input: []const u8) bool {
+    // Detect git merge output by checking first non-empty line for known markers.
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        if (std.mem.startsWith(u8, line, "Merge made by")) return true;
+        if (std.mem.startsWith(u8, line, "Updating ") and std.mem.find(u8, line, "..") != null) return true;
+        if (std.mem.startsWith(u8, line, "Already up to date")) return true;
+        return false;
+    }
+    return false;
+}
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
     // Phase 1: generate standard output
@@ -116,6 +127,8 @@ fn applyInner(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) 
         }
         try w.writeAll("@ merge "); try w.writeAll(strat); try w.writeByte('\n');
         try emitBody(&it, w);
+    } else if (std.mem.startsWith(u8, first, "Already up to date")) {
+        try w.writeAll("up to date\n");
     } else {
         try emitConflicts(&it, w);
     }
@@ -180,14 +193,18 @@ fn str(allocator: Allocator, so: []const u8, se: []const u8) ![]u8 {
     return allocator.dupe(u8, out.written());
 }
 
-test "matches: always false" {
+test "matches: detects merge output" {
     try std.testing.expect(!matches(""));
-    try std.testing.expect(!matches("Updating abc..def\nFast-forward\n"));
+    try std.testing.expect(matches("Updating abc..def\nFast-forward\n"));
     try std.testing.expect(!matches("CONFLICT (content): x\n"));
+    try std.testing.expect(matches("Merge made by the 'ort' strategy.\n"));
+    try std.testing.expect(matches("Already up to date.\n"));
+    try std.testing.expect(!matches("random text\n"));
 }
 
-test "pipe-mode safety" {
-    try std.testing.expect(!matches(fixture_ff));
+test "pipe-mode matches merge fixtures" {
+    try std.testing.expect(matches(fixture_ff));
+    // conflict stdout starts with conflict markers, not merge header
     try std.testing.expect(!matches(fixture_conflict_stdout));
 }
 

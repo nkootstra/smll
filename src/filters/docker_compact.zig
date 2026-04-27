@@ -60,15 +60,44 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
     try writer.print("d{d}{s}", .{ count, state });
 
-    // Second pass: emit names.
+    // Second pass: emit name, image, and status for each container.
     var emit = std.mem.splitScalar(u8, stdout, '\n');
     _ = emit.next(); // skip header
+    const image_col = findColumnStart(header, "IMAGE") orelse 0;
     while (emit.next()) |line| {
         if (line.len == 0) continue;
         const name = extractName(line, names_col);
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
+        // Append image (truncated at column boundary) and status.
+        if (image_col > 0 and image_col < line.len) {
+            const img_start = image_col;
+            // Image field ends at next multi-space gap.
+            var img_end = img_start;
+            while (img_end < line.len) : (img_end += 1) {
+                if (img_end + 1 < line.len and line[img_end] == ' ' and line[img_end + 1] == ' ') break;
+            }
+            const image = std.mem.trim(u8, line[img_start..img_end], " ");
+            if (image.len > 0) {
+                try writer.writeByte('(');
+                try writer.writeAll(image);
+                // Add status indicator.
+                if (status_col > 0 and status_col < line.len) {
+                    const st = std.mem.trim(u8, line[status_col..@min(status_col + 25, line.len)], " ");
+                    // Trim status at first multi-space gap.
+                    var st_end: usize = 0;
+                    while (st_end < st.len) : (st_end += 1) {
+                        if (st_end + 1 < st.len and st[st_end] == ' ' and st[st_end + 1] == ' ') break;
+                    }
+                    if (st_end > 0) {
+                        try writer.writeByte(',');
+                        try writer.writeAll(st[0..st_end]);
+                    }
+                }
+                try writer.writeByte(')');
+            }
+        }
     }
     try writer.writeByte('\n');
 }

@@ -41,7 +41,66 @@ const cat_compact = @import("cat_compact");
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
 // after git_status and before git_show — the branch output shape is distinct from
 // both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit };
+const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_merge, git_blame, cargo_test, jest, tsc, go_test, pytest, kubectl_compact, docker_compact, npm_install, tree, ls_compact, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
+
+/// Pipe-mode wrapper for find_compact — detects `find -ls` tabular output.
+const FindCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return find_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return find_compact.apply(allocator, input, stderr, writer);
+    }
+};
+
+/// Pipe-mode wrapper for du_compact — detects `du` size+path output.
+/// Uses sort_desc=true in pipe mode to get top-N + prefix compression.
+const DuCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return du_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return du_compact.apply(allocator, input, stderr, writer, true);
+    }
+};
+
+/// Pipe-mode wrapper for curl_compact — detects curl -v/vvv stderr output
+/// (lines starting with *, >, <). In pipe mode the verbose output comes as
+/// stdin, so we pass it as stderr to the filter.
+const CurlCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return curl_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        _ = stderr;
+        // In pipe mode, the curl -v output arrives as stdin (our `input`).
+        // curl_compact expects stdout (body) + stderr (verbose output).
+        // Pass empty stdout and the input as stderr.
+        return curl_compact.apply(allocator, "", input, writer);
+    }
+};
+
+/// Pipe-mode wrapper for build_compact — detects build progress chatter.
+const BuildCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return build_compact.matches(input, "");
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return build_compact.apply(allocator, input, stderr, writer);
+    }
+};
+
+/// Pipe-mode wrapper for generic_compact — adapts its 3-arg apply() to the
+/// 4-arg signature expected by the pipe-mode filter dispatch.
+const GenericCompactPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return generic_compact.matches(input);
+    }
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        _ = stderr;
+        return generic_compact.apply(allocator, input, writer);
+    }
+};
 
 /// Pipe-mode wrapper that uses git_log.applyCompact instead of apply.
 /// This matches the v0.6 "lossy by default" posture for pipe mode.
@@ -503,7 +562,7 @@ fn runWrapperInner(
     const is_go_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "go");
     if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
         if (!lossless) {
-            if (is_pytest and pytest.matches(stdout_slice)) {
+            if (is_pytest and (pytest.matches(stdout_slice) or pytest.matches(stderr_slice))) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
@@ -519,7 +578,7 @@ fn runWrapperInner(
                 };
                 return exit_code;
             }
-            if (is_jest and jest.matches(stdout_slice)) {
+            if (is_jest and (jest.matches(stdout_slice) or jest.matches(stderr_slice))) {
                 jest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
@@ -527,7 +586,7 @@ fn runWrapperInner(
                 };
                 return exit_code;
             }
-            if (is_tsc and tsc.matches(stdout_slice)) {
+            if (is_tsc and (tsc.matches(stdout_slice) or tsc.matches(stderr_slice))) {
                 tsc.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                     try stderr_writer.writeAll(stderr_slice);
@@ -674,7 +733,15 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
+            // No bespoke filter matched within the columnar block.
+            // Apply generic compactor for large non-tabular output (docker compose, etc.).
+            if (!lossless and generic_compact.matches(stdout_slice)) {
+                generic_compact.apply(allocator, stdout_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                };
+            } else {
+                try writer.writeAll(stdout_slice);
+            }
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
@@ -690,7 +757,8 @@ fn runWrapperInner(
     const is_build_subcmd = std.mem.eql(u8, arg1, "build");
     const is_cargo_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
     const is_go_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "go");
-    if (is_make or is_cargo_build or is_go_build) {
+    const is_zig_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "zig");
+    if (is_make or is_cargo_build or is_go_build or is_zig_build) {
         if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
             build_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 try writer.writeAll(stdout_slice);
@@ -981,7 +1049,16 @@ fn runWrapperInner(
             }
         },
     } else {
-        try writer.writeAll(stdout_slice);
+        // Unknown git subcommand: apply generic compactor for large output.
+        if (!lossless and generic_compact.matches(stdout_slice)) {
+            generic_compact.apply(allocator, stdout_slice, writer) catch {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+                return exit_code;
+            };
+        } else {
+            try writer.writeAll(stdout_slice);
+        }
         try stderr_writer.writeAll(stderr_slice);
     }
 

@@ -255,19 +255,45 @@ fn parentDir(path: []const u8) []const u8 {
     return "";
 }
 
+/// Extract the file path from a status content line like "new file:   src/foo.rs".
+fn extractPath(content: []const u8) []const u8 {
+    const prefixes = [_][]const u8{
+        "modified:   ", "new file:   ", "deleted:    ",
+        "renamed:    ", "copied:     ", "typechange: ",
+        "both modified:   ", "both added:      ",
+    };
+    for (prefixes) |p| {
+        if (std.mem.startsWith(u8, content, p)) return content[p.len..];
+    }
+    return content;
+}
+
 fn flushRun(writer: *Writer, sections: []const Section, contents: []const []const u8, sigil: u8, dir: []const u8) !void {
     if (sections.len == 0) return;
     if (sections.len >= DIR_GROUP_THRESHOLD and dir.len > 0) {
-        // Grouped output: "S src/filters/ ×5"
-        if (sigil == 'U') {
-            try writer.writeAll("UU ");
-        } else {
-            try writer.writeByte(sigil);
-            try writer.writeByte(' ');
+        // Dirname-prefix RLE: emit first entry fully, then subsequent
+        // entries without the shared directory prefix so agents can
+        // see every individual filename.
+        for (sections, contents, 0..) |sec, content, i| {
+            if (i == 0) {
+                writeSectionEntry(writer, sec, content) catch {};
+            } else {
+                // Emit just sigil + filename (strip shared dir prefix)
+                const path = extractPath(content);
+                if (path.len > dir.len and std.mem.startsWith(u8, path, dir)) {
+                    if (sigil == 'U') {
+                        writer.writeAll("UU ") catch {};
+                    } else {
+                        writer.writeByte(sigil) catch {};
+                        writer.writeByte(' ') catch {};
+                    }
+                    writer.writeAll(path[dir.len..]) catch {};
+                    writer.writeByte('\n') catch {};
+                } else {
+                    writeSectionEntry(writer, sec, content) catch {};
+                }
+            }
         }
-        try writer.writeAll(dir);
-        try writer.writeAll(" \xc3\x97");
-        try writer.print("{d}\n", .{sections.len});
     } else {
         for (sections, contents) |sec, content| {
             writeSectionEntry(writer, sec, content) catch {};

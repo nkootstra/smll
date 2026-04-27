@@ -24,8 +24,9 @@ pub fn matches(input: []const u8) bool {
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        // Current branch: "* <name>"
-        if (std.mem.startsWith(u8, line, "* ")) return true;
+        // Current branch: "* <name>" where name starts with a non-space char.
+        // Rejects curl -v output which starts with "*   Trying..." (extra spaces).
+        if (line.len >= 3 and line[0] == '*' and line[1] == ' ' and line[2] != ' ') return true;
         // Other branch: "  <name>" (exactly two spaces)
         if (line.len >= 3 and line[0] == ' ' and line[1] == ' ' and line[2] != ' ') return true;
         // Any other first non-blank line → not a branch list.
