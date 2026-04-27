@@ -249,7 +249,7 @@ fn setupClaude(
 
     if (try checkRtkConflict(existing_settings, "claude", "settings.json", stderr)) return 1;
 
-    var settings_json = loadOrCreateJsonObject(allocator, existing_settings) catch {
+    var settings_json = loadOrCreateJsonObject(allocator, existing_settings, false) catch {
         try writeJsonError(stderr, "settings.json");
         return 1;
     };
@@ -318,7 +318,7 @@ fn setupOpencode(
     }
 
     // Register plugin in opencode.json plugin array.
-    var config_json = loadOrCreateJsonObject(allocator, existing_config) catch {
+    var config_json = loadOrCreateJsonObject(allocator, existing_config, false) catch {
         try writeJsonError(stderr, "opencode.json");
         return 1;
     };
@@ -360,7 +360,7 @@ fn unsetupClaude(
     defer if (existing_settings) |buf| allocator.free(buf);
 
     if (existing_settings) |_| {
-        var settings_json = loadOrCreateJsonObject(allocator, existing_settings) catch {
+        var settings_json = loadOrCreateJsonObject(allocator, existing_settings, false) catch {
             try writeJsonError(stderr, "settings.json");
             return 1;
         };
@@ -440,7 +440,7 @@ fn setupCursor(
 
     if (try checkRtkConflict(existing, "cursor", "hooks.json", stderr)) return 1;
 
-    var hooks_json = loadOrCreateCursorHooksJson(allocator, existing) catch {
+    var hooks_json = loadOrCreateJsonObject(allocator, existing, true) catch {
         try writeJsonError(stderr, "hooks.json");
         return 1;
     };
@@ -493,7 +493,7 @@ fn unsetupCursor(
     defer if (existing) |buf| allocator.free(buf);
 
     if (existing) |_| {
-        var hooks_json = loadOrCreateCursorHooksJson(allocator, existing) catch {
+        var hooks_json = loadOrCreateJsonObject(allocator, existing, true) catch {
             try writeJsonError(stderr, "hooks.json");
             return 1;
         };
@@ -520,19 +520,6 @@ fn unsetupCursor(
     return 0;
 }
 
-fn loadOrCreateCursorHooksJson(
-    allocator: std.mem.Allocator,
-    existing: ?[]const u8,
-) !JParsed {
-    const input = blk: {
-        if (existing) |buf| {
-            if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk "{\"version\":1}";
-            break :blk buf;
-        }
-        break :blk "{\"version\":1}";
-    };
-    return try miniJsonParse(allocator, input);
-}
 
 fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *JValue, hook_command: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidSettingsJson;
@@ -609,13 +596,14 @@ fn buildCursorHookScript() []const u8 {
 fn loadOrCreateJsonObject(
     allocator: std.mem.Allocator,
     existing: ?[]const u8,
+    needs_version: bool,
 ) !JParsed {
     const input = blk: {
         if (existing) |buf| {
-            if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk "{}";
+            if (std.mem.trim(u8, buf, " \t\r\n").len == 0) break :blk if (needs_version) "{\"version\":1}" else "{}";
             break :blk buf;
         }
-        break :blk "{}";
+        break :blk if (needs_version) "{\"version\":1}" else "{}";
     };
     return try miniJsonParse(allocator, input);
 }
