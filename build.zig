@@ -541,16 +541,26 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("generic_compact", generic_compact_mod);
     release_mod.addImport("cat_compact", cat_compact_mod);
 
-    const release_exe = b.addExecutable(.{
+    // Build object file, then link with system ld -no_data_const to eliminate
+    // the __DATA_CONST segment (saves 16KB from page alignment waste).
+    const release_obj = b.addObject(.{
         .name = "smll",
         .root_module = release_mod,
     });
+    const ld_step = b.addSystemCommand(&.{"ld", "-o"});
+    const release_bin = ld_step.addOutputFileArg("smll");
+    ld_step.addFileArg(release_obj.getEmittedBin());
+    ld_step.addArgs(&.{
+        "-lSystem",
+        "-no_data_const",
+        "-dead_strip",
+        "-syslibroot",
+    });
+    ld_step.addDirectoryArg(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" });
     // macOS `strip` removes more symbols than Zig's built-in strip.
     const strip_step = b.addSystemCommand(&.{ "strip" });
-    strip_step.addFileArg(release_exe.getEmittedBin());
-    const install_release = b.addInstallArtifact(release_exe, .{
-        .dest_dir = .{ .override = .{ .custom = "release" } },
-    });
+    strip_step.addFileArg(release_bin);
+    const install_release = b.addInstallFile(release_bin, "release/smll");
     install_release.step.dependOn(&strip_step.step);
     const release_step = b.step("release", "Build stripped ReleaseSmall binary into zig-out/release/");
     release_step.dependOn(&install_release.step);
