@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- ~250 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- ~220 KB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
