@@ -24,25 +24,7 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
 
-    if (stderr.len > 0) {
-        var lines = std.mem.splitScalar(u8, stderr, '\n');
-        while (lines.next()) |line| {
-            if (line.len == 0) continue;
-            if (std.mem.startsWith(u8, line, "From ")) continue;
-            if (std.mem.startsWith(u8, line, "remote")) continue;
-            if (std.mem.startsWith(u8, line, "Counting") or
-                std.mem.startsWith(u8, line, "Compressing") or
-                std.mem.startsWith(u8, line, "Receiving") or
-                std.mem.startsWith(u8, line, "Resolving") or
-                std.mem.startsWith(u8, line, "Total ") or
-                std.mem.startsWith(u8, line, "Delta ")) continue;
-            if (std.mem.find(u8, line, "-> FETCH_HEAD") != null) continue;
-            const trimmed = std.mem.trimStart(u8, line, " \t");
-            if (util.isRefUpdateLine(trimmed)) {
-                try util.writeRefUpdateLine(trimmed, writer, '<');
-            }
-        }
-    }
+    try util.processRefStderr(stderr, writer, '<', "From ", "-> FETCH_HEAD");
 
     if (stdout.len > 0) {
         if (std.mem.find(u8, stdout, "Already up to date.") != null) {

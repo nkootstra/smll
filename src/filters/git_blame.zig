@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const util = @import("util");
@@ -87,7 +88,7 @@ fn truncateBlocks(output: []const u8, w: *Writer) !void {
                     if (next.len == 0) continue;
                     if (next[0] == 'b') {
                         // Next block starts — emit summary + block header
-                        try w.print(" (+{d})\n", .{extra});
+                        try w.writeAll(" (+"); try ansi.writeDecimal(w, extra); try w.writeAll(")\n");
                         // Reset and process this new block header
                         block_line_count = 0;
                         try w.writeAll(next);
@@ -97,7 +98,7 @@ fn truncateBlocks(output: []const u8, w: *Writer) !void {
                     if (next[0] == ' ') extra += 1;
                 } else {
                     // End of output — emit summary
-                    try w.print(" (+{d})\n", .{extra});
+                    try w.writeAll(" (+"); try ansi.writeDecimal(w, extra); try w.writeAll(")\n");
                 }
             }
         } else {

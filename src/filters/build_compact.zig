@@ -24,24 +24,6 @@ const Writer = std.Io.Writer;
 // invocations at column 0. Go progress covers `go build:` leader lines.
 const CARGO_PROGRESS_PREFIX = "   Compiling ";
 const GO_PROGRESS_PREFIX = "go build:";
-const MAKE_PROGRESS_PREFIXES = [_][]const u8{
-    "gcc ",
-    "cc ",
-    "g++ ",
-    "clang ",
-    "clang++ ",
-    "CC ",
-    "CXX ",
-    "LD ",
-    "LINK ",
-    "AR ",
-};
-
-// Warnings/errors ALWAYS pass through verbatim. Detection uses plain
-// substring presence to cover both compiler ("warning:", "error[E0308]:")
-// and make-shell-style ("WARN", "ERROR", "FAIL") shapes.
-const WARN_NEEDLES = [_][]const u8{ "warning:", "WARN" };
-const ERR_NEEDLES = [_][]const u8{ "error:", "error[", "ERROR", "FAIL" };
 
 pub fn matches(stdout: []const u8, stderr: []const u8) bool {
     return scanForAny(stdout) or scanForAny(stderr);
@@ -66,21 +48,23 @@ const LineKind = enum {
 };
 
 fn classify(line: []const u8) LineKind {
-    // Progress classification first — these prefixes are anchored, so
-    // a "   Compiling foo" line never accidentally matches "warning".
+    if (line.len == 0) return .other;
+    // Progress classification first — these prefixes are anchored.
     if (std.mem.startsWith(u8, line, CARGO_PROGRESS_PREFIX)) return .cargo_progress;
     if (std.mem.startsWith(u8, line, GO_PROGRESS_PREFIX)) return .go_progress;
-    for (MAKE_PROGRESS_PREFIXES) |p| {
-        if (std.mem.startsWith(u8, line, p)) return .make_progress;
+    // Make progress: first-char switch avoids iterating the prefix array.
+    switch (line[0]) {
+        'g' => if (std.mem.startsWith(u8, line, "gcc ") or std.mem.startsWith(u8, line, "g++ ")) return .make_progress,
+        'c' => if (std.mem.startsWith(u8, line, "cc ") or std.mem.startsWith(u8, line, "clang ") or std.mem.startsWith(u8, line, "clang++ ")) return .make_progress,
+        'C' => if (std.mem.startsWith(u8, line, "CC ") or std.mem.startsWith(u8, line, "CXX ")) return .make_progress,
+        'L' => if (std.mem.startsWith(u8, line, "LD ") or std.mem.startsWith(u8, line, "LINK ")) return .make_progress,
+        'A' => if (std.mem.startsWith(u8, line, "AR ")) return .make_progress,
+        else => {},
     }
-    // Errors before warnings — a line containing "error:" should not be
-    // reclassified as a warning if it also happens to contain "WARN".
-    for (ERR_NEEDLES) |n| {
-        if (std.mem.find(u8, line, n) != null) return .err;
-    }
-    for (WARN_NEEDLES) |n| {
-        if (std.mem.find(u8, line, n) != null) return .warning;
-    }
+    // Errors before warnings.
+    if (std.mem.find(u8, line, "error:") != null or std.mem.find(u8, line, "error[") != null or
+        std.mem.find(u8, line, "ERROR") != null or std.mem.find(u8, line, "FAIL") != null) return .err;
+    if (std.mem.find(u8, line, "warning:") != null or std.mem.find(u8, line, "WARN") != null) return .warning;
     return .other;
 }
 
@@ -98,13 +82,13 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &make_count, &go_count);
 
     if (cargo_count > 0) {
-        try writer.print("Compiled {d} (cargo)\n", .{cargo_count});
+        try writer.writeAll("Compiled "); try ansi.writeDecimal(writer, cargo_count); try writer.writeAll(" (cargo)\n");
     }
     if (make_count > 0) {
-        try writer.print("Compiled {d} (make)\n", .{make_count});
+        try writer.writeAll("Compiled "); try ansi.writeDecimal(writer, make_count); try writer.writeAll(" (make)\n");
     }
     if (go_count > 0) {
-        try writer.print("Compiled {d} (go)\n", .{go_count});
+        try writer.writeAll("Compiled "); try ansi.writeDecimal(writer, go_count); try writer.writeAll(" (go)\n");
     }
 }
 

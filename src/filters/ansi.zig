@@ -1,6 +1,17 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+/// Write a usize as decimal digits to an Io.Writer. Shared across filters
+/// to avoid monomorphizing std.fmt.print for each call site.
+pub noinline fn writeDecimal(w: *std.Io.Writer, val: usize) !void {
+    var buf: [20]u8 = undefined;
+    var n = val;
+    var i: usize = buf.len;
+    if (n == 0) { try w.writeByte('0'); return; }
+    while (n > 0) { i -= 1; buf[i] = @intCast('0' + n % 10); n /= 10; }
+    try w.writeAll(buf[i..]);
+}
+
 /// Strip CSI (`\x1b[...m`, cursor moves, etc.) and OSC (`\x1b]...\x07` or
 /// `\x1b\\`) escape sequences from `input`.
 ///

@@ -323,6 +323,12 @@ const WrapperResult = struct {
     output_bytes: usize,
 };
 
+/// Write stdout + stderr passthrough. Used as error fallback in filter dispatch.
+noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Writer, stdout_slice: []const u8, stderr_slice: []const u8) void {
+    writer.writeAll(stdout_slice) catch {};
+    stderr_writer.writeAll(stderr_slice) catch {};
+}
+
 fn runWrapper(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -400,15 +406,18 @@ fn runWrapperInner(
     else
         outer_cmd;
 
-    var ls_env: std.process.Environ.Map = undefined;
-    var ls_env_inited = false;
-    defer if (ls_env_inited) ls_env.deinit();
+    var ls_env_old_lc_all: ?[]const u8 = null;
+    var ls_env_modified = false;
+    defer if (ls_env_modified) {
+        // Restore original LC_ALL (best-effort, single-threaded so safe).
+        @constCast(environ).put("LC_ALL", ls_env_old_lc_all orelse "") catch {};
+    };
     const spawn_env: ?*const std.process.Environ.Map = blk: {
         if (std.mem.eql(u8, cmd_basename, "ls")) {
-            ls_env = try environ.clone(allocator);
-            ls_env_inited = true;
-            try ls_env.put("LC_ALL", "C");
-            break :blk &ls_env;
+            ls_env_old_lc_all = environ.get("LC_ALL");
+            @constCast(environ).put("LC_ALL", "C") catch break :blk null;
+            ls_env_modified = true;
+            break :blk environ;
         }
         break :blk null;
     };
@@ -509,20 +518,17 @@ fn runWrapperInner(
             try writer.writeAll(stdout_slice);
         } else if (is_find_ls and find_compact.matches(stdout_slice)) {
             find_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else if (rg.matchesPattern(stdout_slice)) {
             rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
             rg.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else {
@@ -540,8 +546,7 @@ fn runWrapperInner(
     {
         if (tree.matches(stdout_slice)) {
             tree.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
             try stderr_writer.writeAll(stderr_slice);
@@ -579,40 +584,35 @@ fn runWrapperInner(
         if (!lossless) {
             if (is_pytest and (pytest.matches(stdout_slice) or pytest.matches(stderr_slice))) {
                 pytest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
                 return exit_code;
             }
             if (is_cargo_test and (cargo_test.matches(stdout_slice) or cargo_test.matches(stderr_slice))) {
                 cargo_test.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
                 return exit_code;
             }
             if (is_jest and (jest.matches(stdout_slice) or jest.matches(stderr_slice))) {
                 jest.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
                 return exit_code;
             }
             if (is_tsc and (tsc.matches(stdout_slice) or tsc.matches(stderr_slice))) {
                 tsc.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
                 return exit_code;
             }
             if (is_go_test and (go_test.matches(stdout_slice) or go_test.matches(stderr_slice))) {
                 go_test.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
                 return exit_code;
@@ -630,13 +630,11 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv)) {
         if (!lossless and curl_compact.matches(stderr_slice)) {
             curl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else {
-            try writer.writeAll(stdout_slice);
-            try stderr_writer.writeAll(stderr_slice);
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
         return exit_code;
     }
@@ -648,8 +646,7 @@ fn runWrapperInner(
         if (!lossless and du_compact.matches(stdout_slice)) {
             const sort_desc = du_compact.hasSummarizeFlag(argv);
             du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else {
@@ -667,8 +664,7 @@ fn runWrapperInner(
                 if (err == error.ParsedNothing) {
                     try writeWithFallback(allocator, stdout_slice, writer);
                 } else {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 }
             };
@@ -707,41 +703,35 @@ fn runWrapperInner(
                 std.mem.eql(u8, arg1, "ci"));
         if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             docker_logs.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else if (!lossless and is_npm_install and npm_install.matches(stdout_slice)) {
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else if (!lossless and is_npm_install and npm_install.matches(stderr_slice)) {
             // npm writes WARN/notice to stderr in many versions; dispatch off stderr
             // when stdout doesn't match but stderr does.
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
             return exit_code;
         } else if (!lossless and std.mem.eql(u8, cmd_basename, "docker") and docker_compact.matches(stdout_slice)) {
             docker_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else if (!lossless and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
             kubectl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else if (!lossless and columnar.matches(stdout_slice)) {
             columnar.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else {
@@ -773,8 +763,7 @@ fn runWrapperInner(
     if (is_make or is_cargo_build or is_go_build or is_zig_build) {
         if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
             build_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else {
@@ -788,8 +777,7 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "cat")) {
         if (!lossless and cat_compact.matches(stdout_slice)) {
             cat_compact.apply(allocator, stdout_slice, stderr_slice, writer, argv) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         } else {
@@ -805,8 +793,7 @@ fn runWrapperInner(
         // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
         if (!lossless and generic_compact.matches(stdout_slice)) {
             generic_compact.apply(allocator, stdout_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return if (exit_code != 0) exit_code else 1;
             };
         } else {
@@ -818,8 +805,7 @@ fn runWrapperInner(
 
     // Global lossless mode: bypass all git filters.
     if (lossless) {
-        try writer.writeAll(stdout_slice);
-        try stderr_writer.writeAll(stderr_slice);
+        passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         return exit_code;
     }
 
@@ -834,12 +820,10 @@ fn runWrapperInner(
             if (hasArg(git_argv, "--short") or hasArg(git_argv, "-s") or
                 hasArg(git_argv, "--porcelain") or hasArg(git_argv, "-z"))
             {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
                 git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
             }
@@ -854,12 +838,10 @@ fn runWrapperInner(
                 hasArg(git_argv, "--summary") or
                 hasArg(git_argv, "--patch-with-stat"); // stat lines start with space, dropped by filter
             if (diff_summary_mode) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
                 git_diff.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
             }
@@ -880,12 +862,10 @@ fn runWrapperInner(
             // Detect --format=X and --pretty=X (prefix match only).
             const log_custom_format2 = hasFormatOrPrettyArg(git_argv);
             if (log_custom_format or log_custom_format2) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
                 git_log.applyCompact(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
             }
@@ -911,113 +891,91 @@ fn runWrapperInner(
                 break :blk false;
             };
             if (show_summary_mode or show_custom_format or show_blob) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
                 git_show.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
             }
         },
         .add => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_add.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .commit => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_commit.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .push => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_push.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .pull => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_pull.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .fetch => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_fetch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .merge => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_merge.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .rebase => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_rebase.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .checkout => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_checkout.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .branch => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_branch.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
         .stash => {
             if (lossless) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else git_stash.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
         },
@@ -1035,12 +993,10 @@ fn runWrapperInner(
                 hasArg(git_argv, "-e") or
                 hasArg(git_argv, "--show-email");
             if (blame_alt_format) {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
                 git_blame.apply(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
             }
@@ -1051,21 +1007,18 @@ fn runWrapperInner(
             // matches; passthrough otherwise (e.g. git grep without -n).
             if (rg.matchesPattern(stdout_slice)) {
                 rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
-                    try writer.writeAll(stdout_slice);
-                    try stderr_writer.writeAll(stderr_slice);
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
             } else {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             }
         },
     } else {
         // Unknown git subcommand: apply generic compactor for large output.
         if (!lossless and generic_compact.matches(stdout_slice)) {
             generic_compact.apply(allocator, stdout_slice, writer) catch {
-                try writer.writeAll(stdout_slice);
-                try stderr_writer.writeAll(stderr_slice);
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return exit_code;
             };
         } else {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -129,7 +130,7 @@ fn emitTruncatedBody(writer: *Writer, body: []const u8) !void {
             try writer.writeAll(line);
             try writer.writeByte('\n');
         } else {
-            try writer.print("(+{d})\n", .{total - 3});
+            try writer.writeAll("(+"); try ansi.writeDecimal(writer, total - 3); try writer.writeAll(")\n");
             return;
         }
     }
@@ -255,7 +256,7 @@ fn emitFilteredStderr(writer: *Writer, stderr: []const u8) !void {
         try writer.writeByte('\n');
     }
     if (request_count > 1) {
-        try writer.print("({d} requests total)\n", .{request_count});
+        try writer.writeByte('('); try ansi.writeDecimal(writer, request_count); try writer.writeAll(" requests total)\n");
     }
 }
 

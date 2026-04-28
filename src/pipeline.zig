@@ -70,10 +70,19 @@ pub fn dispatch(
     writer: *Writer,
     comptime Filters: anytype,
 ) !void {
-    inline for (Filters) |Filter| {
-        if (Filter.matches(input)) {
-            // Pipe-mode: no separate stderr stream; pass empty slice.
-            try Filter.apply(allocator, input, &.{}, writer);
+    const MatchFn = *const fn ([]const u8) bool;
+    const ApplyFn = *const fn (Allocator, []const u8, []const u8, *Writer) anyerror!void;
+    const Entry = struct { match: MatchFn, apply: ApplyFn };
+    const table = comptime blk: {
+        var t: [Filters.len]Entry = undefined;
+        for (0..Filters.len) |i| {
+            t[i] = .{ .match = Filters[i].matches, .apply = Filters[i].apply };
+        }
+        break :blk t;
+    };
+    for (&table) |entry| {
+        if (entry.match(input)) {
+            try entry.apply(allocator, input, &.{}, writer);
             return;
         }
     }

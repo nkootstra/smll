@@ -88,7 +88,7 @@ fn flushPending(writer: *Writer, line: []const u8, payload_start: usize, count: 
     }
     if (count > 1) {
         try writer.writeAll(" ×");
-        try writer.print("{d}", .{count});
+        try ansi.writeDecimal(writer, count);
     }
     try writer.writeByte('\n');
 }

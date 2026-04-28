@@ -212,7 +212,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
             for (0..best_k) |j| {
                 try emitTruncated(writer, output_lines.items[i + j]);
             }
-            try writer.print("(+{d})\n", .{best_repeats - 1});
+            try writer.writeAll("(+"); try ansi.writeDecimal(writer, best_repeats - 1); try writer.writeAll(")\n");
             i += best_k * best_repeats;
         } else {
             try emitTruncated(writer, ol);
@@ -227,7 +227,7 @@ const MAX_LINE_LEN: usize = 100;
 fn emitTruncated(writer: *Writer, line: []const u8) !void {
     if (line.len > MAX_LINE_LEN) {
         try writer.writeAll(line[0..MAX_LINE_LEN]);
-        try writer.print("...+{d}\n", .{line.len - MAX_LINE_LEN});
+        try writer.writeAll("...+"); try ansi.writeDecimal(writer, line.len - MAX_LINE_LEN); try writer.writeByte('\n');
     } else {
         try writer.writeAll(line);
         try writer.writeByte('\n');
@@ -246,9 +246,11 @@ fn fmtLine(allocator: Allocator, line: []const u8, total_count: usize) ![]u8 {
             try buf.appendSlice(allocator, "...");
         }
         try buf.appendSlice(allocator, " \xc3\x97");
-        var tmp: [16]u8 = undefined;
-        const num_str = std.fmt.bufPrint(&tmp, "{d}", .{total_count}) catch unreachable;
-        try buf.appendSlice(allocator, num_str);
+        var tmp: [20]u8 = undefined;
+        var n = total_count;
+        var ti: usize = tmp.len;
+        if (n == 0) { ti -= 1; tmp[ti] = '0'; } else while (n > 0) { ti -= 1; tmp[ti] = @intCast('0' + n % 10); n /= 10; }
+        try buf.appendSlice(allocator, tmp[ti..]);
         return try buf.toOwnedSlice(allocator);
     }
     return try allocator.dupe(u8, line);
@@ -369,19 +371,20 @@ fn stripTimestamp(line: []const u8) []const u8 {
     }
 
     // Syslog: "Mon DD [YYYY ]HH:MM:SS" — starts with 3-letter month abbreviation
-    if (c0 >= 'A' and c0 <= 'Z' and line.len >= 3) {
-        const months = [_][]const u8{
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    if (c0 >= 'A' and c0 <= 'Z' and line.len > 4 and line[3] == ' ') {
+        // Check 3-letter month: Jan..Dec all have unique (c0,c2) pairs
+        const is_month = switch (c0) {
+            'J' => (line[1] == 'a' or line[1] == 'u'), // Jan, Jun, Jul
+            'F' => line[1] == 'e', // Feb
+            'M' => (line[1] == 'a'), // Mar, May
+            'A' => (line[1] == 'p' or line[1] == 'u'), // Apr, Aug
+            'S' => line[1] == 'e', // Sep
+            'O' => line[1] == 'c', // Oct
+            'N' => line[1] == 'o', // Nov
+            'D' => line[1] == 'e', // Dec
+            else => false,
         };
-        var is_month = false;
-        for (months) |m| {
-            if (std.mem.startsWith(u8, line, m)) {
-                is_month = true;
-                break;
-            }
-        }
-        if (is_month and line.len > 4 and line[3] == ' ') {
+        if (is_month) {
             // "Apr 23 12:00:00 ..." or "Apr 23 2026 12:00:00 ..."
             // Scan for HH:MM:SS pattern (NN:NN:NN)
             var i: usize = 4;

@@ -425,6 +425,15 @@ pub fn build(b: *std.Build) void {
     npm_install_mod.addImport("ansi", ansi_mod);
     generic_compact_mod.addImport("ansi", ansi_mod);
     build_compact_mod.addImport("ansi", ansi_mod);
+    cat_compact_mod.addImport("ansi", ansi_mod);
+    curl_compact_mod.addImport("ansi", ansi_mod);
+    docker_compact_mod.addImport("ansi", ansi_mod);
+    du_compact_mod.addImport("ansi", ansi_mod);
+    find_compact_mod.addImport("ansi", ansi_mod);
+    git_blame_mod.addImport("ansi", ansi_mod);
+    git_commit_mod.addImport("ansi", ansi_mod);
+    git_merge_mod.addImport("ansi", ansi_mod);
+    kubectl_compact_mod.addImport("ansi", ansi_mod);
 
     const sigil_rle_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/sigil_rle.zig"),
@@ -532,13 +541,28 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("generic_compact", generic_compact_mod);
     release_mod.addImport("cat_compact", cat_compact_mod);
 
-    const release_exe = b.addExecutable(.{
-        .name = "smll",
-        .root_module = release_mod,
-    });
-    const install_release = b.addInstallArtifact(release_exe, .{
-        .dest_dir = .{ .override = .{ .custom = "release" } },
-    });
+    // On macOS: build object file, then link with system ld -no_data_const to
+    // eliminate the __DATA_CONST segment (saves 16KB from page alignment waste).
+    // On other platforms: use standard executable linking.
+    const is_macos = target.result.os.tag == .macos;
+    const release_bin = blk: {
+        if (is_macos) {
+            const release_obj = b.addObject(.{ .name = "smll", .root_module = release_mod });
+            const ld_cmd = b.addSystemCommand(&.{"ld", "-o"});
+            const bin = ld_cmd.addOutputFileArg("smll");
+            ld_cmd.addFileArg(release_obj.getEmittedBin());
+            ld_cmd.addArgs(&.{ "-lSystem", "-no_data_const", "-dead_strip", "-no_exported_symbols", "-syslibroot" });
+            ld_cmd.addDirectoryArg(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" });
+            break :blk bin;
+        } else {
+            const rel_exe = b.addExecutable(.{ .name = "smll", .root_module = release_mod });
+            break :blk rel_exe.getEmittedBin();
+        }
+    };
+    const strip_step = b.addSystemCommand(&.{ "strip" });
+    strip_step.addFileArg(release_bin);
+    const install_release = b.addInstallFile(release_bin, "release/smll");
+    install_release.step.dependOn(&strip_step.step);
     const release_step = b.step("release", "Build stripped ReleaseSmall binary into zig-out/release/");
     release_step.dependOn(&install_release.step);
 

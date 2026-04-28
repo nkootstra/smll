@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -175,7 +176,7 @@ fn compressCode(input: []const u8, lang: Lang, writer: *Writer) !void {
                     // End of body — emit closing brace + elision marker.
                     if (body_lines > 1) {
                         try writer.writeAll("    // ... (");
-                        try writer.print("{d}", .{body_lines});
+                        try ansi.writeDecimal(writer, body_lines);
                         try writer.writeAll(" lines)\n");
                     }
                     try writer.writeAll(line);
@@ -217,7 +218,7 @@ fn compressCode(input: []const u8, lang: Lang, writer: *Writer) !void {
                     // Emit elision marker, then emit this line normally.
                     if (skipped > 0) {
                         try writer.writeAll("    # ... (");
-                        try writer.print("{d}", .{skipped});
+                        try ansi.writeDecimal(writer, skipped);
                         try writer.writeAll(" lines)\n");
                     }
                     // Process this line as a new top-level line.
