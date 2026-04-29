@@ -314,6 +314,54 @@ pub fn build(b: *std.Build) void {
         .optimize = .ReleaseSmall,
     });
 
+    const wc_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/wc_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const env_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/env_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const mypy_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/mypy_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const ruff_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/ruff_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const pip_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/pip_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const prettier_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/prettier_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const dotnet_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/dotnet_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
+    const tool_compact_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/tool_compact.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+
     const curl_compact_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/curl_compact.zig"),
         .target = target,
@@ -426,6 +474,10 @@ pub fn build(b: *std.Build) void {
     generic_compact_mod.addImport("ansi", ansi_mod);
     build_compact_mod.addImport("ansi", ansi_mod);
     cat_compact_mod.addImport("ansi", ansi_mod);
+    mypy_compact_mod.addImport("ansi", ansi_mod);
+    ruff_compact_mod.addImport("ansi", ansi_mod);
+    dotnet_compact_mod.addImport("ansi", ansi_mod);
+    tool_compact_mod.addImport("ansi", ansi_mod);
     curl_compact_mod.addImport("ansi", ansi_mod);
     docker_compact_mod.addImport("ansi", ansi_mod);
     du_compact_mod.addImport("ansi", ansi_mod);
@@ -458,6 +510,14 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("ls_compact", ls_compact_mod);
     exe_mod.addImport("find_compact", find_compact_mod);
     exe_mod.addImport("du_compact", du_compact_mod);
+    exe_mod.addImport("wc_compact", wc_compact_mod);
+    exe_mod.addImport("env_compact", env_compact_mod);
+    exe_mod.addImport("mypy_compact", mypy_compact_mod);
+    exe_mod.addImport("ruff_compact", ruff_compact_mod);
+    exe_mod.addImport("pip_compact", pip_compact_mod);
+    exe_mod.addImport("prettier_compact", prettier_compact_mod);
+    exe_mod.addImport("dotnet_compact", dotnet_compact_mod);
+    exe_mod.addImport("tool_compact", tool_compact_mod);
     exe_mod.addImport("curl_compact", curl_compact_mod);
     exe_mod.addImport("kubectl_compact", kubectl_compact_mod);
     exe_mod.addImport("cargo_test", cargo_test_mod);
@@ -528,6 +588,14 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("ls_compact", ls_compact_mod);
     release_mod.addImport("find_compact", find_compact_mod);
     release_mod.addImport("du_compact", du_compact_mod);
+    release_mod.addImport("wc_compact", wc_compact_mod);
+    release_mod.addImport("env_compact", env_compact_mod);
+    release_mod.addImport("mypy_compact", mypy_compact_mod);
+    release_mod.addImport("ruff_compact", ruff_compact_mod);
+    release_mod.addImport("pip_compact", pip_compact_mod);
+    release_mod.addImport("prettier_compact", prettier_compact_mod);
+    release_mod.addImport("dotnet_compact", dotnet_compact_mod);
+    release_mod.addImport("tool_compact", tool_compact_mod);
     release_mod.addImport("curl_compact", curl_compact_mod);
     release_mod.addImport("kubectl_compact", kubectl_compact_mod);
     release_mod.addImport("cargo_test", cargo_test_mod);
@@ -548,7 +616,7 @@ pub fn build(b: *std.Build) void {
     const release_bin = blk: {
         if (is_macos) {
             const release_obj = b.addObject(.{ .name = "smll", .root_module = release_mod });
-            const ld_cmd = b.addSystemCommand(&.{"ld", "-o"});
+            const ld_cmd = b.addSystemCommand(&.{ "ld", "-o" });
             const bin = ld_cmd.addOutputFileArg("smll");
             ld_cmd.addFileArg(release_obj.getEmittedBin());
             ld_cmd.addArgs(&.{ "-lSystem", "-no_data_const", "-dead_strip", "-no_exported_symbols", "-syslibroot" });
@@ -645,6 +713,30 @@ pub fn build(b: *std.Build) void {
 
     const du_compact_tests = b.addTest(.{ .root_module = du_compact_mod });
     const run_du_compact_tests = b.addRunArtifact(du_compact_tests);
+
+    const wc_compact_tests = b.addTest(.{ .root_module = wc_compact_mod });
+    const run_wc_compact_tests = b.addRunArtifact(wc_compact_tests);
+
+    const env_compact_tests = b.addTest(.{ .root_module = env_compact_mod });
+    const run_env_compact_tests = b.addRunArtifact(env_compact_tests);
+
+    const mypy_compact_tests = b.addTest(.{ .root_module = mypy_compact_mod });
+    const run_mypy_compact_tests = b.addRunArtifact(mypy_compact_tests);
+
+    const ruff_compact_tests = b.addTest(.{ .root_module = ruff_compact_mod });
+    const run_ruff_compact_tests = b.addRunArtifact(ruff_compact_tests);
+
+    const pip_compact_tests = b.addTest(.{ .root_module = pip_compact_mod });
+    const run_pip_compact_tests = b.addRunArtifact(pip_compact_tests);
+
+    const prettier_compact_tests = b.addTest(.{ .root_module = prettier_compact_mod });
+    const run_prettier_compact_tests = b.addRunArtifact(prettier_compact_tests);
+
+    const dotnet_compact_tests = b.addTest(.{ .root_module = dotnet_compact_mod });
+    const run_dotnet_compact_tests = b.addRunArtifact(dotnet_compact_tests);
+
+    const tool_compact_tests = b.addTest(.{ .root_module = tool_compact_mod });
+    const run_tool_compact_tests = b.addRunArtifact(tool_compact_tests);
 
     const curl_compact_tests = b.addTest(.{ .root_module = curl_compact_mod });
     const run_curl_compact_tests = b.addRunArtifact(curl_compact_tests);
@@ -942,6 +1034,14 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_ls_compact_tests.step);
     test_step.dependOn(&run_find_compact_tests.step);
     test_step.dependOn(&run_du_compact_tests.step);
+    test_step.dependOn(&run_wc_compact_tests.step);
+    test_step.dependOn(&run_env_compact_tests.step);
+    test_step.dependOn(&run_mypy_compact_tests.step);
+    test_step.dependOn(&run_ruff_compact_tests.step);
+    test_step.dependOn(&run_pip_compact_tests.step);
+    test_step.dependOn(&run_prettier_compact_tests.step);
+    test_step.dependOn(&run_dotnet_compact_tests.step);
+    test_step.dependOn(&run_tool_compact_tests.step);
     test_step.dependOn(&run_curl_compact_tests.step);
     test_step.dependOn(&run_kubectl_compact_tests.step);
     test_step.dependOn(&run_cargo_test_tests.step);

@@ -26,7 +26,10 @@ const Writer = std.Io.Writer;
 // or:
 //   "stash@{0}: On <branch>: <subject>"
 
-pub fn matches(input: []const u8) bool { _ = input; return false; }
+pub fn matches(input: []const u8) bool {
+    _ = input;
+    return false;
+}
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
     _ = a;
@@ -64,6 +67,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 
     // Out-of-scope shapes (show, drop, apply, pop, or unknown): passthrough.
     try w.writeAll(stdout);
+    try w.writeAll(stderr);
 }
 
 /// Parse and emit a save-shape line.
@@ -86,14 +90,17 @@ fn applySaveLine(line: []const u8, w: *Writer) !void {
     }
     if (!found) {
         // Unrecognised save line — passthrough.
-        try w.writeAll(line); try w.writeByte('\n');
+        try w.writeAll(line);
+        try w.writeByte('\n');
         return;
     }
 
     const after_on = line[branch_start..];
     // Find the colon that separates branch from the rest.
     const colon = std.mem.findScalar(u8, after_on, ':') orelse {
-        try w.writeAll("$ "); try w.writeAll(after_on); try w.writeByte('\n');
+        try w.writeAll("$ ");
+        try w.writeAll(after_on);
+        try w.writeByte('\n');
         return;
     };
     const branch = after_on[0..colon];
@@ -117,10 +124,14 @@ fn applySaveLine(line: []const u8, w: *Writer) !void {
 fn applyListLine(line: []const u8, w: *Writer) !void {
     // Extract N from "stash@{N}:".
     const open = std.mem.findScalar(u8, line, '{') orelse {
-        try w.writeAll(line); try w.writeByte('\n'); return;
+        try w.writeAll(line);
+        try w.writeByte('\n');
+        return;
     };
     const close = std.mem.findScalar(u8, line[open..], '}') orelse {
-        try w.writeAll(line); try w.writeByte('\n'); return;
+        try w.writeAll(line);
+        try w.writeByte('\n');
+        return;
     };
     const n_str = line[open + 1 .. open + close];
 
@@ -144,15 +155,21 @@ fn applyListLine(line: []const u8, w: *Writer) !void {
     }
 
     if (!found) {
-        try w.writeByte('$'); try w.writeAll(n_str); try w.writeByte(' ');
-        try w.writeAll(body); try w.writeByte('\n');
+        try w.writeByte('$');
+        try w.writeAll(n_str);
+        try w.writeByte(' ');
+        try w.writeAll(body);
+        try w.writeByte('\n');
         return;
     }
 
     const after_on = body[branch_start..];
     const colon = std.mem.findScalar(u8, after_on, ':') orelse {
-        try w.writeByte('$'); try w.writeAll(n_str); try w.writeByte(' ');
-        try w.writeAll(after_on); try w.writeByte('\n');
+        try w.writeByte('$');
+        try w.writeAll(n_str);
+        try w.writeByte(' ');
+        try w.writeAll(after_on);
+        try w.writeByte('\n');
         return;
     };
     const branch = after_on[0..colon];
@@ -198,7 +215,8 @@ test "save: sigil and branch" {
     const a = std.testing.allocator;
     // Modern git stash save format (no WIP on).
     const input = "Saved working directory and index state On main: wip: fixture stash entry 1\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "$ main "));
     try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 1") != null);
 }
@@ -206,21 +224,24 @@ test "save: sigil and branch" {
 test "save: WIP on branch format" {
     const a = std.testing.allocator;
     const input = "Saved working directory and index state WIP on feature/x: abc1234 do the thing\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "$ feature/x "));
     try std.testing.expect(std.mem.find(u8, out, "abc1234 do the thing") != null);
 }
 
 test "save: fixture" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_save, ""); defer a.free(out);
+    const out = try str(a, fixture_save, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "$ main "));
     try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 1") != null);
 }
 
 test "list: 2-entry fixture" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_list, ""); defer a.free(out);
+    const out = try str(a, fixture_list, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "$0 main ") != null);
     try std.testing.expect(std.mem.find(u8, out, "$1 main ") != null);
     try std.testing.expect(std.mem.find(u8, out, "wip: fixture stash entry 2") != null);
@@ -233,7 +254,8 @@ test "list: 3-entry list" {
         "stash@{0}: On feat: add widget\n" ++
         "stash@{1}: WIP on main: abc1234 fix bug\n" ++
         "stash@{2}: On dev: something else\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "$0 feat ") != null);
     try std.testing.expect(std.mem.find(u8, out, "$1 main ") != null);
     try std.testing.expect(std.mem.find(u8, out, "$2 dev ") != null);
@@ -242,29 +264,39 @@ test "list: 3-entry list" {
 test "passthrough: show/drop/apply output" {
     const a = std.testing.allocator;
     const input = "diff --git a/foo.txt b/foo.txt\nindex abc..def 100644\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     // Unknown shapes pass through verbatim.
     try std.testing.expectEqualStrings(input, out);
 }
 
+test "passthrough: stderr-only failure output" {
+    const a = std.testing.allocator;
+    const err = "fatal: bad revision 'stash@{999}'\n";
+    const out = try str(a, "", err);
+    defer a.free(out);
+    try std.testing.expectEqualStrings(err, out);
+}
+
 test "empty" {
     const a = std.testing.allocator;
-    const out = try str(a, "", ""); defer a.free(out);
+    const out = try str(a, "", "");
+    defer a.free(out);
     try std.testing.expectEqualStrings("", out);
 }
 
 test "R3: save fixture" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_save, ""); defer a.free(out);
+    const out = try str(a, fixture_save, "");
+    defer a.free(out);
     const raw = fixture_save.len;
-    if (raw >= 50) try std.testing.expect(out.len <= raw)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= raw) else try std.testing.expect(out.len <= raw);
 }
 
 test "R3: list fixture" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_list, ""); defer a.free(out);
+    const out = try str(a, fixture_list, "");
+    defer a.free(out);
     const raw = fixture_list.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }
