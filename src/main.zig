@@ -1,4 +1,9 @@
 const std = @import("std");
+pub const panic = std.debug.simple_panic;
+pub const std_options: std.Options = .{
+    .enable_segfault_handler = false,
+    .signal_stack_size = null,
+};
 const pipeline = @import("pipeline.zig");
 const stats = @import("stats.zig");
 const git_status = @import("git_status");
@@ -322,10 +327,22 @@ test "streaming detection: explicit and positional watch forms" {
     try std.testing.expect(!isStreamingCommand("go", &.{ "go", "test", "./..." }));
 }
 
-pub fn main(init: std.process.Init) !void {
-    const io = init.io;
-    const environ = init.environ_map;
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
+pub fn main(init: std.process.Init.Minimal) !void {
+    var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{
+        .argv0 = .init(init.args),
+        .environ = init.environ,
+    });
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena_state = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_state.deinit();
+    const arena_allocator = arena_state.allocator();
+
+    var environ_map = try init.environ.createMap(std.heap.page_allocator);
+    defer environ_map.deinit();
+    const environ = &environ_map;
+    const args = try init.args.toSlice(arena_allocator);
 
     var out_buf: [4096]u8 = undefined;
     var stdout_file = std.Io.File.stdout();
@@ -368,17 +385,17 @@ pub fn main(init: std.process.Init) !void {
     const home = environ.get("HOME") orelse "";
 
     // Stats display: --stats, --stats --reset
-    if (try stats.maybeRun(init.arena.allocator(), io, home, args, &stdout_writer.interface)) |code| {
+    if (try stats.maybeRun(arena_allocator, io, home, args, &stdout_writer.interface)) |code| {
         try stdout_writer.interface.flush();
-        if (code != 0) std.process.exit(code);
+        if (code != 0) std.c._exit(code);
         return;
     }
 
     // Setup check: only needed with args (--setup, --unsetup, etc.)
-    if (try setup.maybeRun(init.arena.allocator(), io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
+    if (try setup.maybeRun(arena_allocator, io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
         try stderr_writer.interface.flush();
-        if (code != 0) std.process.exit(code);
+        if (code != 0) std.c._exit(code);
         return;
     }
 
@@ -410,7 +427,7 @@ pub fn main(init: std.process.Init) !void {
         stats.record(allocator, io, home, child_argv, result.input_bytes, result.output_bytes);
     }
 
-    if (result.exit_code != 0) std.process.exit(result.exit_code);
+    if (result.exit_code != 0) std.c._exit(result.exit_code);
 }
 
 fn readAllStdin(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
