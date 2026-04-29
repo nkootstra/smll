@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     const util_mod = b.createModule(.{
@@ -565,6 +566,8 @@ pub fn build(b: *std.Build) void {
         .unwind_tables = .none,
         .single_threaded = true,
         .omit_frame_pointer = true,
+        .no_builtin = true,
+        .link_libc = true,
     });
     release_mod.addImport("git_status", git_status_mod);
     release_mod.addImport("git_diff", git_diff_mod);
@@ -617,22 +620,25 @@ pub fn build(b: *std.Build) void {
         if (is_macos) {
             const release_obj = b.addObject(.{ .name = "smll", .root_module = release_mod });
             const ld_cmd = b.addSystemCommand(&.{ "ld", "-o" });
-            const bin = ld_cmd.addOutputFileArg("smll");
+            const linked_bin = ld_cmd.addOutputFileArg("smll-linked");
             ld_cmd.addFileArg(release_obj.getEmittedBin());
-            ld_cmd.addArgs(&.{ "-lSystem", "-no_data_const", "-dead_strip", "-no_exported_symbols", "-syslibroot" });
+            ld_cmd.addArgs(&.{ "-lSystem", "-no_data_const", "-dead_strip", "-no_exported_symbols", "-no_function_starts", "-syslibroot" });
             ld_cmd.addDirectoryArg(.{ .cwd_relative = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" });
-            break :blk bin;
+
+            // Strip into a fresh generated file. Stripping the ld output in
+            // place is not idempotent in Zig's cache: a second `zig build
+            // release` can re-strip the cached output and produce an aborting
+            // executable with a bloated code signature.
+            const strip_cmd = b.addSystemCommand(&.{ "strip", "-N", "-no_code_signature_warning", "-o" });
+            const stripped_bin = strip_cmd.addOutputFileArg("smll");
+            strip_cmd.addFileArg(linked_bin);
+            break :blk stripped_bin;
         } else {
             const rel_exe = b.addExecutable(.{ .name = "smll", .root_module = release_mod });
             break :blk rel_exe.getEmittedBin();
         }
     };
     const install_release = b.addInstallFile(release_bin, "release/smll");
-    if (is_macos) {
-        const strip_step = b.addSystemCommand(&.{"strip"});
-        strip_step.addFileArg(release_bin);
-        install_release.step.dependOn(&strip_step.step);
-    }
     const release_step = b.step("release", "Build stripped ReleaseSmall binary into zig-out/release/");
     release_step.dependOn(&install_release.step);
 
