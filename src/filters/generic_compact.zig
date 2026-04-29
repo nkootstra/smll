@@ -22,6 +22,7 @@ pub const THRESHOLD_BYTES: usize = 4 * 1024;
 
 pub fn matches(input: []const u8) bool {
     if (input.len <= THRESHOLD_BYTES) return false;
+    if (looksLikeJson(input)) return false;
     // Reject binary data: check first 512 bytes for NUL or high-density non-ASCII.
     const sample = input[0..@min(input.len, 512)];
     var non_text: usize = 0;
@@ -32,6 +33,59 @@ pub fn matches(input: []const u8) bool {
     // >10% control chars → likely binary
     if (non_text * 10 > sample.len) return false;
     return true;
+}
+
+fn looksLikeJson(input: []const u8) bool {
+    const trimmed_ws = std.mem.trimStart(u8, input, " \t\r\n");
+    const trimmed = if (std.mem.startsWith(u8, trimmed_ws, "\xef\xbb\xbf")) trimmed_ws[3..] else trimmed_ws;
+    if (trimmed.len == 0) return false;
+    if (trimmed[0] == '{') return looksLikeJsonObject(trimmed[1..]);
+    if (trimmed[0] != '[') return false;
+    return looksLikeJsonArray(trimmed[1..]);
+}
+
+fn looksLikeJsonObject(after_open: []const u8) bool {
+    const rest = std.mem.trimStart(u8, after_open, " \t\r\n");
+    return rest.len > 0 and (rest[0] == '"' or rest[0] == '}');
+}
+
+fn looksLikeJsonArray(after_open: []const u8) bool {
+    const rest = std.mem.trimStart(u8, after_open, " \t\r\n");
+    if (rest.len == 0) return false;
+    if (rest[0] == ']') return true;
+    if (rest[0] == '{' or rest[0] == '[' or rest[0] == '"') return true;
+    if (std.mem.startsWith(u8, rest, "true")) return jsonValueHasDelimiter(rest[4..]);
+    if (std.mem.startsWith(u8, rest, "false")) return jsonValueHasDelimiter(rest[5..]);
+    if (std.mem.startsWith(u8, rest, "null")) return jsonValueHasDelimiter(rest[4..]);
+    if (rest[0] == '-' or (rest[0] >= '0' and rest[0] <= '9')) return jsonNumberHasDelimiter(rest);
+    return false;
+}
+
+fn jsonValueHasDelimiter(after_value: []const u8) bool {
+    const rest = std.mem.trimStart(u8, after_value, " \t\r\n");
+    return rest.len > 0 and (rest[0] == ',' or rest[0] == ']');
+}
+
+fn jsonNumberHasDelimiter(s: []const u8) bool {
+    var i: usize = 0;
+    if (i < s.len and s[i] == '-') i += 1;
+    const digits_start = i;
+    while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+    if (i == digits_start) return false;
+    if (i < s.len and s[i] == '.') {
+        i += 1;
+        const frac_start = i;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+        if (i == frac_start) return false;
+    }
+    if (i < s.len and (s[i] == 'e' or s[i] == 'E')) {
+        i += 1;
+        if (i < s.len and (s[i] == '+' or s[i] == '-')) i += 1;
+        const exp_start = i;
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') i += 1;
+        if (i == exp_start) return false;
+    }
+    return jsonValueHasDelimiter(s[i..]);
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
@@ -212,7 +266,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
             for (0..best_k) |j| {
                 try emitTruncated(writer, output_lines.items[i + j]);
             }
-            try writer.writeAll("(+"); try ansi.writeDecimal(writer, best_repeats - 1); try writer.writeAll(")\n");
+            try writer.writeAll("(+");
+            try ansi.writeDecimal(writer, best_repeats - 1);
+            try writer.writeAll(")\n");
             i += best_k * best_repeats;
         } else {
             try emitTruncated(writer, ol);
@@ -227,7 +283,9 @@ const MAX_LINE_LEN: usize = 100;
 fn emitTruncated(writer: *Writer, line: []const u8) !void {
     if (line.len > MAX_LINE_LEN) {
         try writer.writeAll(line[0..MAX_LINE_LEN]);
-        try writer.writeAll("...+"); try ansi.writeDecimal(writer, line.len - MAX_LINE_LEN); try writer.writeByte('\n');
+        try writer.writeAll("...+");
+        try ansi.writeDecimal(writer, line.len - MAX_LINE_LEN);
+        try writer.writeByte('\n');
     } else {
         try writer.writeAll(line);
         try writer.writeByte('\n');
@@ -249,7 +307,14 @@ fn fmtLine(allocator: Allocator, line: []const u8, total_count: usize) ![]u8 {
         var tmp: [20]u8 = undefined;
         var n = total_count;
         var ti: usize = tmp.len;
-        if (n == 0) { ti -= 1; tmp[ti] = '0'; } else while (n > 0) { ti -= 1; tmp[ti] = @intCast('0' + n % 10); n /= 10; }
+        if (n == 0) {
+            ti -= 1;
+            tmp[ti] = '0';
+        } else while (n > 0) {
+            ti -= 1;
+            tmp[ti] = @intCast('0' + n % 10);
+            n /= 10;
+        }
         try buf.appendSlice(allocator, tmp[ti..]);
         return try buf.toOwnedSlice(allocator);
     }
@@ -412,7 +477,6 @@ fn stripTimestamp(line: []const u8) []const u8 {
     return line;
 }
 
-
 test "matches: threshold boundary" {
     const below = [_]u8{'x'} ** THRESHOLD_BYTES;
     const at = [_]u8{'x'} ** (THRESHOLD_BYTES + 1);
@@ -518,6 +582,99 @@ test "apply: 100 KiB synthetic reduces >=30%" {
     const got = out.written();
     const reduction = (buf.items.len - got.len) * 100 / buf.items.len;
     try std.testing.expect(reduction >= 30);
+}
+
+test "matches: large JSON object is treated as machine-readable passthrough" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try buf.appendSlice(std.testing.allocator, "{\"items\":[");
+    for (0..600) |i| {
+        if (i > 0) try buf.append(std.testing.allocator, ',');
+        const item = try std.fmt.allocPrint(std.testing.allocator, "{{\"id\":{d},\"name\":\"item-{d}\"}}", .{ i, i });
+        defer std.testing.allocator.free(item);
+        try buf.appendSlice(std.testing.allocator, item);
+    }
+    try buf.appendSlice(std.testing.allocator, "]}\n");
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(!matches(buf.items));
+}
+
+test "matches: large JSON array is treated as machine-readable passthrough" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try buf.append(std.testing.allocator, '[');
+    for (0..600) |i| {
+        if (i > 0) try buf.append(std.testing.allocator, ',');
+        const item = try std.fmt.allocPrint(std.testing.allocator, "{{\"id\":{d}}}", .{i});
+        defer std.testing.allocator.free(item);
+        try buf.appendSlice(std.testing.allocator, item);
+    }
+    try buf.appendSlice(std.testing.allocator, "]\n");
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(!matches(buf.items));
+}
+
+test "matches: large JSON with UTF-8 BOM is treated as machine-readable passthrough" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    try buf.appendSlice(std.testing.allocator, "\xef\xbb\xbf{\"items\":[");
+    for (0..600) |i| {
+        if (i > 0) try buf.append(std.testing.allocator, ',');
+        const item = try std.fmt.allocPrint(std.testing.allocator, "{{\"id\":{d}}}", .{i});
+        defer std.testing.allocator.free(item);
+        try buf.appendSlice(std.testing.allocator, item);
+    }
+    try buf.appendSlice(std.testing.allocator, "]}\n");
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(!matches(buf.items));
+}
+
+test "matches: bracketed log output still qualifies for compaction" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    for (0..300) |i| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "[INFO] request {d} ok\n", .{i});
+        defer std.testing.allocator.free(line);
+        try buf.appendSlice(std.testing.allocator, line);
+    }
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(matches(buf.items));
+}
+
+test "matches: bracketed numeric progress logs still qualify for compaction" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    for (0..300) |i| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "[{d}/300] building crate_{d}\n", .{ i, i });
+        defer std.testing.allocator.free(line);
+        try buf.appendSlice(std.testing.allocator, line);
+    }
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(matches(buf.items));
+}
+
+test "matches: bracketed ISO timestamp logs still qualify for compaction" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    for (0..200) |i| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "[2026-04-28T12:00:{d}Z] request ok\n", .{i});
+        defer std.testing.allocator.free(line);
+        try buf.appendSlice(std.testing.allocator, line);
+    }
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(matches(buf.items));
+}
+
+test "matches: brace-prefixed logs still qualify for compaction" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(std.testing.allocator);
+    for (0..250) |i| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "{{worker-{d}}} request ok\n", .{i});
+        defer std.testing.allocator.free(line);
+        try buf.appendSlice(std.testing.allocator, line);
+    }
+    try std.testing.expect(buf.items.len > THRESHOLD_BYTES);
+    try std.testing.expect(matches(buf.items));
 }
 
 test "apply: timestamp-aware RLE collapses syslog lines" {

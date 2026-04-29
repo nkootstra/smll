@@ -114,6 +114,7 @@ smll --stats --reset
 Stats are stored locally in `~/.smll/stats.json` (~80 bytes). No network calls.
 Best-effort — if the file can't be read or written, smll silently skips stats
 and the wrapped command runs normally. Pipe mode (stdin) does not record stats.
+Set `DO_NOT_TRACK=1` to skip local stats writes as well.
 
 ## Supported commands
 
@@ -124,13 +125,17 @@ and the wrapped command runs normally. Pipe mode (stdin) does not record stats.
 | search / listing | `rg`, `tree` | noise strip |
 | filesystem walk | `find` / `find -ls` | strip metadata columns; collapse ≥3 paths/parent to count |
 | columnar tables | `docker ps`, `kubectl get`, `gh pr/issue list`, `ps`, `ls -l`, `bun pm ls` | column/padding collapse |
+| counts / environment | `wc`, `env` | collapse count padding; mask sensitive env values |
 | disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
-| network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs |
-| build drivers | `make`, `cargo build`, `go build` | collapse progress, keep warnings/errors |
-| test runners | `cargo test`, `pytest`, `jest` / `vitest`, `go test -v` | drop PASS, keep FAIL + evidence |
-| type checker | `tsc` — compresses each error to `path:L:C TSnnnn` | locations-only |
+| network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs; preserve response bodies byte-for-byte |
+| build drivers | `make`, `cargo build`, `go build`, `dotnet build`, `swift build`, `xcodebuild` | collapse progress, keep warnings/errors |
+| test runners | `cargo test`, `pytest`, `jest` / `vitest`, `go test -v`, `dotnet test` | drop PASS/progress, keep FAIL + evidence |
+| type checker / lint | `tsc`, `mypy`, `ruff` | preserve diagnostics and summaries |
+| formatters | `prettier`, `dotnet format`, `ruff format` | keep files/summaries needing action |
 | logs | `docker logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |
-| package managers | `npm install` / `npm ci` — keep WARN + summary, drop notice/funding | drop noise, keep actionable |
+| package managers | `npm install` / `npm ci`, `pnpm`, `yarn`, `bun`, `pip list/outdated`, `uv`, `uvx` | drop noise, keep warnings/errors/summaries |
+| GitHub CLI | `gh` | keep errors/statuses/URLs/help; table output still column-compacts |
+| finite readers | `head`, `tail` | pass through exactly; follow/watch forms stream raw |
 | fallback | any unknown command whose stdout exceeds 64 KiB | ANSI strip + blank-collapse + RLE |
 
 Anything short and unknown passes through untouched. `SMLL_LOSSLESS=1`

@@ -23,6 +23,14 @@ const docker_compact = @import("docker_compact");
 const ls_compact = @import("ls_compact");
 const find_compact = @import("find_compact");
 const du_compact = @import("du_compact");
+const wc_compact = @import("wc_compact");
+const env_compact = @import("env_compact");
+const mypy_compact = @import("mypy_compact");
+const ruff_compact = @import("ruff_compact");
+const pip_compact = @import("pip_compact");
+const prettier_compact = @import("prettier_compact");
+const dotnet_compact = @import("dotnet_compact");
+const tool_compact = @import("tool_compact");
 const curl_compact = @import("curl_compact");
 const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
@@ -134,6 +142,21 @@ fn hasArg(argv: []const []const u8, arg: []const u8) bool {
     return false;
 }
 
+fn isEnvAssignment(arg: []const u8) bool {
+    const eq = std.mem.indexOfScalar(u8, arg, '=') orelse return false;
+    return eq > 0;
+}
+
+fn isEnvListingInvocation(argv: []const []const u8) bool {
+    for (argv[1..]) |arg| {
+        if (arg.len == 0) continue;
+        if (arg[0] == '-') continue;
+        if (isEnvAssignment(arg)) continue;
+        return false;
+    }
+    return true;
+}
+
 fn hasFormatOrPrettyArg(argv: []const []const u8) bool {
     for (argv) |a| {
         if (std.mem.startsWith(u8, a, "--format=") or
@@ -152,12 +175,90 @@ fn hasStatOrNameFlags(argv: []const []const u8) bool {
         hasArg(argv, "--compact-summary");
 }
 
+fn isLikelyBinary(input: []const u8) bool {
+    if (hasBinaryMagic(input)) return true;
+    const sample = input[0..@min(input.len, 1024)];
+    var control: usize = 0;
+    var high: usize = 0;
+    for (sample) |c| {
+        if (c == 0) return true;
+        if (c >= 0x80) high += 1;
+        if (c < 0x20 and c != '\n' and c != '\r' and c != '\t' and c != 0x1b) control += 1;
+    }
+    if (sample.len == 0) return false;
+    if (control * 10 > sample.len) return true;
+    // Invalid UTF-8 with high-bit bytes is a strong binary signal (JPEG,
+    // compressed data). Pure ASCII logs skip this check.
+    if (high > 0 and !std.unicode.utf8ValidateSlice(sample)) return true;
+    return false;
+}
+
+fn hasBinaryMagic(input: []const u8) bool {
+    return std.mem.startsWith(u8, input, "\x89PNG\r\n\x1a\n") or
+        std.mem.startsWith(u8, input, "\xff\xd8\xff") or
+        std.mem.startsWith(u8, input, "GIF87a") or
+        std.mem.startsWith(u8, input, "GIF89a") or
+        std.mem.startsWith(u8, input, "%PDF-") or
+        std.mem.startsWith(u8, input, "PK\x03\x04") or
+        std.mem.startsWith(u8, input, "\x1f\x8b");
+}
+
+fn curlBodyLooksBinary(stdout: []const u8, stderr: []const u8) bool {
+    return isLikelyBinary(stdout) or curlContentTypeLooksBinary(stderr);
+}
+
+fn curlContentTypeLooksBinary(stderr: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, stderr, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        const value = contentTypeValue(line) orelse continue;
+        return !contentTypeLooksText(value);
+    }
+    return false;
+}
+
+fn contentTypeValue(line: []const u8) ?[]const u8 {
+    const prefixed = if (std.mem.startsWith(u8, line, "<")) std.mem.trim(u8, line[1..], " \t") else line;
+    const name = "content-type:";
+    if (!std.ascii.startsWithIgnoreCase(prefixed, name)) return null;
+    return std.mem.trim(u8, prefixed[name.len..], " \t");
+}
+
+fn contentTypeLooksText(value: []const u8) bool {
+    const media = blk: {
+        const semi = std.mem.indexOfScalar(u8, value, ';') orelse break :blk value;
+        break :blk value[0..semi];
+    };
+    const t = std.mem.trim(u8, media, " \t");
+    return std.ascii.startsWithIgnoreCase(t, "text/") or
+        std.ascii.indexOfIgnoreCase(t, "json") != null or
+        std.ascii.indexOfIgnoreCase(t, "xml") != null or
+        std.ascii.indexOfIgnoreCase(t, "javascript") != null or
+        std.ascii.eqlIgnoreCase(t, "application/x-www-form-urlencoded") or
+        std.ascii.eqlIgnoreCase(t, "application/graphql");
+}
+
+fn allowsShortWatchFlag(cmd_basename: []const u8) bool {
+    return std.mem.eql(u8, cmd_basename, "jest") or
+        std.mem.eql(u8, cmd_basename, "vitest") or
+        std.mem.eql(u8, cmd_basename, "tsc") or
+        std.mem.eql(u8, cmd_basename, "webpack") or
+        std.mem.eql(u8, cmd_basename, "nodemon");
+}
+
 /// Detect streaming/interactive commands that produce continuous output
 /// and must not be buffered. Returns true for watch modes, follow flags,
 /// dev servers, and other long-running stdout streamers.
+///
+/// Contract: `argv` is the structured child argv (`argv[0]` command plus
+/// tokens), not shell prose. The result only affects wrapper-mode execution
+/// before filtered dispatch: matches inherit stdio and skip capture/filtering.
 fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
-    // --watch / -w flag (vitest, jest, tsc, turbo, nodemon, etc.)
-    if (hasArg(argv, "--watch") or hasArg(argv, "-w")) return true;
+    // --watch / --watchAll are explicit watch flags. Short -w is overloaded
+    // (grep/rg word-regexp, wc/cargo width), so only treat it as watch for
+    // tools where -w conventionally means watch.
+    if (hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) return true;
+    if (hasArg(argv, "-w") and allowsShortWatchFlag(cmd_basename)) return true;
 
     // --follow / -f flag (docker logs, kubectl logs, tail)
     if (hasArg(argv, "--follow") or hasArg(argv, "-f")) {
@@ -172,8 +273,10 @@ fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
     // Subcommand-based: watch, dev, serve, start
     if (argv.len >= 2) {
         const sub = argv[1];
-        // "turbo watch", "cargo watch", "gh run watch"
+        // "turbo watch", "cargo watch", "gh run watch", "dotnet watch run"
         if (std.mem.eql(u8, sub, "watch")) return true;
+        // "go run ." is commonly a long-running dev/server process.
+        if (std.mem.eql(u8, cmd_basename, "go") and std.mem.eql(u8, sub, "run")) return true;
         // "npm run dev", "pnpm dev", etc.
         if (std.mem.eql(u8, sub, "dev") or
             std.mem.eql(u8, sub, "serve") or
@@ -192,12 +295,31 @@ fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
         }
     }
 
+    // Extra subcommand-based streaming forms.
+    if (argv.len >= 3) {
+        if (std.mem.eql(u8, cmd_basename, "gh") and std.mem.eql(u8, argv[1], "run") and std.mem.eql(u8, argv[2], "watch")) return true;
+    }
+
     // Inherently streaming commands
-    if (std.mem.eql(u8, cmd_basename, "tail") or
-        std.mem.eql(u8, cmd_basename, "nodemon") or
+    if (std.mem.eql(u8, cmd_basename, "nodemon") or
         std.mem.eql(u8, cmd_basename, "watchman")) return true;
 
     return false;
+}
+
+test "streaming detection: short -w is scoped to watch-capable tools" {
+    try std.testing.expect(isStreamingCommand("vitest", &.{ "vitest", "-w" }));
+    try std.testing.expect(isStreamingCommand("tsc", &.{ "tsc", "-w" }));
+    try std.testing.expect(!isStreamingCommand("cargo", &.{ "cargo", "test", "-w" }));
+    try std.testing.expect(!isStreamingCommand("grep", &.{ "grep", "-w", "needle" }));
+    try std.testing.expect(!isStreamingCommand("rg", &.{ "rg", "-w", "needle" }));
+}
+
+test "streaming detection: explicit and positional watch forms" {
+    try std.testing.expect(isStreamingCommand("pnpm", &.{ "pnpm", "test", "--", "--watch" }));
+    try std.testing.expect(isStreamingCommand("npm", &.{ "npm", "run", "dev" }));
+    try std.testing.expect(isStreamingCommand("go", &.{ "go", "run", "." }));
+    try std.testing.expect(!isStreamingCommand("go", &.{ "go", "test", "./..." }));
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -222,12 +344,23 @@ pub fn main(init: std.process.Init) !void {
         var in_buf: [4096]u8 = undefined;
         var stdin_file = std.Io.File.stdin();
         var stdin_reader = stdin_file.reader(io, &in_buf);
-        try pipeline.run(
-            std.heap.page_allocator,
-            &stdin_reader.interface,
-            &pipe_stdout_writer.interface,
-            Filters,
-        );
+        if (envFlagOn(environ, "SMLL_LOSSLESS")) {
+            var copy_buf: [32768]u8 = undefined;
+            while (true) {
+                const got = stdin_reader.interface.readSliceShort(&copy_buf) catch |err| switch (err) {
+                    error.ReadFailed => return err,
+                };
+                if (got == 0) break;
+                try pipe_stdout_writer.interface.writeAll(copy_buf[0..got]);
+            }
+        } else {
+            try pipeline.run(
+                std.heap.page_allocator,
+                &stdin_reader.interface,
+                &pipe_stdout_writer.interface,
+                Filters,
+            );
+        }
         try pipe_stdout_writer.interface.flush();
         return;
     }
@@ -250,14 +383,9 @@ pub fn main(init: std.process.Init) !void {
     }
 
     // Wrapper mode: forward extra args as a child-process invocation.
-    // Build the slice from init.minimal.args on the stack — 32 args is well
-    // above any realistic `git <subcmd> <args...>` invocation.
-    var argv_buf: [32][]const u8 = undefined;
-    const argv_count = args.len - 1;
-    if (argv_count > argv_buf.len) return error.TooManyArgs;
-    for (args[1..], 0..) |arg, i| {
-        argv_buf[i] = arg;
-    }
+    // Use the arena-owned argument slice directly so commands with many file
+    // operands do not fail before the child process gets a chance to run.
+    const child_argv = args[1..];
 
     // Arena over the wrapper lifetime — filter loops allocate per-line and
     // free at scope exit. page_allocator is a syscall per alloc; arena bumps
@@ -269,16 +397,17 @@ pub fn main(init: std.process.Init) !void {
         allocator,
         io,
         environ,
-        argv_buf[0..argv_count],
+        child_argv,
         &stdout_writer.interface,
         &stderr_writer.interface,
     );
     try stdout_writer.interface.flush();
     try stderr_writer.interface.flush();
 
-    // Record stats (best-effort, never fails the command).
-    if (home.len > 0) {
-        stats.record(allocator, io, home, argv_buf[0..argv_count], result.input_bytes, result.output_bytes);
+    // Record stats (best-effort, never fails the command). Respect the
+    // conventional DO_NOT_TRACK opt-out even though stats are local-only.
+    if (result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK")) {
+        stats.record(allocator, io, home, child_argv, result.input_bytes, result.output_bytes);
     }
 
     if (result.exit_code != 0) std.process.exit(result.exit_code);
@@ -291,9 +420,14 @@ fn readAllStdin(allocator: std.mem.Allocator, io: std.Io) ![]u8 {
     return try stdin_reader.interface.allocRemaining(allocator, .unlimited);
 }
 
-// Maximum bytes captured from child stdout + stderr combined.
-// 2 MiB matches the integration test cap and accommodates large git outputs.
-const MAX_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+// Maximum bytes captured per child stream before failing closed. Large unknown
+// text output is still eligible for generic compaction, so keep this high
+// enough for real-world tool dumps while bounding memory use. Verbose curl gets
+// a larger cap because stdout is the response body and may be sizeable JSON.
+const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CURL_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_OUTPUT_LABEL = "16M+\n";
+const MAX_CURL_OUTPUT_LABEL = "64M+\n";
 
 // All 15 R4 git subcommands.  Phase 2 fills in the remaining 11; for now
 // only the 4 v0.3 filters (status, diff, log, show) are wired — the other
@@ -321,7 +455,47 @@ const WrapperResult = struct {
     exit_code: u8,
     input_bytes: usize,
     output_bytes: usize,
+    record_stats: bool,
 };
+
+const CapturedOutput = struct {
+    stdout: []u8,
+    stderr: []u8,
+};
+
+/// Concurrently drain child stdout and stderr. Reading one pipe to EOF before
+/// the other can deadlock when the child writes more than the kernel pipe
+/// buffer to stderr while stdout stays open.
+fn drainChildOutput(allocator: std.mem.Allocator, io: std.Io, child: *std.process.Child, max_output_bytes: usize) !CapturedOutput {
+    var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
+    var multi_reader: std.Io.File.MultiReader = undefined;
+    multi_reader.init(
+        allocator,
+        io,
+        multi_reader_buffer.toStreams(),
+        &.{ child.stdout.?, child.stderr.? },
+    );
+    defer multi_reader.deinit();
+
+    const stdout_reader = multi_reader.reader(0);
+    const stderr_reader = multi_reader.reader(1);
+
+    while (multi_reader.fill(64, .none)) |_| {
+        if (stdout_reader.buffered().len > max_output_bytes) return error.StreamTooLong;
+        if (stderr_reader.buffered().len > max_output_bytes) return error.StreamTooLong;
+    } else |err| switch (err) {
+        error.EndOfStream => {},
+        else => |e| return e,
+    }
+
+    try multi_reader.checkAnyError();
+
+    const stdout_slice = try multi_reader.toOwnedSlice(0);
+    errdefer allocator.free(stdout_slice);
+    const stderr_slice = try multi_reader.toOwnedSlice(1);
+
+    return .{ .stdout = stdout_slice, .stderr = stderr_slice };
+}
 
 /// Write stdout + stderr passthrough. Used as error fallback in filter dispatch.
 noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Writer, stdout_slice: []const u8, stderr_slice: []const u8) void {
@@ -340,12 +514,15 @@ fn runWrapper(
     // Capture filter output in a buffer to measure output bytes for stats.
     var capture = std.Io.Writer.Allocating.init(allocator);
     defer capture.deinit();
+    last_output_inherited = false;
     const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
     const output = capture.written();
 
-    // When both stdout and stderr are empty, emit a short hint so agents
-    // always receive something back and don't loop retrying the command.
-    if (output.len == 0 and last_stderr_bytes == 0) {
+    // When both captured stdout and stderr are empty, emit a short hint so
+    // agents don't loop retrying the command. Streaming commands inherit stdio
+    // directly, so their output bypasses this capture buffer and must not get
+    // an extra hint appended.
+    if (output.len == 0 and last_stderr_bytes == 0 and !last_output_inherited) {
         try writer.writeAll("(no output)\n");
     } else {
         try writer.writeAll(output);
@@ -360,12 +537,14 @@ fn runWrapper(
         .exit_code = exit_code,
         .input_bytes = last_input_bytes,
         .output_bytes = output.len,
+        .record_stats = !last_output_inherited,
     };
 }
 
 /// Set by runWrapperInner to communicate input bytes to runWrapper.
 var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
+var last_output_inherited: bool = false;
 
 /// Write stdout with generic_compact fallback: if the specific filter didn't
 /// match but the output is large enough, apply generic_compact rather than
@@ -390,11 +569,9 @@ fn runWrapperInner(
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !u8 {
-    // Spawn + sequential drain (stdout, then stderr). Avoids MultiReader to
-    // shave ~10 KB off the release binary. Deadlock risk if stderr exceeds
-    // the pipe buffer (~64 KB on Linux) before stdout is drained — acceptable
-    // for git/cargo/bun which emit small stderr (errors, progress lines).
-    // MAX_OUTPUT_BYTES cap still bounds total capture.
+    // Spawn the child and drain stdout + stderr concurrently. Many tools write
+    // substantial diagnostics/progress to stderr before closing stdout; draining
+    // stdout first can block forever once the stderr pipe fills.
     //
     // For `ls`: force LC_ALL=C + LANG=C so date fields always use the C-locale
     // shape ("Apr 22") regardless of the user's system locale. Without this,
@@ -422,13 +599,20 @@ fn runWrapperInner(
         break :blk null;
     };
 
-    // Detect streaming/interactive commands that must not be buffered.
-    // These get stdout+stderr inherited directly — no capture, no filtering.
-    const is_streaming = isStreamingCommand(cmd_basename, argv);
+    // Detect commands that must not be buffered. These get stdout+stderr
+    // inherited directly — no capture, no filtering, no size cap. This includes
+    // explicit lossless mode, streaming/interactive commands, and non-verbose
+    // curl where stdout may be an API body, archive, or install script.
+    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+    const is_raw_curl = std.mem.eql(u8, cmd_basename, "curl") and !curl_compact.hasVerboseFlag(argv);
+    const is_streaming = lossless or isStreamingCommand(cmd_basename, argv) or is_raw_curl;
     if (is_streaming) {
+        last_output_inherited = true;
+        last_input_bytes = 0;
+        last_stderr_bytes = 0;
         var child = std.process.spawn(io, .{
             .argv = argv,
-            .stdin = .ignore,
+            .stdin = .inherit,
             .stdout = .inherit,
             .stderr = .inherit,
             .environ_map = spawn_env,
@@ -443,39 +627,32 @@ fn runWrapperInner(
 
     var child = std.process.spawn(io, .{
         .argv = argv,
-        .stdin = .ignore,
+        .stdin = .inherit,
         .stdout = .pipe,
         .stderr = .pipe,
         .environ_map = spawn_env,
     }) catch |err| return err;
     defer child.kill(io);
 
-    var stdout_buf: [4096]u8 = undefined;
-    var stdout_reader = child.stdout.?.reader(io, &stdout_buf);
-    const stdout_slice = stdout_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
+    const max_output_bytes: usize = if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv))
+        MAX_CURL_OUTPUT_BYTES
+    else
+        MAX_OUTPUT_BYTES;
+    const max_output_label = if (max_output_bytes == MAX_CURL_OUTPUT_BYTES) MAX_CURL_OUTPUT_LABEL else MAX_OUTPUT_LABEL;
+    const captured = drainChildOutput(allocator, io, &child, max_output_bytes) catch |err| switch (err) {
         error.StreamTooLong => {
-            const msg = "2M+\n";
-            stderr_writer.writeAll(msg) catch {};
+            last_input_bytes = 0;
+            last_stderr_bytes = max_output_label.len;
+            stderr_writer.writeAll(max_output_label) catch {};
             return 1;
         },
         else => return err,
     };
+    const stdout_slice = captured.stdout;
+    const stderr_slice = captured.stderr;
 
-    // Record raw input size for stats tracking.
+    // Record raw stream sizes for stats tracking and empty-output detection.
     last_input_bytes = stdout_slice.len;
-
-    var err_drain_buf: [4096]u8 = undefined;
-    var stderr_reader = child.stderr.?.reader(io, &err_drain_buf);
-    const stderr_slice = stderr_reader.interface.allocRemaining(allocator, .limited(MAX_OUTPUT_BYTES)) catch |err| switch (err) {
-        error.StreamTooLong => {
-            const msg = "2M+\n";
-            stderr_writer.writeAll(msg) catch {};
-            return 1;
-        },
-        else => return err,
-    };
-
-    // Record stderr size for empty-output detection.
     last_stderr_bytes = stderr_slice.len;
 
     const term = try child.wait(io);
@@ -489,9 +666,6 @@ fn runWrapperInner(
     // goes straight to passthrough even if the subcommand string matches a
     // KnownSubcommand.
     // Strip any directory prefix: "git", "/usr/bin/git", etc. all match.
-
-    // Hoist SMLL_LOSSLESS lookup — checked in every dispatch branch.
-    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
 
     const has_arg1 = argv.len >= 2;
     const arg1 = if (has_arg1) argv[1] else "";
@@ -623,12 +797,153 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    // Python tooling wrappers — preserve diagnostics while dropping progress
+    // chatter/table padding.
+    if (std.mem.eql(u8, cmd_basename, "mypy")) {
+        if (!lossless) {
+            mypy_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "ruff")) {
+        if (!lossless) {
+            ruff_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "head") or std.mem.eql(u8, cmd_basename, "tail")) {
+        passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "gh")) {
+        if (exit_code != 0 and stderr_slice.len > 0) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless) {
+            tool_compact.applyGh(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "pnpm") or std.mem.eql(u8, cmd_basename, "yarn") or
+        std.mem.eql(u8, cmd_basename, "bun") or std.mem.eql(u8, cmd_basename, "uv") or
+        std.mem.eql(u8, cmd_basename, "uvx"))
+    {
+        if (exit_code != 0 and stderr_slice.len > 0) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless) {
+            tool_compact.applyPackage(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "swift") or std.mem.eql(u8, cmd_basename, "xcodebuild")) {
+        if (exit_code != 0 and stderr_slice.len > 0) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless) {
+            tool_compact.applyAppleBuild(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "dotnet")) {
+        if (!lossless and (std.mem.eql(u8, arg1, "build") or std.mem.eql(u8, arg1, "test") or std.mem.eql(u8, arg1, "format") or std.mem.eql(u8, arg1, "restore"))) {
+            dotnet_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "prettier")) {
+        if (!lossless) {
+            prettier_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "pip") or std.mem.eql(u8, cmd_basename, "pip3")) {
+        if (!lossless and (std.mem.eql(u8, arg1, "list") or std.mem.eql(u8, arg1, "outdated"))) {
+            pip_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // env wrapper — mask sensitive variables for environment-listing forms.
+    // Do not filter `env FOO=bar command`: that form executes an arbitrary
+    // child command and its stdout should keep the command's semantics.
+    if (std.mem.eql(u8, cmd_basename, "env") and isEnvListingInvocation(argv)) {
+        if (!lossless) {
+            env_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // wc wrapper — collapse padding while preserving counts, filenames, and stderr.
+    if (std.mem.eql(u8, cmd_basename, "wc")) {
+        if (!lossless) {
+            wc_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
     // curl -v / -vv / -vvv wrapper — LOSSY compaction by default (v0.6).
     // Drops TLS handshake chatter and cert dumps from stderr; preserves
-    // status line, request/response headers, and body. Non-standard filter:
-    // matches() inspects STDERR, not stdout. Set SMLL_LOSSLESS=1 to bypass.
-    if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv)) {
-        if (!lossless and curl_compact.matches(stderr_slice)) {
+    // status line, request/response headers, and body. Non-verbose curl is
+    // always passthrough: stdout is often machine-readable JSON, shell scripts,
+    // or other data consumed by downstream tools.
+    if (std.mem.eql(u8, cmd_basename, "curl")) {
+        if (curl_compact.hasVerboseFlag(argv) and !lossless and curl_compact.matches(stderr_slice) and !curlBodyLooksBinary(stdout_slice, stderr_slice)) {
             curl_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
@@ -806,6 +1121,15 @@ fn runWrapperInner(
     // Global lossless mode: bypass all git filters.
     if (lossless) {
         passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        return exit_code;
+    }
+
+    // If git failed, preserve its raw diagnostic streams verbatim. Most git
+    // filters intentionally consume benign stderr chatter on success, but
+    // failed commands need every error line for the agent's next step.
+    if (exit_code != 0 and stderr_slice.len > 0) {
+        try writer.writeAll(stdout_slice);
+        try writer.writeAll(stderr_slice);
         return exit_code;
     }
 

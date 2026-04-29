@@ -103,6 +103,27 @@ fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
     return try drainChild(allocator, io, &child);
 }
 
+fn runSmllWithEnv(allocator: std.mem.Allocator, input: []const u8, name: []const u8, value: []const u8) !RunResult {
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put(name, value);
+
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = &.{exe_path},
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .environ_map = &env,
+    });
+
+    if (input.len > 0) try child.stdin.?.writeStreamingAll(io, input);
+    child.stdin.?.close(io);
+    child.stdin = null;
+
+    return try drainChild(allocator, io, &child);
+}
+
 /// Concurrently drain stdout + stderr from a running child, wait on it,
 /// and return owned slices. Mirrors what std.process.run does internally so
 /// we don't deadlock when both pipes fill.
@@ -136,6 +157,15 @@ fn drainChild(allocator: std.mem.Allocator, io: std.Io, child: *std.process.Chil
     const stderr_slice = try multi_reader.toOwnedSlice(1);
 
     return .{ .stdout = stdout_slice, .stderr = stderr_slice, .term = term };
+}
+
+fn expectNoStatsFile(dir: std.Io.Dir) !void {
+    const file = dir.openFile(std.testing.io, ".smll/stats.json", .{}) catch |err| {
+        try std.testing.expectEqual(error.FileNotFound, err);
+        return;
+    };
+    file.close(std.testing.io);
+    return error.UnexpectedStatsFile;
 }
 
 test "echo hello passes through" {
@@ -491,6 +521,31 @@ fn runSmllWrapper(
     return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
 }
 
+fn runSmllWrapperWithStdin(
+    allocator: std.mem.Allocator,
+    inner_argv: []const []const u8,
+    input: []const u8,
+) !RunResult {
+    var full: std.ArrayList([]const u8) = .empty;
+    defer full.deinit(allocator);
+    try full.append(allocator, exe_path);
+    for (inner_argv) |a| try full.append(allocator, a);
+
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = full.items,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
+
+    if (input.len > 0) try child.stdin.?.writeStreamingAll(io, input);
+    child.stdin.?.close(io);
+    child.stdin = null;
+
+    return try drainChild(allocator, io, &child);
+}
+
 test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd)" {
     // v0.4 argv guard: the outer command is "cat", not "git", so the formatter
     // switch is bypassed and stdout passes through verbatim (no filtering).
@@ -517,6 +572,21 @@ test "wrapper: child exit code propagates (exit 42)" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 42 }, result.term);
 }
 
+test "wrapper: forwards more than 32 child arguments" {
+    const allocator = std.testing.allocator;
+    var argv: [41][]const u8 = undefined;
+    argv[0] = "/bin/echo";
+    for (argv[1..]) |*arg| arg.* = "arg";
+    argv[40] = "arg39";
+
+    var result = try runSmllWrapper(allocator, &argv);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "arg arg") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "arg39") != null);
+}
+
 test "wrapper: child stderr flows through to smll's stderr" {
     const allocator = std.testing.allocator;
     var result = try runSmllWrapper(
@@ -525,6 +595,105 @@ test "wrapper: child stderr flows through to smll's stderr" {
     );
     defer result.deinit(allocator);
     try std.testing.expectEqualStrings("child-err\n", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: child stdin flows through to commands that read piped input" {
+    const allocator = std.testing.allocator;
+    var cat_result = try runSmllWrapperWithStdin(allocator, &.{"/bin/cat"}, "alpha\nbeta\n");
+    defer cat_result.deinit(allocator);
+    try std.testing.expectEqualStrings("alpha\nbeta\n", cat_result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, cat_result.term);
+
+    var grep_result = try runSmllWrapperWithStdin(allocator, &.{ "grep", "beta" }, "alpha\nbeta\n");
+    defer grep_result.deinit(allocator);
+    try std.testing.expectEqualStrings("beta\n", grep_result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, grep_result.term);
+}
+
+test "wrapper: streaming command does not append no-output hint" {
+    const allocator = std.testing.allocator;
+    var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", "printf 'stream-ok\\n'", "--watch" });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings("stream-ok\n", result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: DO_NOT_TRACK disables local stats file writes" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("HOME", home_path);
+    try env.put("DO_NOT_TRACK", "1");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "/bin/echo", "hello" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("hello\n", wrapped.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+    try expectNoStatsFile(tmp.dir);
+}
+
+test "wrapper: raw inherited output is not recorded as zero-byte stats" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\printf 'raw-body\n'
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "curl", "https://example.invalid/raw" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("raw-body\n", wrapped.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+    try expectNoStatsFile(tmp.dir);
+}
+
+test "wrapper: large stderr does not deadlock while stdout is still open" {
+    const allocator = std.testing.allocator;
+    const script =
+        "i=0; " ++
+        "while [ $i -lt 3000 ]; do " ++
+        "printf 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\\n' 1>&2; " ++
+        "i=$((i + 1)); " ++
+        "done; " ++
+        "printf 'ok\\n'";
+    var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", script });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings("ok\n", result.stdout);
+    try std.testing.expect(result.stderr.len > 200 * 1024);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
@@ -814,6 +983,15 @@ fn runSmllWrapperFakeGit(
     bin_dir: []const u8,
     inner_argv: []const []const u8,
 ) !RunResult {
+    return runSmllWrapperFakePathLimited(allocator, bin_dir, inner_argv, 2 * 1024 * 1024);
+}
+
+fn runSmllWrapperFakePathLimited(
+    allocator: std.mem.Allocator,
+    bin_dir: []const u8,
+    inner_argv: []const []const u8,
+    limit: usize,
+) !RunResult {
     // Build full argv: [smll_exe, inner_argv...]
     var full: std.ArrayList([]const u8) = .empty;
     defer full.deinit(allocator);
@@ -830,8 +1008,8 @@ fn runSmllWrapperFakeGit(
 
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = full.items,
-        .stdout_limit = .limited(2 * 1024 * 1024),
-        .stderr_limit = .limited(2 * 1024 * 1024),
+        .stdout_limit = .limited(limit),
+        .stderr_limit = .limited(limit),
         .environ_map = &env,
     });
     return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
@@ -938,6 +1116,51 @@ test "dispatch: registered subcommand with both stdout and stderr — stderr not
     try std.testing.expectEqualStrings("", result.stderr);
 }
 
+test "dispatch: git fatal stderr-only failures are preserved" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'fatal: boom for %s\n' "$1" >&2
+        \\exit 128
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "status" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 128 }, result.term);
+    try std.testing.expectEqualStrings("fatal: boom for status\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "dispatch: git fatal failures preserve both stdout and stderr" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'partial stdout for %s\n' "$1"
+        \\printf 'fatal: stderr for %s\n' "$1" >&2
+        \\exit 128
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "status" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 128 }, result.term);
+    try std.testing.expectEqualStrings("partial stdout for status\nfatal: stderr for status\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
 // (d) Non-git outer command (cargo push):
 //     argv[1] = "cargo" ≠ "git" → argv guard forces passthrough regardless of
 //     argv[2] = "push" being a KnownSubcommand.
@@ -967,6 +1190,177 @@ test "dispatch: non-git outer command bypasses formatter (argv guard)" {
 
     // Passthrough: raw dirty_fixture bytes must come through unchanged.
     try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
+}
+
+test "dispatch: non-verbose curl preserves large machine-readable stdout" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\printf '{"items":['
+        \\i=0
+        \\while [ $i -lt 1000 ]; do
+        \\  if [ $i -gt 0 ]; then printf ','; fi
+        \\  printf '{"id":%s,"name":"item-%s"}' "$i" "$i"
+        \\  i=$((i + 1))
+        \\done
+        \\printf ']}\n'
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "curl", "https://example.invalid/api.json" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "{\"items\":["));
+    try std.testing.expect(std.mem.endsWith(u8, result.stdout, "]}\n"));
+    try std.testing.expect(std.mem.find(u8, result.stdout, "item-999") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "...+") == null);
+}
+
+test "dispatch: non-verbose curl does not hit wrapper capture limit" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\i=0
+        \\while [ $i -lt 3000 ]; do
+        \\  printf '%01024d' "$i"
+        \\  i=$((i + 1))
+        \\done
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{ "curl", "https://example.invalid/big.bin" }, 4 * 1024 * 1024);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len > 2 * 1024 * 1024);
+    try std.testing.expect(std.mem.find(u8, result.stderr, "16M+") == null);
+}
+
+test "dispatch: large unknown text output is compacted instead of capped" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "python3",
+        \\#!/bin/sh
+        \\i=0
+        \\while [ $i -lt 3000 ]; do
+        \\  printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n'
+        \\  i=$((i + 1))
+        \\done
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{ "python3", "script.py" }, 4 * 1024 * 1024);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < 1024);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "×3000") != null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "dispatch: oversized captured output emits only cap marker" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "hugeout",
+        \\#!/bin/sh
+        \\dd if=/dev/zero bs=1048576 count=17 2>/dev/null | tr '\000' 'A'
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{"hugeout"}, 1024);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("16M+\n", result.stderr);
+}
+
+test "pipe-mode: large JSON passes through byte-identically" {
+    const allocator = std.testing.allocator;
+    var input: std.ArrayList(u8) = .empty;
+    defer input.deinit(allocator);
+    try input.appendSlice(allocator, "{\"items\":[");
+    for (0..1000) |i| {
+        if (i > 0) try input.append(allocator, ',');
+        const item = try std.fmt.allocPrint(allocator, "{{\"id\":{d},\"name\":\"item-{d}\"}}", .{ i, i });
+        defer allocator.free(item);
+        try input.appendSlice(allocator, item);
+    }
+    try input.appendSlice(allocator, "]}\n");
+    try std.testing.expect(input.items.len > 4 * 1024);
+
+    var result = try runSmll(allocator, input.items);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, input.items, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "pipe-mode: SMLL_LOSSLESS bypasses filters byte-identically" {
+    const allocator = std.testing.allocator;
+    const input = "line with    spaces and \x1b[31mcolor\x1b[0m\n" ** 400;
+    var result = try runSmllWithEnv(allocator, input, "SMLL_LOSSLESS", "1");
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, input, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_LOSSLESS bypasses capture limit for large output" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "bigout",
+        \\#!/bin/sh
+        \\i=0
+        \\while [ $i -lt 3000 ]; do
+        \\  printf '%01024d' "$i"
+        \\  i=$((i + 1))
+        \\done
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("SMLL_LOSSLESS", "1");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "bigout" },
+        .stdout_limit = .limited(4 * 1024 * 1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+    try std.testing.expect(wrapped.stdout.len > 2 * 1024 * 1024);
+    try std.testing.expectEqualStrings("", wrapped.stderr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1849,6 +2243,323 @@ test "smoke: du with SMLL_LOSSLESS=1 passes through unchanged" {
     try std.testing.expectEqualSlices(u8, du_fixture, result.stdout);
 }
 
+const wc_fixture =
+    "       1       2      10 a.txt\n" ++
+    "      20      30     400 b.txt\n" ++
+    "      21      32     410 total\n";
+
+test "smoke: wc collapses count padding" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "wc", wc_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "wc", "a.txt", "b.txt" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("1 2 10 a.txt\n20 30 400 b.txt\n21 32 410 total\n", result.stdout);
+}
+
+test "smoke: wc with SMLL_LOSSLESS=1 passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "wc", wc_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "wc", "a.txt", "b.txt" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, wc_fixture, result.stdout);
+}
+
+const env_fixture =
+    "HOME=/tmp/example\n" ++
+    "API_KEY=supersecrettoken\n" ++
+    "SECRET_TOKEN=abc\n" ++
+    "LANG=en_US.UTF-8\n";
+
+test "smoke: env masks sensitive values" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "env", env_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"env"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "HOME=/tmp/example") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "API_KEY=su****en") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "SECRET_TOKEN=****") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "supersecrettoken") == null);
+}
+
+test "smoke: env command-execution form is not filtered" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "env", env_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "env", "FOO=bar", "printenv" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, env_fixture, result.stdout);
+}
+
+const mypy_fixture =
+    "LOG: processing noisy stuff\n" ++
+    "src/a.py:10: error: Incompatible types [assignment]\n" ++
+    "src/b.py:3: note: Revealed type is builtins.str\n" ++
+    "Found 1 error in 1 file (checked 2 source files)\n";
+
+test "smoke: mypy preserves diagnostics and drops chatter" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "mypy", mypy_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "mypy", "src" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "LOG:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/a.py:10: error") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Found 1 error") != null);
+}
+
+const ruff_fixture =
+    "src/a.py:1:8: F401 `os` imported but unused\n" ++
+    "Found 1 error.\n";
+
+test "smoke: ruff preserves diagnostics" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "ruff", ruff_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "ruff", "check", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("src/a.py:1:8: F401 `os` imported but unused\n", result.stdout);
+}
+
+const pip_fixture =
+    "Package    Version\n" ++
+    "---------- -------\n" ++
+    "requests   2.31.0\n" ++
+    "urllib3    2.0.7\n";
+
+test "smoke: pip list collapses table padding" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "pip", pip_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pip", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("requests 2.31.0\nurllib3 2.0.7\n", result.stdout);
+}
+
+const prettier_fixture =
+    "Checking formatting...\n" ++
+    "[warn] src/a.ts\n" ++
+    "[warn] Code style issues found in 1 file. Run Prettier to fix.\n";
+
+test "smoke: prettier keeps formatting warnings" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "prettier", prettier_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "prettier", "--check", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("[warn] src/a.ts\n[warn] Code style issues found in 1 file. Run Prettier to fix.\n", result.stdout);
+}
+
+const dotnet_build_fixture =
+    "  Determining projects to restore...\n" ++
+    "Program.cs(10,5): error CS1002: ; expected [/tmp/app.csproj]\n" ++
+    "Build FAILED.\n" ++
+    "    1 Error(s)\n";
+
+test "smoke: dotnet build keeps errors and summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "dotnet", dotnet_build_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "dotnet", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error CS1002") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Build FAILED") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Determining projects") == null);
+}
+
+const dotnet_test_fixture = "Test run failed.\nTotal tests: 3\n     Passed: 2\n     Failed: 1\n";
+
+test "smoke: dotnet test keeps failure summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "dotnet", dotnet_test_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "dotnet", "test" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Test run failed") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Failed: 1") != null);
+}
+
+const gh_fixture = "noise\n✓ build passed\nhttps://github.com/o/r/pull/1\n";
+
+test "smoke: gh keeps checks and urls" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "pr", "checks" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("✓ build passed\nhttps://github.com/o/r/pull/1\n", result.stdout);
+}
+
+const package_fixture = "Progress: resolved 1\nWARN deprecated left-pad\nadded 12 packages\n";
+
+test "smoke: pnpm keeps package warnings and summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "pnpm", package_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pnpm", "install" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("WARN deprecated left-pad\nadded 12 packages\n", result.stdout);
+}
+
+test "smoke: bun keeps package warnings and summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "bun", package_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "bun", "install" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("WARN deprecated left-pad\nadded 12 packages\n", result.stdout);
+}
+
+test "smoke: uv keeps package errors" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "uv", "Resolved 3 packages\nerror: failed to resolve\n");
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "uv", "sync" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Resolved 3 packages") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error: failed to resolve") != null);
+}
+
+test "smoke: uvx keeps package errors" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "uvx", "Installed 1 package\nerror: command failed\n");
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "uvx", "ruff" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("error: command failed\n", result.stdout);
+}
+
+const apple_fixture = "CompileSwift A.swift\nA.swift:1:1: error: bad\n** BUILD FAILED **\n";
+
+test "smoke: swift keeps build diagnostics" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "swift", apple_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "swift", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error: bad") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "BUILD FAILED") != null);
+}
+
+test "smoke: xcodebuild keeps build diagnostics" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "xcodebuild", apple_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "xcodebuild", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error: bad") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "BUILD FAILED") != null);
+}
+
+test "smoke: finite head and tail pass through exactly" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir_head = try setupFakeTool(allocator, tmp.dir, "head", "a\nb\n");
+    defer allocator.free(bin_dir_head);
+    var head_result = try runSmllWrapperEnv(allocator, bin_dir_head, &.{ "head", "-n", "2" }, &.{});
+    defer head_result.deinit(allocator);
+    try std.testing.expectEqualStrings("a\nb\n", head_result.stdout);
+
+    var tmp_tail = std.testing.tmpDir(.{});
+    defer tmp_tail.cleanup();
+    const bin_dir_tail = try setupFakeTool(allocator, tmp_tail.dir, "tail", "c\nd\n");
+    defer allocator.free(bin_dir_tail);
+    var tail_result = try runSmllWrapperEnv(allocator, bin_dir_tail, &.{ "tail", "-n", "2" }, &.{});
+    defer tail_result.deinit(allocator);
+    try std.testing.expectEqualStrings("c\nd\n", tail_result.stdout);
+}
+
 // ---------------------------------------------------------------------------
 // v0.6 curl_compact — two-stream (stdout+stderr) verbose-flag dispatch.
 // ---------------------------------------------------------------------------
@@ -1909,7 +2620,7 @@ test "smoke: curl -v drops TLS chatter, keeps headers + body (default)" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "SSL certificate verify") == null);
 }
 
-test "smoke: curl large -vvv fixture reduces by ≥ 60%" {
+test "smoke: curl large -vvv fixture strips verbose noise but preserves body" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1920,9 +2631,7 @@ test "smoke: curl large -vvv fixture reduces by ≥ 60%" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    const raw_total = curl_large_stderr.len + curl_large_stdout.len;
-    const reduction = (raw_total - result.stdout.len) * 100 / raw_total;
-    try std.testing.expect(reduction >= 60);
+    try std.testing.expect(std.mem.find(u8, result.stdout, curl_large_stdout) != null);
     // No cert material survives.
     try std.testing.expect(std.mem.find(u8, result.stdout, "BEGIN CERTIFICATE") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "MIIFaz") == null);
@@ -1930,6 +2639,120 @@ test "smoke: curl large -vvv fixture reduces by ≥ 60%" {
     // First 5 requests show full status; rest are summarized.
     const int_status_count = std.mem.count(u8, result.stdout, "< HTTP/2 200");
     try std.testing.expect(int_status_count >= 1 and int_status_count <= 5);
+}
+
+test "smoke: curl -v preserves response bodies larger than default capture cap" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\dd if=/dev/zero bs=1048576 count=17 2>/dev/null | tr '\000' 'x'
+        \\printf '> GET /huge HTTP/1.1\n< HTTP/1.1 200 OK\n' >&2
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_dir, &.{ "curl", "-v", "https://example.com/huge" }, 20 * 1024 * 1024);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len > 17 * 1024 * 1024);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "64M+") == null);
+}
+
+test "smoke: curl -v binary body passes through without stdout decoration" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    const body = "\x00PNG\r\n\x1a\nBINARY-DATA";
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\printf '\000PNG\r\n\032\nBINARY-DATA'
+        \\printf '> GET /image.png HTTP/1.1\n< HTTP/1.1 200 OK\n< content-type: image/png\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-v", "https://example.com/image.png" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, body, result.stdout);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stderr, "content-type: image/png") != null);
+}
+
+test "smoke: curl -v high-bit binary body passes through without stdout decoration" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    const body = "\xff\xd8\xff\xe0JFIF-binary-body";
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\printf '\377\330\377\340JFIF-binary-body'
+        \\printf '> GET /image.jpg HTTP/1.1\n< HTTP/1.1 200 OK\n< content-type: image/jpeg\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-v", "https://example.com/image.jpg" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, body, result.stdout);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stderr, "content-type: image/jpeg") != null);
+}
+
+test "smoke: curl -v ascii binary content-type passes through without stdout decoration" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    const body = "%PDF-1.7\n% ascii header\n";
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\printf '%%PDF-1.7\n%% ascii header\n'
+        \\printf '> GET /file.pdf HTTP/1.1\n< HTTP/1.1 200 OK\n< content-type: application/pdf\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-v", "https://example.com/file.pdf" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, body, result.stdout);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stderr, "content-type: application/pdf") != null);
+}
+
+test "smoke: curl -v PDF magic passes through without content-type" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    const body = "%PDF-1.7\n% ascii header\n";
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\printf '%%PDF-1.7\n%% ascii header\n'
+        \\printf '> GET /file HTTP/1.1\n< HTTP/1.1 200 OK\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "curl", "-v", "https://example.com/file" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, body, result.stdout);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stderr, "< HTTP/1.1 200 OK") != null);
 }
 
 test "smoke: curl without -v passes through (no dispatch)" {

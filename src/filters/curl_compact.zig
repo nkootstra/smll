@@ -103,36 +103,10 @@ pub fn apply(
 
     if (stdout.len > 0) {
         if (has_stderr_content) try writer.writeAll("--- body ---\n");
-        try emitTruncatedBody(writer, stdout);
-    }
-}
-
-const BODY_MAX_LINES: usize = 10;
-
-fn emitTruncatedBody(writer: *Writer, body: []const u8) !void {
-    var lines = std.mem.splitScalar(u8, body, '\n');
-    var count: usize = 0;
-    var total: usize = 0;
-    // Count total lines first
-    var counter = std.mem.splitScalar(u8, body, '\n');
-    while (counter.next()) |l| {
-        if (l.len > 0) total += 1;
-    }
-    if (total <= BODY_MAX_LINES) {
-        try writer.writeAll(body);
-        return;
-    }
-    // Emit first 3 lines, then summary
-    while (lines.next()) |line| {
-        if (line.len == 0) continue;
-        count += 1;
-        if (count <= 3) {
-            try writer.writeAll(line);
-            try writer.writeByte('\n');
-        } else {
-            try writer.writeAll("(+"); try ansi.writeDecimal(writer, total - 3); try writer.writeAll(")\n");
-            return;
-        }
+        // The response body is often machine-readable JSON, shell script, or
+        // another downstream-consumed payload. Filter only curl's verbose trace;
+        // preserve stdout byte-for-byte.
+        try writer.writeAll(stdout);
     }
 }
 
@@ -256,7 +230,9 @@ fn emitFilteredStderr(writer: *Writer, stderr: []const u8) !void {
         try writer.writeByte('\n');
     }
     if (request_count > 1) {
-        try writer.writeByte('('); try ansi.writeDecimal(writer, request_count); try writer.writeAll(" requests total)\n");
+        try writer.writeByte('(');
+        try ansi.writeDecimal(writer, request_count);
+        try writer.writeAll(" requests total)\n");
     }
 }
 
