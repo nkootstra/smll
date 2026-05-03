@@ -1,4 +1,5 @@
 const std = @import("std");
+const build_options = @import("build_options");
 pub const panic = std.debug.simple_panic;
 pub const std_options: std.Options = .{
     .enable_segfault_handler = false,
@@ -379,6 +380,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
             );
         }
         try pipe_stdout_writer.interface.flush();
+        return;
+    }
+
+    if (args.len == 2 and std.mem.eql(u8, args[1], "--version")) {
+        try stdout_writer.interface.print("smll {s}\n", .{build_options.smll_version});
+        try stdout_writer.interface.flush();
         return;
     }
 

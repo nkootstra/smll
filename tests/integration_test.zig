@@ -8,6 +8,7 @@ const git_commit = @import("git_commit");
 const git_branch = @import("git_branch");
 
 const exe_path: []const u8 = build_options.smll_exe_path;
+const smll_version: []const u8 = build_options.smll_version;
 
 const dirty_fixture = @embedFile("fixture_git_status_dirty");
 const clean_fixture = @embedFile("fixture_git_status_clean");
@@ -562,6 +563,24 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
 
     // Passthrough: raw fixture bytes must come through unchanged.
     try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "meta: --version prints package version" {
+    const allocator = std.testing.allocator;
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--version" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    const expected = try std.fmt.allocPrint(allocator, "smll {s}\n", .{smll_version});
+    defer allocator.free(expected);
+
+    try std.testing.expectEqualStrings(expected, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
