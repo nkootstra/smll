@@ -2694,6 +2694,39 @@ test "smoke: dotnet test keeps failure summary" {
 
 const gh_fixture = "noise\n✓ build passed\nhttps://github.com/o/r/pull/1\n";
 
+const gh_pr_checks_fixture =
+    "build\tpass\t1m23s\n" ++
+    "lint\tfail\t32s\n" ++
+    "docs\tskipping\t0s\n" ++
+    "deploy\tpending\t0s\n" ++
+    "preview\tcancel\t0s\n";
+
+const gh_pr_state_all_fixture =
+    "22\tAdd --version flag\tfeat/version-flag\tMERGED\t2026-05-03T10:06:20Z\n" ++
+    "21\tFix agent retry loops on commands with no output\tclaude/fix-git-output-loop\tMERGED\t2026-05-03T04:49:11Z\n" ++
+    "20\tShrink release binary\tperf/shrink-release-binary\tMERGED\t2026-04-29T16:33:54Z\n" ++
+    "19\tOpen PR keeps empty branch\t\tOPEN\t2026-04-28T12:00:00Z\n" ++
+    "18\tClosed PR abbreviation\tfix/closed-pr\tCLOSED\t2026-04-27T09:30:00Z\n";
+
+const gh_pr_state_all_compact =
+    "22\tAdd --version flag\tfeat/version-flag\tM\t2026-05-03\n" ++
+    "21\tFix agent retry loops on commands with no output\tclaude/fix-git-output-loop\tM\t2026-05-03\n" ++
+    "20\tShrink release binary\tperf/shrink-release-binary\tM\t2026-04-29\n" ++
+    "19\tOpen PR keeps empty branch\t\tO\t2026-04-28\n" ++
+    "18\tClosed PR abbreviation\tfix/closed-pr\tC\t2026-04-27\n";
+
+const gh_release_list_fixture =
+    "smll 1.2.5\tLatest\tv1.2.5\t2026-05-03T10:11:03Z\n" ++
+    "smll 1.2.4\t\tv1.2.4\t2026-05-03T09:15:05Z\n" ++
+    "smll 1.2.3\t\tv1.2.3\t2026-04-29T17:05:10Z\n" ++
+    "smll 1.2.2\t\tv1.2.2\t2026-04-28T15:40:37Z\t\n";
+
+const gh_release_list_compact =
+    "smll 1.2.5\tLatest\tv1.2.5\t2026-05-03\n" ++
+    "smll 1.2.4\t\tv1.2.4\t2026-05-03\n" ++
+    "smll 1.2.3\t\tv1.2.3\t2026-04-29\n" ++
+    "smll 1.2.2\t\tv1.2.2\t2026-04-28\t\n";
+
 test "smoke: gh keeps checks and urls" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -2706,6 +2739,76 @@ test "smoke: gh keeps checks and urls" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualStrings("✓ build passed\nhttps://github.com/o/r/pull/1\n", result.stdout);
+}
+
+test "smoke: gh pr checks keeps status rows without urls" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_pr_checks_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "pr", "checks" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(gh_pr_checks_fixture, result.stdout);
+}
+
+test "smoke: gh pr list keeps tab-separated state rows" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_pr_state_all_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "pr", "list", "--state", "all" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(gh_pr_state_all_compact, result.stdout);
+}
+
+test "smoke: compact gh pr list output is idempotent" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_pr_state_all_compact);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "pr", "list", "--state", "all" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(gh_pr_state_all_compact, result.stdout);
+}
+
+test "smoke: gh release list keeps tab-separated rows compact" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_release_list_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "release", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(gh_release_list_compact, result.stdout);
+}
+
+test "smoke: compact gh release list output is idempotent" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_release_list_compact);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "release", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(gh_release_list_compact, result.stdout);
 }
 
 const package_fixture = "Progress: resolved 1\nWARN deprecated left-pad\nadded 12 packages\n";
