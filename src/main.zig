@@ -520,6 +520,35 @@ noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Writer, s
     stderr_writer.writeAll(stderr_slice) catch {};
 }
 
+/// Emit a hint to stdout when the wrapped child produced no stdout AND no
+/// stderr. Without a hint, agents commonly retry the command in a loop,
+/// mistaking the silence for a tool-side failure. The hint always includes
+/// the exit code so the agent can distinguish a successful no-op (e.g.
+/// `git status --short` on a clean tree) from a failure that just happened
+/// to print nothing.
+fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code: u8) !void {
+    const cmd_path = if (argv.len > 0) argv[0] else "command";
+    const cmd = if (std.mem.findScalarLast(u8, cmd_path, '/')) |idx|
+        cmd_path[idx + 1 ..]
+    else
+        cmd_path;
+
+    // For `git status` and `git diff` on a clean tree, raw git emits nothing
+    // and exits 0 — a git-native success signal that means "no changes".
+    // Use that phrasing alongside the exit code so agents recognize it.
+    if (exit_code == 0 and std.mem.eql(u8, cmd, "git") and argv.len >= 2) {
+        const sub = argv[1];
+        if (std.mem.eql(u8, sub, "status") or std.mem.eql(u8, sub, "diff")) {
+            try writer.writeAll("(smll: no changes; git ");
+            try writer.writeAll(sub);
+            try writer.writeAll(" exited 0 with no output)\n");
+            return;
+        }
+    }
+
+    try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
+}
+
 fn runWrapper(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -535,12 +564,12 @@ fn runWrapper(
     const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
     const output = capture.written();
 
-    // When both captured stdout and stderr are empty, emit a short hint so
-    // agents don't loop retrying the command. Streaming commands inherit stdio
-    // directly, so their output bypasses this capture buffer and must not get
-    // an extra hint appended.
+    // When both captured stdout and stderr are empty, emit a contextual hint
+    // so agents don't loop retrying the command. Streaming commands inherit
+    // stdio directly, so their output bypasses this capture buffer and must
+    // not get an extra hint appended.
     if (output.len == 0 and last_stderr_bytes == 0 and !last_output_inherited) {
-        try writer.writeAll("(no output)\n");
+        try writeNoOutputHint(writer, argv, exit_code);
     } else {
         try writer.writeAll(output);
     }
