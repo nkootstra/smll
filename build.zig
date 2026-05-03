@@ -3,6 +3,10 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    const smll_version = packageVersion(b);
+
+    const app_opts = b.addOptions();
+    app_opts.addOption([]const u8, "smll_version", smll_version);
 
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -10,6 +14,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
+    exe_mod.addOptions("build_options", app_opts);
 
     const util_mod = b.createModule(.{
         .root_source_file = b.path("src/util.zig"),
@@ -569,6 +574,7 @@ pub fn build(b: *std.Build) void {
         .no_builtin = true,
         .link_libc = true,
     });
+    release_mod.addOptions("build_options", app_opts);
     release_mod.addImport("git_status", git_status_mod);
     release_mod.addImport("git_diff", git_diff_mod);
     release_mod.addImport("git_log", git_log_mod);
@@ -791,6 +797,7 @@ pub fn build(b: *std.Build) void {
 
     const opts = b.addOptions();
     opts.addOptionPath("smll_exe_path", exe.getEmittedBin());
+    opts.addOption([]const u8, "smll_version", smll_version);
 
     const integration_mod = b.createModule(.{
         .root_source_file = b.path("tests/integration_test.zig"),
@@ -1064,4 +1071,17 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_sigil_rle_tests.step);
     test_step.dependOn(&run_validator_tests.step);
     test_step.dependOn(&run_integration_tests.step);
+}
+
+fn packageVersion(b: *std.Build) []const u8 {
+    const data = b.build_root.handle.readFileAlloc(b.graph.io, "build.zig.zon", b.allocator, .limited(64 * 1024)) catch |err| {
+        std.debug.panic("failed to read build.zig.zon: {s}", .{@errorName(err)});
+    };
+    const version_key = ".version";
+    const key_index = std.mem.indexOf(u8, data, version_key) orelse @panic("build.zig.zon missing .version");
+    const after_key = data[key_index + version_key.len ..];
+    const open_quote = std.mem.indexOfScalar(u8, after_key, '"') orelse @panic("build.zig.zon .version missing opening quote");
+    const after_open = after_key[open_quote + 1 ..];
+    const close_quote = std.mem.indexOfScalar(u8, after_open, '"') orelse @panic("build.zig.zon .version missing closing quote");
+    return after_open[0..close_quote];
 }
