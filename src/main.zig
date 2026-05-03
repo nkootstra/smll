@@ -599,11 +599,10 @@ var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
 
-/// Write stdout with generic_compact fallback: if the specific filter didn't
-/// match but the output is large enough, apply generic_compact rather than
-/// passing through raw. This catches commands inside bespoke dispatch blocks
-/// whose specific filter rejects the output shape.
+/// Write stdout through safe generic fallbacks: high-confidence table/list
+/// compaction first, then size-gated generic text compaction, then raw output.
 fn writeWithFallback(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !void {
+    if (try writeGenericTableIfUseful(allocator, stdout_slice, writer)) return;
     if (generic_compact.matches(stdout_slice)) {
         generic_compact.apply(allocator, stdout_slice, writer) catch {
             try writer.writeAll(stdout_slice);
@@ -612,6 +611,19 @@ fn writeWithFallback(allocator: std.mem.Allocator, stdout_slice: []const u8, wri
     } else {
         try writer.writeAll(stdout_slice);
     }
+}
+
+fn writeGenericTableIfUseful(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !bool {
+    if (!columnar.matchesGeneric(stdout_slice)) return false;
+
+    var compact = std.Io.Writer.Allocating.init(allocator);
+    defer compact.deinit();
+    columnar.applyGeneric(allocator, stdout_slice, &.{}, &compact.writer) catch return false;
+    const compacted = compact.written();
+    if (compacted.len >= stdout_slice.len) return false;
+
+    try writer.writeAll(compacted);
+    return true;
 }
 
 fn runWrapperInner(
@@ -885,10 +897,13 @@ fn runWrapperInner(
         if (exit_code != 0 and stderr_slice.len > 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless) {
-            tool_compact.applyGh(allocator, stdout_slice, stderr_slice, writer) catch {
-                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-                return 1;
-            };
+            if (!try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
+                tool_compact.applyGh(allocator, stdout_slice, stderr_slice, writer) catch {
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                    return 1;
+                };
+            }
+            try stderr_writer.writeAll(stderr_slice);
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -1159,11 +1174,8 @@ fn runWrapperInner(
         // Non-git outer command: size-gated generic compactor on stdout
         // when no bespoke arm claimed it AND output exceeds threshold.
         // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
-        if (!lossless and generic_compact.matches(stdout_slice)) {
-            generic_compact.apply(allocator, stdout_slice, writer) catch {
-                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-                return if (exit_code != 0) exit_code else 1;
-            };
+        if (!lossless) {
+            try writeWithFallback(allocator, stdout_slice, writer);
         } else {
             try writer.writeAll(stdout_slice);
         }

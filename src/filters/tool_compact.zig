@@ -3,16 +3,18 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
+const gh_pr_state_field = 3;
+
 pub fn applyPackage(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    try scanKeep(allocator, stdout, stderr, writer, shouldKeepPackage, "ok\n");
+    try scanKeep(allocator, stdout, stderr, writer, shouldKeepPackage, writeRawLine, false, "ok\n");
 }
 
 pub fn applyAppleBuild(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    try scanKeep(allocator, stdout, stderr, writer, shouldKeepAppleBuild, "ok\n");
+    try scanKeep(allocator, stdout, stderr, writer, shouldKeepAppleBuild, writeRawLine, false, "ok\n");
 }
 
 pub fn applyGh(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    try scanKeep(allocator, stdout, stderr, writer, shouldKeepGh, "ok\n");
+    try scanKeep(allocator, stdout, stderr, writer, shouldKeepGh, writeGhLine, true, "ok\n");
 }
 
 fn scanKeep(
@@ -21,13 +23,15 @@ fn scanKeep(
     stderr: []const u8,
     writer: *Writer,
     comptime keepFn: fn ([]const u8) bool,
+    comptime writeFn: fn (*Writer, []const u8) anyerror!void,
+    comptime preserve_trailing_tabs: bool,
     empty_msg: []const u8,
 ) !void {
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     var kept: usize = 0;
-    try scanOne(allocator, stdout, writer, &strip_buf, &kept, keepFn);
-    try scanOne(allocator, stderr, writer, &strip_buf, &kept, keepFn);
+    try scanOne(allocator, stdout, writer, &strip_buf, &kept, keepFn, writeFn, preserve_trailing_tabs);
+    try scanOne(allocator, stderr, writer, &strip_buf, &kept, keepFn, writeFn, preserve_trailing_tabs);
     if (kept == 0 and stdout.len > 0 and stderr.len == 0) try writer.writeAll(empty_msg);
 }
 
@@ -38,6 +42,8 @@ fn scanOne(
     strip_buf: *std.ArrayList(u8),
     kept: *usize,
     comptime keepFn: fn ([]const u8) bool,
+    comptime writeFn: fn (*Writer, []const u8) anyerror!void,
+    comptime preserve_trailing_tabs: bool,
 ) !void {
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |raw| {
@@ -45,11 +51,64 @@ fn scanOne(
         const clean = ansi.stripInto(strip_buf, allocator, raw) catch raw;
         const line = std.mem.trimEnd(u8, clean, " \t\r");
         if (keepFn(line)) {
-            try writer.writeAll(line);
+            const write_line = if (preserve_trailing_tabs)
+                std.mem.trimEnd(u8, clean, "\r")
+            else
+                line;
+            try writeFn(writer, write_line);
             try writer.writeByte('\n');
             kept.* += 1;
         }
     }
+}
+
+fn writeRawLine(writer: *Writer, line: []const u8) !void {
+    try writer.writeAll(line);
+}
+
+fn writeGhLine(writer: *Writer, line: []const u8) !void {
+    if (try writeCompactGhTabularRow(writer, line)) return;
+    try writer.writeAll(line);
+}
+
+fn writeCompactGhTabularRow(writer: *Writer, line: []const u8) !bool {
+    if (!isGhTabularRow(line)) return false;
+
+    var fields = std.mem.splitScalar(u8, line, '\t');
+    var field_idx: usize = 0;
+    while (fields.next()) |field| : (field_idx += 1) {
+        if (field_idx > 0) try writer.writeByte('\t');
+        if (looksLikeIsoTimestamp(field)) {
+            try writer.writeAll(field[0..10]);
+        } else if (field_idx == gh_pr_state_field) {
+            try writer.writeAll(compactGhPrState(field));
+        } else {
+            try writer.writeAll(field);
+        }
+    }
+    return true;
+}
+
+fn compactGhPrState(state: []const u8) []const u8 {
+    if (std.mem.eql(u8, state, "OPEN")) return "O";
+    if (std.mem.eql(u8, state, "CLOSED")) return "C";
+    if (std.mem.eql(u8, state, "MERGED")) return "M";
+    return state;
+}
+
+fn looksLikeIsoTimestamp(field: []const u8) bool {
+    return field.len >= 20 and
+        field[4] == '-' and field[7] == '-' and field[10] == 'T' and
+        field[field.len - 1] == 'Z' and
+        allAsciiDigits(field[0..4]) and allAsciiDigits(field[5..7]) and
+        allAsciiDigits(field[8..10]);
+}
+
+fn looksLikeDate(field: []const u8) bool {
+    return field.len == 10 and
+        field[4] == '-' and field[7] == '-' and
+        allAsciiDigits(field[0..4]) and allAsciiDigits(field[5..7]) and
+        allAsciiDigits(field[8..10]);
 }
 
 fn shouldKeepPackage(line: []const u8) bool {
@@ -78,8 +137,41 @@ fn shouldKeepGh(line: []const u8) bool {
         containsIgnore(t, "failure") or containsIgnore(t, "cancelled") or
         containsIgnore(t, "success") or containsIgnore(t, "passed") or
         containsIgnore(t, "pending") or containsIgnore(t, "usage:") or
+        containsGhCheckStatus(t, "pass") or containsGhCheckStatus(t, "fail") or
+        containsGhCheckStatus(t, "skipping") or containsGhCheckStatus(t, "cancel") or
+        isGhTabularRow(t) or
         containsIgnore(t, "pull request") or containsIgnore(t, "issue") or
         contains(t, "https://") or contains(t, "#");
+}
+
+fn isGhTabularRow(line: []const u8) bool {
+    var fields = std.mem.splitScalar(u8, line, '\t');
+    const first = fields.next() orelse return false;
+
+    var field_count: usize = 1;
+    var has_date = looksLikeIsoTimestamp(first) or looksLikeDate(first);
+    while (fields.next()) |field| {
+        field_count += 1;
+        if (looksLikeIsoTimestamp(field) or looksLikeDate(field)) has_date = true;
+    }
+    if (field_count < 3) return false;
+    return allAsciiDigits(first) or has_date;
+}
+
+fn allAsciiDigits(value: []const u8) bool {
+    if (value.len == 0) return false;
+    for (value) |c| {
+        if (!std.ascii.isDigit(c)) return false;
+    }
+    return true;
+}
+
+fn containsGhCheckStatus(line: []const u8, status: []const u8) bool {
+    var fields = std.mem.tokenizeAny(u8, line, " \t");
+    while (fields.next()) |field| {
+        if (std.mem.eql(u8, field, status)) return true;
+    }
+    return false;
 }
 
 fn contains(haystack: []const u8, needle: []const u8) bool {

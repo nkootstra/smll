@@ -15,10 +15,8 @@ const Writer = std.Io.Writer;
 // matches() returns true when the first non-blank line starts with "  " (two
 // spaces + name) OR "* " (asterisk + space + name).  Empty input returns false
 // so that delete/rename silent output falls through to passthrough.
-// Pipe-mode idempotence: compressed output lines start with "* " (single
-// leading space + name) or " " (single space + name) — NOT "  " (two spaces),
-// so re-piping through smll does NOT re-match and the output passes through
-// unchanged.
+// Pipe-mode idempotence: compact plain rows either pass through unchanged on a
+// second pass or compact to the same bytes again. Verbose rows are also stable.
 
 pub fn matches(input: []const u8) bool {
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -47,7 +45,9 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
         const line = std.mem.trimEnd(u8, raw, "\r");
         if (line.len == 0) continue;
 
-        if (std.mem.startsWith(u8, line, "* ")) {
+        if (try writeVerboseBranchLine(w, line)) {
+            continue;
+        } else if (std.mem.startsWith(u8, line, "* ")) {
             // Current branch: strip one leading space to save a byte → "* <name>"
             // (This keeps the '*' sigil but collapses "* main" → "* main"; same width.
             //  We preserve verbatim to stay R2-lossless without any decode step.)
@@ -66,6 +66,74 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
             try w.writeAll(line);
             try w.writeByte('\n');
         }
+    }
+}
+
+fn writeVerboseBranchLine(w: *Writer, line: []const u8) !bool {
+    const current = std.mem.startsWith(u8, line, "* ");
+    if (!current and !std.mem.startsWith(u8, line, "  ")) return false;
+
+    const rest = std.mem.trimStart(u8, line[2..], " ");
+    const sha_start = findShaToken(rest) orelse return false;
+    if (sha_start == 0) return false;
+    const branch = std.mem.trimEnd(u8, rest[0..sha_start], " ");
+    const after_branch = std.mem.trimStart(u8, rest[sha_start..], " ");
+    const sha = after_branch[0..7];
+    const tail = std.mem.trimStart(u8, after_branch[7..], " ");
+
+    if (current) try w.writeAll("* ");
+    try w.writeAll(branch);
+    try w.writeByte(' ');
+    try w.writeAll(sha);
+    if (tail.len > 0) {
+        try w.writeByte(' ');
+        try writeCompactVerboseTail(w, tail);
+    }
+    try w.writeByte('\n');
+    return true;
+}
+
+fn findShaToken(line: []const u8) ?usize {
+    var i: usize = 0;
+    while (i + 7 <= line.len) : (i += 1) {
+        if (i > 0 and line[i - 1] != ' ') continue;
+        if (i + 7 < line.len and line[i + 7] != ' ') continue;
+        if (allHex(line[i .. i + 7])) return i;
+    }
+    return null;
+}
+
+fn allHex(value: []const u8) bool {
+    if (value.len == 0) return false;
+    for (value) |c| {
+        if (!std.ascii.isHex(c)) return false;
+    }
+    return true;
+}
+
+fn writeCompactVerboseTail(w: *Writer, tail: []const u8) !void {
+    if (!std.mem.startsWith(u8, tail, "[")) {
+        try w.writeAll(tail);
+        return;
+    }
+
+    const end = std.mem.indexOfScalar(u8, tail, ']') orelse {
+        try w.writeAll(tail);
+        return;
+    };
+    const upstream = tail[1..end];
+    try w.writeByte('@');
+    if (std.mem.endsWith(u8, upstream, ": gone")) {
+        try w.writeAll(upstream[0 .. upstream.len - ": gone".len]);
+        try w.writeAll(" gone");
+    } else {
+        try w.writeAll(upstream);
+    }
+
+    const subject = std.mem.trimStart(u8, tail[end + 1 ..], " ");
+    if (subject.len > 0) {
+        try w.writeByte(' ');
+        try w.writeAll(subject);
     }
 }
 
@@ -107,7 +175,8 @@ test "matches: fixture" {
 
 test "pipe-mode idempotence: compressed output is NOT re-matched" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_branch_list); defer a.free(out);
+    const out = try str(a, fixture_branch_list);
+    defer a.free(out);
     // Compressed output uses "* <name>" and " <name>" (single space).
     // The "  " (two-space) pattern won't match single-space output.
     try std.testing.expect(!matches(out));
@@ -115,20 +184,61 @@ test "pipe-mode idempotence: compressed output is NOT re-matched" {
 
 test "apply: current branch emits * sigil" {
     const a = std.testing.allocator;
-    const out = try str(a, "* main\n  feature\n"); defer a.free(out);
+    const out = try str(a, "* main\n  feature\n");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "* main\n") != null);
 }
 
 test "apply: other branches get single-space indent" {
     const a = std.testing.allocator;
-    const out = try str(a, "* main\n  feature\n  dev\n"); defer a.free(out);
+    const out = try str(a, "* main\n  feature\n  dev\n");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, " feature\n") != null);
     try std.testing.expect(std.mem.find(u8, out, " dev\n") != null);
 }
 
+test "apply: verbose branch rows collapse alignment and upstream marker" {
+    const a = std.testing.allocator;
+    const input =
+        "* feat/generic-output-optimization    9ce95e8 docs: document generic table fallback\n" ++
+        "  main                                78a9d9e [origin/main] chore: release v1.2.5\n" ++
+        "  hardening/tool-output-safety        b9033e1 [origin/hardening/tool-output-safety: gone] Harden wrapper output safety\n";
+    const out = try str(a, input);
+    defer a.free(out);
+
+    try std.testing.expectEqualStrings(
+        "* feat/generic-output-optimization 9ce95e8 docs: document generic table fallback\n" ++
+            "main 78a9d9e @origin/main chore: release v1.2.5\n" ++
+            "hardening/tool-output-safety b9033e1 @origin/hardening/tool-output-safety gone Harden wrapper output safety\n",
+        out,
+    );
+}
+
+test "apply: plain seven-hex branch name stays plain" {
+    const a = std.testing.allocator;
+    const out = try str(a, "* deadbee\n  feature\n");
+    defer a.free(out);
+
+    try std.testing.expectEqualStrings("* deadbee\n feature\n", out);
+}
+
+test "pipe-mode idempotence: verbose compact output is stable" {
+    const a = std.testing.allocator;
+    const input =
+        "* feat/generic-output-optimization    9ce95e8 docs: document generic table fallback\n" ++
+        "  main                                78a9d9e [origin/main] chore: release v1.2.5\n";
+    const once = try str(a, input);
+    defer a.free(once);
+    const twice = try str(a, once);
+    defer a.free(twice);
+
+    try std.testing.expectEqualStrings(once, twice);
+}
+
 test "apply: all branch names preserved" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_branch_list); defer a.free(out);
+    const out = try str(a, fixture_branch_list);
+    defer a.free(out);
     // fixture contains: feature-x, feature-y, main
     try std.testing.expect(std.mem.find(u8, out, "feature-x") != null);
     try std.testing.expect(std.mem.find(u8, out, "feature-y") != null);
@@ -137,13 +247,15 @@ test "apply: all branch names preserved" {
 
 test "apply: current branch marker (* main)" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_branch_list); defer a.free(out);
+    const out = try str(a, fixture_branch_list);
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "* main") != null);
 }
 
 test "apply: order preserved" {
     const a = std.testing.allocator;
-    const out = try str(a, "* main\n  alpha\n  beta\n"); defer a.free(out);
+    const out = try str(a, "* main\n  alpha\n  beta\n");
+    defer a.free(out);
     const main_pos = std.mem.find(u8, out, "main").?;
     const alpha_pos = std.mem.find(u8, out, "alpha").?;
     const beta_pos = std.mem.find(u8, out, "beta").?;
@@ -154,13 +266,15 @@ test "apply: order preserved" {
 test "apply: single-branch repo passthrough (raw < 50 B → smll ≤ raw)" {
     const a = std.testing.allocator;
     const input = "* main\n"; // 7 B — raw < 50 B, smll ≤ raw required
-    const out = try str(a, input); defer a.free(out);
+    const out = try str(a, input);
+    defer a.free(out);
     try std.testing.expect(out.len <= input.len);
 }
 
 test "apply: empty input produces empty output" {
     const a = std.testing.allocator;
-    const out = try str(a, ""); defer a.free(out);
+    const out = try str(a, "");
+    defer a.free(out);
     try std.testing.expectEqualStrings("", out);
 }
 
@@ -168,7 +282,8 @@ test "R3 exemption: smll ≤ raw on fixture (branch list is incompressible beyon
     // R3 for git_branch is relaxed: no 20% floor, only smll ≤ raw.
     // Pure-name listings cannot be compressed ≥20% losslessly; see plan §Unit 6b.
     const a = std.testing.allocator;
-    const out = try str(a, fixture_branch_list); defer a.free(out);
+    const out = try str(a, fixture_branch_list);
+    defer a.free(out);
     try std.testing.expect(out.len <= fixture_branch_list.len);
 }
 
@@ -182,6 +297,7 @@ test "R3 exemption: smll ≤ raw on larger branch list" {
         "  gamma-long-branch\n" ++
         "  delta-long-branch\n" ++
         "  epsilon-long-branch\n";
-    const out = try str(a, input); defer a.free(out);
+    const out = try str(a, input);
+    defer a.free(out);
     try std.testing.expect(out.len <= input.len);
 }

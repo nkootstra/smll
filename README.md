@@ -136,10 +136,10 @@ Set `DO_NOT_TRACK=1` to skip local stats writes as well.
 | package managers | `npm install` / `npm ci`, `pnpm`, `yarn`, `bun`, `pip list/outdated`, `uv`, `uvx` | drop noise, keep warnings/errors/summaries |
 | GitHub CLI | `gh` | keep errors/statuses/URLs/help; table output still column-compacts |
 | finite readers | `head`, `tail` | pass through exactly; follow/watch forms stream raw |
-| fallback | any unknown command whose stdout exceeds 64 KiB | ANSI strip + blank-collapse + RLE |
+| fallback | unknown table/list-shaped output; large unknown stdout | safe table padding collapse; ANSI strip + blank-collapse + RLE |
 
-Anything short and unknown passes through untouched. `SMLL_LOSSLESS=1`
-bypasses every filter.
+Unknown output only compacts when the shape is high-confidence. Ambiguous short
+output passes through untouched. `SMLL_LOSSLESS=1` bypasses every filter.
 
 ## Design principles
 
