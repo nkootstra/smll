@@ -964,6 +964,9 @@ pub fn build(b: *std.Build) void {
     integration_mod.addAnonymousImport("fixture_gh_pr_list", .{
         .root_source_file = b.path("tests/fixtures/gh_pr_list.txt"),
     });
+    integration_mod.addAnonymousImport("fixture_gh_run_list", .{
+        .root_source_file = b.path("tests/fixtures/gh_run_list.txt"),
+    });
 
     // v0.9 smoke-test fixtures — end-to-end coverage for new filters.
     integration_mod.addAnonymousImport("fixture_jest_failing", .{

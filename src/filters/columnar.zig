@@ -5,29 +5,23 @@ const Writer = std.Io.Writer;
 // LOSSY columnar compaction — on by default (v0.6). Set
 // SMLL_LOSSLESS=1 to bypass.
 //
-// Target: docker ps, docker images, kubectl get, gh pr list — any format where
-// rows are whitespace-separated columns padded to visual width, and rows often
-// share column values (e.g. identical image, identical status).
+// Target: docker ps, docker images, kubectl get, gh pr list, and high-confidence
+// generic tables where rows are whitespace-separated columns padded to visual width.
 //
 // Algorithm (one-way encode; decode is approximate and unused in product):
 //   1. Parse each line into fields, splitting on runs of ≥2 spaces.
 //   2. Rejoin fields with a single space (discards visual column alignment).
-//   3. Per-column RLE: if row N's field[i] equals row N-1's field[i] (exact
-//      byte match and field is non-empty), replace with SIGIL '~'.
-//   4. Literal-sigil escape: if a field equals "~" in the input, the encoder
-//      leaves it alone (it would collide with RLE, but as a one-way encode we
-//      accept the decode ambiguity).  In practice tool columns don't contain a
-//      literal '~' field.
+//   3. In command-specific mode, per-column RLE elides repeated fields.
 //
 // Contract:
 //   • Byte content is altered (padding collapsed).  Not lossless.
 //   • Semantic content (field values, row order) preserved.
 //   • Measured token savings: 15% (docker ps), 26% (docker images).
 //
-// Not routed in default dispatch — the R3 lossless contract requires explicit
-// user opt-in.
+// Command-specific dispatch may still use repeated-field elision and path
+// truncation. Generic dispatch only collapses padding so every row stays
+// self-contained for agents.
 
-const SIGIL: u8 = '~';
 const MIN_GAP: usize = 2;
 
 pub fn matches(input: []const u8) bool {
@@ -51,6 +45,35 @@ pub fn matches(input: []const u8) bool {
     return false;
 }
 
+pub fn matchesGeneric(input: []const u8) bool {
+    if (input.len == 0) return false;
+
+    var tabular_lines: usize = 0;
+    var expected_fields: usize = 0;
+    var consistent_rows: usize = 0;
+
+    var i: usize = 0;
+    while (i < input.len) {
+        const line_start = i;
+        while (i < input.len and input[i] != '\n') i += 1;
+        const line = input[line_start..i];
+        if (i < input.len) i += 1;
+
+        if (!lineIsTabular(line)) continue;
+        const fields = countFields(line);
+        if (fields < 3) continue;
+        tabular_lines += 1;
+        if (expected_fields == 0) {
+            expected_fields = fields;
+            consistent_rows = 1;
+        } else if (fields == expected_fields) {
+            consistent_rows += 1;
+        }
+    }
+
+    return tabular_lines >= 3 and consistent_rows >= 3;
+}
+
 fn lineIsTabular(line: []const u8) bool {
     var run: usize = 0;
     for (line) |b| {
@@ -65,6 +88,14 @@ fn lineIsTabular(line: []const u8) bool {
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    try applyInner(allocator, stdout, stderr, writer, true, true);
+}
+
+pub fn applyGeneric(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    try applyInner(allocator, stdout, stderr, writer, false, false);
+}
+
+fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer, truncate_last_field: bool, elide_repeated_fields: bool) !void {
     _ = stderr;
     if (stdout.len == 0) return;
 
@@ -100,15 +131,15 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         while (field_idx < cur_fields.items.len) : (field_idx += 1) {
             if (field_idx > 0) try writer.writeByte(' ');
             const f = cur_fields.items[field_idx];
-            if (have_prev and
+            if (elide_repeated_fields and
+                have_prev and
                 field_idx < prev_fields.items.len and
                 f.len > 0 and
                 std.mem.eql(u8, f, prev_fields.items[field_idx]))
             {
                 // Elided field: emit nothing (gap between spaces signals "same")
             } else {
-                // For the last field, truncate absolute paths to basename
-                if (field_idx == cur_fields.items.len - 1) {
+                if (truncate_last_field and field_idx == cur_fields.items.len - 1) {
                     try writeTruncatedLastField(writer, f);
                 } else {
                     try writer.writeAll(f);
@@ -196,6 +227,28 @@ fn splitFields(
     }
 }
 
+fn countFields(line: []const u8) usize {
+    var count: usize = 0;
+    var i: usize = 0;
+    while (i < line.len and line[i] == ' ') i += 1;
+    while (i < line.len) {
+        const field_start = i;
+        while (i < line.len) {
+            if (line[i] != ' ') {
+                i += 1;
+            } else {
+                var j = i;
+                while (j < line.len and line[j] == ' ') j += 1;
+                if (j - i >= MIN_GAP) break;
+                i = j;
+            }
+        }
+        if (i > field_start) count += 1;
+        while (i < line.len and line[i] == ' ') i += 1;
+    }
+    return count;
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -206,6 +259,13 @@ fn applyToString(a: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(a);
     defer out.deinit();
     try apply(a, input, &.{}, &out.writer);
+    return a.dupe(u8, out.written());
+}
+
+fn applyGenericToString(a: Allocator, input: []const u8) ![]u8 {
+    var out = Writer.Allocating.init(a);
+    defer out.deinit();
+    try applyGeneric(a, input, &.{}, &out.writer);
     return a.dupe(u8, out.written());
 }
 
@@ -221,6 +281,20 @@ test "matches: single column rejected" {
 
 test "matches: empty rejected" {
     try std.testing.expect(!matches(""));
+}
+
+test "matchesGeneric: requires repeated stable rows" {
+    try std.testing.expect(matchesGeneric(
+        "NAME          STATUS       ID        URL\n" ++
+            "alpha         ready        a-1001    https://example.test/a\n" ++
+            "bravo         waiting      b-1002    https://example.test/b\n" ++
+            "charlie       failed       c-1003    https://example.test/c\n",
+    ));
+    try std.testing.expect(!matchesGeneric(
+        "Usage: tool [options]\n" ++
+            "  --verbose  Show extra output for debugging\n" ++
+            "  --help     Show this help text\n",
+    ));
 }
 
 test "split: simple 3 columns" {
@@ -290,4 +364,12 @@ test "encode: docker ps compresses" {
     // Expect substantial byte shrinkage from padding collapse alone.
     const savings_pct = (fixture_docker_ps.len - out.len) * 100 / fixture_docker_ps.len;
     try std.testing.expect(savings_pct >= 25);
+}
+
+test "generic encode: preserves repeated fields" {
+    const a = std.testing.allocator;
+    const input = "H1   H2   H3\nfoo   bar   baz\nfoo   qux   baz\n";
+    const out = try applyGenericToString(a, input);
+    defer a.free(out);
+    try std.testing.expectEqualStrings("H1 H2 H3\nfoo bar baz\nfoo qux baz\n", out);
 }

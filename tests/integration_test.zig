@@ -68,6 +68,7 @@ const blame_large_fixture = @embedFile("fixture_git_blame_large");
 const docker_ps_fixture = @embedFile("fixture_docker_ps");
 const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
 const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
+const gh_run_list_fixture = @embedFile("fixture_gh_run_list");
 // v0.9 smoke-test fixtures
 const jest_failing_fixture = @embedFile("fixture_jest_failing");
 const tsc_errors_fixture = @embedFile("fixture_tsc_errors");
@@ -1819,6 +1820,178 @@ test "columnar: gh pr list preserves preamble by default" {
     ));
     // Still smaller overall (padding collapse in the table region).
     try std.testing.expect(result.stdout.len < gh_pr_list_fixture.len);
+}
+
+test "generic-table: gh run list preserves actionable fields" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_run_list_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "run", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < gh_run_list_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "884211001") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "884211002") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "884211003") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "884211004") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "validate pull request") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "release size gate") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "release size gate Release main workflow_run") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "failure") != null);
+}
+
+test "generic-table: gh run list lossless passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_run_list_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "gh", "run", "list" },
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, gh_run_list_fixture, result.stdout);
+}
+
+test "generic-table: failed gh preserves stderr diagnostics" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "gh",
+        \\#!/bin/sh
+        \\printf 'GraphQL: resource not accessible by integration\n' >&2
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "gh", "pr", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("GraphQL: resource not accessible by integration\n", result.stderr);
+}
+
+test "generic-table: successful gh table preserves stderr warnings" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "gh",
+        \\#!/bin/sh
+        \\cat <<'EOF'
+        \\STATUS       TITLE                           WORKFLOW      BRANCH       EVENT          ID          ELAPSED   AGE
+        \\completed    deploy production               Deploy        main         push           884211001   6m12s     about 1 hour ago
+        \\failure      release size gate                Release       main         workflow_run   884211004   1m44s     about 3 minutes ago
+        \\queued       nightly compatibility sweep      Nightly       main         schedule       884211003   0s        about 1 minute ago
+        \\EOF
+        \\printf 'warning: partial results from GitHub API\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "gh", "run", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len > 0);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "884211004") != null);
+    try std.testing.expectEqualStrings("warning: partial results from GitHub API\n", result.stderr);
+}
+
+test "generic-table: unknown command with stable table compacts" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        "NAME          STATUS       ID        URL\n" ++
+        "alpha         ready        a-1001    https://example.test/a\n" ++
+        "bravo         waiting      b-1002    https://example.test/b\n" ++
+        "charlie       failed       c-1003    https://example.test/c\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "unknown-table", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"unknown-table"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "alpha") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "b-1002") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "https://example.test/c") != null);
+}
+
+test "generic-table: unknown table lossless passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        "NAME          STATUS       ID        URL\n" ++
+        "alpha         ready        a-1001    https://example.test/a\n" ++
+        "bravo         waiting      b-1002    https://example.test/b\n" ++
+        "charlie       failed       c-1003    https://example.test/c\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "unknown-table", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{"unknown-table"},
+        &.{.{ "SMLL_LOSSLESS", "1" }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "generic-table: unknown json output passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        "[\n" ++
+        "  {\"name\": \"alpha\", \"status\": \"ready\"},\n" ++
+        "  {\"name\": \"bravo\", \"status\": \"failed\"}\n" ++
+        "]\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "unknown-json", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"unknown-json"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "generic-table: ambiguous double-space prose is not destructively compacted" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        "Usage: tool [options]\n" ++
+        "  --verbose  Show extra output for debugging\n" ++
+        "  --help     Show this help text\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "unknown-help", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"unknown-help"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
 }
 
 test "columnar: docker with SMLL_COMPACT=0 is silently ignored (still compacts)" {
