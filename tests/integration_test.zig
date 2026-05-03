@@ -619,6 +619,70 @@ test "wrapper: streaming command does not append no-output hint" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "wrapper: empty stdout+stderr from successful command emits exit-aware hint" {
+    // Bare `(no output)` was insufficient to break agent retry loops; the hint
+    // must convey the exit code so the agent knows the command actually ran.
+    const allocator = std.testing.allocator;
+    var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", "true" });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings("(smll: sh exited 0 with no output)\n", result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: empty stdout+stderr from failing command surfaces the exit code" {
+    const allocator = std.testing.allocator;
+    var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", "exit 7" });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings("(smll: sh exited 7 with no output)\n", result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 7 }, result.term);
+}
+
+test "wrapper: empty git status uses git-native no-changes phrasing" {
+    // `git status --short` on a clean tree is silent; without a semantic hint,
+    // agents loop. Use a fake-git stub that emulates clean-tree behavior.
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\exit 0
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "status", "--short" });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings(
+        "(smll: no changes; git status exited 0 with no output)\n",
+        result.stdout,
+    );
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: empty git diff uses git-native no-changes phrasing" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\exit 0
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "diff", "--", "some/file" });
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings(
+        "(smll: no changes; git diff exited 0 with no output)\n",
+        result.stdout,
+    );
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
 test "wrapper: DO_NOT_TRACK disables local stats file writes" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
