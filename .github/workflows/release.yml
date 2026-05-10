@@ -18,7 +18,7 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Verify tag + version
         id: meta
         env:
@@ -27,6 +27,13 @@ jobs:
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           version="${tag#v}"
+          # Defense against malicious tag names: git refs can contain shell
+          # metacharacters ($, ", ;, &, |, etc.). Reject anything that does not
+          # match a strict semver shape before the value flows downstream.
+          if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::Tag ${tag} produced invalid version ${version}"
+            exit 1
+          fi
           echo "tag=${tag}"
           echo "version=${version}"
 
@@ -57,7 +64,7 @@ jobs:
     needs: preflight
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.16.0
@@ -68,16 +75,18 @@ jobs:
       - name: Build release
         run: zig build release
       - name: Package
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          version="${{ needs.preflight.outputs.version }}"
+          version="${VERSION}"
           name="smll-${version}-aarch64-apple-darwin"
           tar -C zig-out/release -czf "${name}.tar.gz" smll
           shasum -a 256 "${name}.tar.gz"
           size=$(wc -c < "${name}.tar.gz")
           echo "tarball size: ${size} bytes"
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: smll-aarch64-apple-darwin
           path: smll-*-aarch64-apple-darwin.tar.gz
@@ -91,7 +100,7 @@ jobs:
       matrix:
         target: [x86_64-linux-gnu, aarch64-linux-gnu]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: 0.16.0
@@ -102,16 +111,18 @@ jobs:
       - name: Build release (cross)
         run: zig build release -Dtarget=${{ matrix.target }}
       - name: Package
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          version="${{ needs.preflight.outputs.version }}"
+          version="${VERSION}"
           name="smll-${version}-${{ matrix.target }}"
           tar -C zig-out/release -czf "${name}.tar.gz" smll
           shasum -a 256 "${name}.tar.gz"
           size=$(wc -c < "${name}.tar.gz")
           echo "tarball size: ${size} bytes"
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: smll-${{ matrix.target }}
           path: smll-*-${{ matrix.target }}.tar.gz
@@ -127,15 +138,17 @@ jobs:
       sha256_linux_x64: ${{ steps.hashes.outputs.sha256_linux_x64 }}
       sha256_linux_arm64: ${{ steps.hashes.outputs.sha256_linux_arm64 }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
       - name: Compute per-platform SHA256s
         id: hashes
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          version="${{ needs.preflight.outputs.version }}"
+          version="${VERSION}"
           cd dist
           ls -la
 
@@ -197,18 +210,20 @@ jobs:
     if: ${{ !contains(needs.release.outputs.version, '-') }}
     steps:
       - name: Checkout smll (for bump script)
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - name: Checkout homebrew-smll
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           repository: nkootstra/homebrew-smll
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           path: homebrew-smll
       - name: Compute source archive SHA256
         id: src
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
-          version="${{ needs.release.outputs.version }}"
+          version="${VERSION}"
           url="https://github.com/nkootstra/smll/archive/refs/tags/v${version}.tar.gz"
           sha=$(curl -sSL --fail "${url}" | shasum -a 256 | awk '{print $1}')
           echo "sha256: ${sha}"
