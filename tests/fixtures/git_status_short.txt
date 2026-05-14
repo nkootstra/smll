@@ -1,0 +1,11 @@
+ M src/filters/git_status.zig
+ M src/filters/git_log.zig
+ M src/filters/git_diff.zig
+ M src/main.zig
+M  src/pipeline.zig
+A  src/filters/git_reflog.zig
+?? tests/fixtures/git_status_short.txt
+?? tests/fixtures/git_reflog.txt
+?? tests/fixtures/git_tag.txt
+R  src/old.zig -> src/new.zig
+UU src/conflict.zig

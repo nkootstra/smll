@@ -37,6 +37,9 @@ pub fn build(b: *std.Build) void {
     git_status_mod.addAnonymousImport("fixture_git_status_conflict", .{
         .root_source_file = b.path("tests/fixtures/git_status_conflict.txt"),
     });
+    git_status_mod.addAnonymousImport("fixture_git_status_short", .{
+        .root_source_file = b.path("tests/fixtures/git_status_short.txt"),
+    });
 
     const git_diff_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/git_diff.zig"),
@@ -220,6 +223,15 @@ pub fn build(b: *std.Build) void {
     });
     git_branch_mod.addAnonymousImport("fixture_git_branch_list", .{
         .root_source_file = b.path("tests/fixtures/git_branch_list.txt"),
+    });
+
+    const git_reflog_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/git_reflog.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    git_reflog_mod.addAnonymousImport("fixture_git_reflog", .{
+        .root_source_file = b.path("tests/fixtures/git_reflog.txt"),
     });
 
     const git_stash_mod = b.createModule(.{
@@ -549,6 +561,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("git_rebase", git_rebase_mod);
     exe_mod.addImport("git_checkout", git_checkout_mod);
     exe_mod.addImport("git_branch", git_branch_mod);
+    exe_mod.addImport("git_reflog", git_reflog_mod);
     exe_mod.addImport("git_stash", git_stash_mod);
     exe_mod.addImport("git_blame", git_blame_mod);
 
@@ -588,6 +601,7 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("git_rebase", git_rebase_mod);
     release_mod.addImport("git_checkout", git_checkout_mod);
     release_mod.addImport("git_branch", git_branch_mod);
+    release_mod.addImport("git_reflog", git_reflog_mod);
     release_mod.addImport("git_stash", git_stash_mod);
     release_mod.addImport("git_blame", git_blame_mod);
     release_mod.addImport("rg", rg_mod);
@@ -692,6 +706,9 @@ pub fn build(b: *std.Build) void {
 
     const git_branch_tests = b.addTest(.{ .root_module = git_branch_mod });
     const run_git_branch_tests = b.addRunArtifact(git_branch_tests);
+
+    const git_reflog_tests = b.addTest(.{ .root_module = git_reflog_mod });
+    const run_git_reflog_tests = b.addRunArtifact(git_reflog_tests);
 
     const git_stash_tests = b.addTest(.{ .root_module = git_stash_mod });
     const run_git_stash_tests = b.addRunArtifact(git_stash_tests);
@@ -811,6 +828,7 @@ pub fn build(b: *std.Build) void {
     integration_mod.addImport("git_show", git_show_mod);
     integration_mod.addImport("git_commit", git_commit_mod);
     integration_mod.addImport("git_branch", git_branch_mod);
+    integration_mod.addImport("git_reflog", git_reflog_mod);
     integration_mod.addAnonymousImport("fixture_git_status_dirty", .{
         .root_source_file = b.path("tests/fixtures/git_status_dirty.txt"),
     });
@@ -819,6 +837,9 @@ pub fn build(b: *std.Build) void {
     });
     integration_mod.addAnonymousImport("fixture_git_status_conflict", .{
         .root_source_file = b.path("tests/fixtures/git_status_conflict.txt"),
+    });
+    integration_mod.addAnonymousImport("fixture_git_status_short", .{
+        .root_source_file = b.path("tests/fixtures/git_status_short.txt"),
     });
     integration_mod.addAnonymousImport("fixture_git_diff_simple", .{
         .root_source_file = b.path("tests/fixtures/git_diff_simple.txt"),
@@ -869,6 +890,10 @@ pub fn build(b: *std.Build) void {
     // git_branch fixtures
     integration_mod.addAnonymousImport("fixture_git_branch_list", .{
         .root_source_file = b.path("tests/fixtures/git_branch_list.txt"),
+    });
+    // git_reflog fixtures
+    integration_mod.addAnonymousImport("fixture_git_reflog", .{
+        .root_source_file = b.path("tests/fixtures/git_reflog.txt"),
     });
     // git_add fixtures
     integration_mod.addAnonymousImport("fixture_git_add_error_stdout", .{
@@ -1039,6 +1064,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_git_rebase_tests.step);
     test_step.dependOn(&run_git_checkout_tests.step);
     test_step.dependOn(&run_git_branch_tests.step);
+    test_step.dependOn(&run_git_reflog_tests.step);
     test_step.dependOn(&run_git_stash_tests.step);
     test_step.dependOn(&run_git_blame_tests.step);
     test_step.dependOn(&run_detect_tests.step);

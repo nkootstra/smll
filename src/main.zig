@@ -20,6 +20,7 @@ const git_merge = @import("git_merge");
 const git_rebase = @import("git_rebase");
 const git_checkout = @import("git_checkout");
 const git_branch = @import("git_branch");
+const git_reflog = @import("git_reflog");
 const git_stash = @import("git_stash");
 const git_blame = @import("git_blame");
 const rg = @import("rg");
@@ -55,7 +56,7 @@ const cat_compact = @import("cat_compact");
 // is stable and identifiable by leading "  " or "* " prefix). It is positioned
 // after git_status and before git_show — the branch output shape is distinct from
 // both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_show, GitLogCompact, git_diff, git_commit, git_merge, git_blame, cargo_test, jest, tsc, go_test, pytest, kubectl_compact, docker_compact, npm_install, tree, ls_compact, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
+const Filters = .{ git_status, git_branch, git_reflog, git_show, GitLogCompact, git_diff, git_commit, git_merge, git_blame, cargo_test, jest, tsc, go_test, pytest, kubectl_compact, docker_compact, npm_install, tree, ls_compact, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
 
 /// Pipe-mode wrapper for find_compact — detects `find -ls` tabular output.
 const FindCompactPipe = struct {
@@ -473,6 +474,7 @@ const KnownSubcommand = enum(u8) {
     branch,
     blame,
     grep,
+    reflog,
 };
 
 const WrapperResult = struct {
@@ -1204,12 +1206,17 @@ fn runWrapperInner(
     const has_stat_or_name_flags = hasStatOrNameFlags(git_argv);
     if (std.meta.stringToEnum(KnownSubcommand, subcmd_str)) |subcmd| switch (subcmd) {
         .status => {
-            // --short / -s produce already-compact porcelain output.
-            // Pass through raw — the long-form filter can't parse it.
-            if (hasArg(git_argv, "--short") or hasArg(git_argv, "-s") or
-                hasArg(git_argv, "--porcelain") or hasArg(git_argv, "-z"))
-            {
+            // --porcelain / -z are machine-readable contracts consumed by
+            // tooling — never modify their bytes. --short / -s are human-
+            // (or agent-) facing terse outputs in porcelain v1 shape; apply
+            // dirname-prefix RLE to them.
+            if (hasArg(git_argv, "--porcelain") or hasArg(git_argv, "-z")) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            } else if (hasArg(git_argv, "--short") or hasArg(git_argv, "-s")) {
+                git_status.applyShort(allocator, stdout_slice, stderr_slice, writer) catch {
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                    return 1;
+                };
             } else {
                 git_status.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
@@ -1396,6 +1403,21 @@ fn runWrapperInner(
             // matches; passthrough otherwise (e.g. git grep without -n).
             if (rg.matchesPattern(stdout_slice)) {
                 rg.applyPattern(allocator, stdout_slice, stderr_slice, writer) catch {
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                    return 1;
+                };
+            } else {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            }
+        },
+        .reflog => {
+            // --format= / --pretty= produce custom shapes the filter cannot
+            // parse; pass them through. Default `git reflog` format follows the
+            // `<sha7> HEAD@{N}: <op>: <subject>` grammar the filter expects.
+            if (hasFormatOrPrettyArg(git_argv)) {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            } else if (git_reflog.matches(stdout_slice)) {
+                git_reflog.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                     passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                     return 1;
                 };
