@@ -604,8 +604,21 @@ var last_output_inherited: bool = false;
 /// Write stdout through safe generic fallbacks: high-confidence table/list
 /// compaction first, then size-gated generic text compaction, then raw output.
 fn writeWithFallback(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !void {
+    try writeWithFallbackImpl(allocator, stdout_slice, writer, false);
+}
+
+/// Fallback path for commands we already know are text-only (rg, find,
+/// tree, kubectl/docker columnar miss, etc.). The lower threshold lets
+/// small outputs participate in RLE/whitespace compaction without the
+/// binary-detection conservatism inherited from arbitrary stdin.
+fn writeWithFallbackText(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !void {
+    try writeWithFallbackImpl(allocator, stdout_slice, writer, true);
+}
+
+fn writeWithFallbackImpl(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer, known_text: bool) !void {
     if (try writeGenericTableIfUseful(allocator, stdout_slice, writer)) return;
-    if (generic_compact.matches(stdout_slice)) {
+    const should_compact = if (known_text) generic_compact.matchesText(stdout_slice) else generic_compact.matches(stdout_slice);
+    if (should_compact) {
         generic_compact.apply(allocator, stdout_slice, writer) catch {
             try writer.writeAll(stdout_slice);
             return;
@@ -773,7 +786,7 @@ fn runWrapperInner(
                 return 1;
             };
         } else {
-            try writeWithFallback(allocator, stdout_slice, writer);
+            try writeWithFallbackText(allocator, stdout_slice, writer);
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;
@@ -794,7 +807,7 @@ fn runWrapperInner(
             return exit_code;
         }
         if (std.mem.eql(u8, cmd_basename, "tree")) {
-            try writeWithFallback(allocator, stdout_slice, writer);
+            try writeWithFallbackText(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
@@ -916,10 +929,61 @@ fn runWrapperInner(
         std.mem.eql(u8, cmd_basename, "bun") or std.mem.eql(u8, cmd_basename, "uv") or
         std.mem.eql(u8, cmd_basename, "uvx"))
     {
+        // For JS-pkg-manager install subcommands, the bespoke npm_install
+        // filter drops manager-specific chatter (Progress:, banner, dep trees)
+        // that tool_compact.applyPackage's substring keep would let survive.
+        const is_js_install_subcmd =
+            (std.mem.eql(u8, cmd_basename, "pnpm") or
+                std.mem.eql(u8, cmd_basename, "yarn") or
+                std.mem.eql(u8, cmd_basename, "bun")) and
+            (std.mem.eql(u8, arg1, "install") or
+                std.mem.eql(u8, arg1, "i") or
+                std.mem.eql(u8, arg1, "add") or
+                std.mem.eql(u8, arg1, "remove") or
+                std.mem.eql(u8, arg1, "rm"));
         if (exit_code != 0 and stderr_slice.len > 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless and is_js_install_subcmd and npm_install.matches(stdout_slice)) {
+            npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else if (!lossless and is_js_install_subcmd and npm_install.matches(stderr_slice)) {
+            npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
         } else if (!lossless) {
             tool_compact.applyPackage(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // composer (PHP) install/require/update/remove — same lossy contract as
+    // the JS managers: keep summary + warnings/errors, drop scaffolding.
+    if (std.mem.eql(u8, cmd_basename, "composer")) {
+        const is_composer_install_subcmd =
+            std.mem.eql(u8, arg1, "install") or
+            std.mem.eql(u8, arg1, "require") or
+            std.mem.eql(u8, arg1, "update") or
+            std.mem.eql(u8, arg1, "upgrade") or
+            std.mem.eql(u8, arg1, "remove") or
+            std.mem.eql(u8, arg1, "create-project");
+        if (exit_code != 0 and stderr_slice.len > 0 and !npm_install.matches(stderr_slice)) {
+            // Genuine failure with no recognized error markers — let the user see it raw.
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless and is_composer_install_subcmd and npm_install.matches(stdout_slice)) {
+            npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else if (!lossless and is_composer_install_subcmd and npm_install.matches(stderr_slice)) {
+            npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
@@ -1081,24 +1145,34 @@ fn runWrapperInner(
         const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
         // kubectl logs <pod> — same grammar, same filter.
         const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
-        // npm install / npm i / npm ci — keep summary + warnings, drop notice/funding.
-        const is_npm_install = std.mem.eql(u8, cmd_basename, "npm") and
-            (std.mem.eql(u8, arg1, "install") or
-                std.mem.eql(u8, arg1, "i") or
-                std.mem.eql(u8, arg1, "ci"));
+        // JS package manager installs — npm/pnpm/yarn/bun {install,i,ci,add,remove,rm}.
+        // Keep summary + warnings, drop banners/progress/dep trees.
+        const is_install_subcmd =
+            std.mem.eql(u8, arg1, "install") or
+            std.mem.eql(u8, arg1, "i") or
+            std.mem.eql(u8, arg1, "ci") or
+            std.mem.eql(u8, arg1, "add") or
+            std.mem.eql(u8, arg1, "remove") or
+            std.mem.eql(u8, arg1, "rm");
+        const is_js_pkg_manager =
+            std.mem.eql(u8, cmd_basename, "npm") or
+            std.mem.eql(u8, cmd_basename, "pnpm") or
+            std.mem.eql(u8, cmd_basename, "yarn") or
+            std.mem.eql(u8, cmd_basename, "bun");
+        const is_js_install = is_js_pkg_manager and is_install_subcmd;
         if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             docker_logs.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
-        } else if (!lossless and is_npm_install and npm_install.matches(stdout_slice)) {
+        } else if (!lossless and is_js_install and npm_install.matches(stdout_slice)) {
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };
-        } else if (!lossless and is_npm_install and npm_install.matches(stderr_slice)) {
-            // npm writes WARN/notice to stderr in many versions; dispatch off stderr
-            // when stdout doesn't match but stderr does.
+        } else if (!lossless and is_js_install and npm_install.matches(stderr_slice)) {
+            // Several managers write progress + warnings to stderr (npm classic, yarn,
+            // pnpm). Dispatch off stderr when stdout doesn't match but stderr does.
             npm_install.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
@@ -1121,8 +1195,8 @@ fn runWrapperInner(
             };
         } else {
             // No bespoke filter matched within the columnar block.
-            // Apply generic compactor for large non-tabular output (docker compose, etc.).
-            if (!lossless and generic_compact.matches(stdout_slice)) {
+            // Known-text command class (docker/kubectl/etc.) — use the lower gate.
+            if (!lossless and generic_compact.matchesText(stdout_slice)) {
                 generic_compact.apply(allocator, stdout_slice, writer) catch {
                     try writer.writeAll(stdout_slice);
                 };
@@ -1426,8 +1500,10 @@ fn runWrapperInner(
             }
         },
     } else {
-        // Unknown git subcommand: apply generic compactor for large output.
-        if (!lossless and generic_compact.matches(stdout_slice)) {
+        // Unknown git subcommand: apply generic compactor at the lower
+        // text-mode threshold — we know it's git so small outputs still
+        // benefit (e.g. git remote -v, short status outputs).
+        if (!lossless and generic_compact.matchesText(stdout_slice)) {
             generic_compact.apply(allocator, stdout_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return exit_code;

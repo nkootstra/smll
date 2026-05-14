@@ -451,6 +451,18 @@ pub fn build(b: *std.Build) void {
     npm_install_mod.addAnonymousImport("fixture_npm_install", .{
         .root_source_file = b.path("tests/fixtures/npm_install.txt"),
     });
+    npm_install_mod.addAnonymousImport("fixture_pnpm_install", .{
+        .root_source_file = b.path("tests/fixtures/pnpm_install.txt"),
+    });
+    npm_install_mod.addAnonymousImport("fixture_bun_install", .{
+        .root_source_file = b.path("tests/fixtures/bun_install.txt"),
+    });
+    npm_install_mod.addAnonymousImport("fixture_yarn_install", .{
+        .root_source_file = b.path("tests/fixtures/yarn_install.txt"),
+    });
+    npm_install_mod.addAnonymousImport("fixture_composer_require", .{
+        .root_source_file = b.path("tests/fixtures/composer_require.txt"),
+    });
 
     const build_compact_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/build_compact.zig"),
