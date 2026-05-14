@@ -18,8 +18,9 @@ const Writer = std.Io.Writer;
 //        listings (covered by the count summary), progress visualizations,
 //        manager banners (`bun add vX.Y.Z`), composer scaffolding
 //        ("Loading composer repositories", "Writing lock file", "Generating
-//        ... autoload files", "Discovered Package: ...", "Using version ..."),
-//        blank padding.
+//        ... autoload files", "Discovered Package: ..."), blank padding.
+//        Composer's "Using version <constraint> for <pkg>" is kept — it's
+//        the resolved version of a `composer require` call.
 //
 // If no keep lines captured, emits "up to date\n".
 
@@ -175,7 +176,9 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "Verifying lock file")) return false;
     if (std.mem.startsWith(u8, line, "Running composer ")) return false;
     if (std.mem.startsWith(u8, line, "Discovered Package:")) return false;
-    if (std.mem.startsWith(u8, line, "Using version ")) return false;
+    // "Using version ^X.Y for foo/bar" is the resolved version of a require —
+    // the most actionable signal of a composer require call.
+    if (std.mem.startsWith(u8, line, "Using version ")) return true;
     if (std.mem.startsWith(u8, line, "Use the `composer ")) return false;
     if (std.mem.startsWith(u8, line, "./composer.json has been updated")) return false;
     if (std.mem.startsWith(u8, line, "> @")) return false; // composer script hooks (e.g. "> @php artisan ...")
@@ -302,16 +305,16 @@ test "apply: composer require fixture keeps summary + advisory, drops scaffoldin
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < input.len);
-    // Kept: summary lines + advisory.
+    // Kept: summary lines + advisory + resolved version.
     try std.testing.expect(std.mem.find(u8, got, "Lock file operations: 4 installs") != null);
     try std.testing.expect(std.mem.find(u8, got, "Package operations: 4 installs") != null);
     try std.testing.expect(std.mem.find(u8, got, "No security vulnerability advisories found") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Using version ^7.8 for guzzlehttp/guzzle") != null);
     // Dropped scaffolding.
     try std.testing.expect(std.mem.find(u8, got, "Loading composer repositories") == null);
     try std.testing.expect(std.mem.find(u8, got, "Writing lock file") == null);
     try std.testing.expect(std.mem.find(u8, got, "Generating ") == null);
     try std.testing.expect(std.mem.find(u8, got, "Discovered Package:") == null);
-    try std.testing.expect(std.mem.find(u8, got, "Using version") == null);
     try std.testing.expect(std.mem.find(u8, got, "Use the `composer fund`") == null);
     try std.testing.expect(std.mem.find(u8, got, "> @php artisan") == null);
     // Per-package install/download lines dropped (summary covers them).
