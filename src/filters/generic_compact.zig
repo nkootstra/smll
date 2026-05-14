@@ -20,8 +20,22 @@ const Writer = std.Io.Writer;
 
 pub const THRESHOLD_BYTES: usize = 4 * 1024;
 
+// Lower gate for wrapper-mode dispatch on commands we already know are text
+// (git, gh, kubectl, rg, find, ls, tree, cat, ...). The binary heuristic
+// below still guards against malformed inputs; we just stop excluding small
+// outputs that have measurable headroom.
+pub const THRESHOLD_BYTES_TEXT: usize = 256;
+
 pub fn matches(input: []const u8) bool {
-    if (input.len <= THRESHOLD_BYTES) return false;
+    return matchesAtThreshold(input, THRESHOLD_BYTES);
+}
+
+pub fn matchesText(input: []const u8) bool {
+    return matchesAtThreshold(input, THRESHOLD_BYTES_TEXT);
+}
+
+fn matchesAtThreshold(input: []const u8, threshold: usize) bool {
+    if (input.len <= threshold) return false;
     if (looksLikeJson(input)) return false;
     // Reject binary data: check first 512 bytes for NUL or high-density non-ASCII.
     const sample = input[0..@min(input.len, 512)];
@@ -482,6 +496,24 @@ test "matches: threshold boundary" {
     const at = [_]u8{'x'} ** (THRESHOLD_BYTES + 1);
     try std.testing.expect(!matches(&below));
     try std.testing.expect(matches(&at));
+}
+
+test "matchesText: lower threshold gates small wrapper-mode outputs" {
+    const below = [_]u8{'x'} ** THRESHOLD_BYTES_TEXT;
+    const at = [_]u8{'x'} ** (THRESHOLD_BYTES_TEXT + 1);
+    try std.testing.expect(!matchesText(&below));
+    try std.testing.expect(matchesText(&at));
+    // Inputs between TEXT and full threshold pass matchesText but not matches.
+    const between = [_]u8{'x'} ** (THRESHOLD_BYTES_TEXT + 100);
+    try std.testing.expect(matchesText(&between));
+    try std.testing.expect(!matches(&between));
+}
+
+test "matchesText: still rejects binary input" {
+    var buf: [THRESHOLD_BYTES_TEXT + 50]u8 = undefined;
+    @memset(&buf, 'x');
+    buf[100] = 0; // NUL byte
+    try std.testing.expect(!matchesText(&buf));
 }
 
 test "matches: empty input" {

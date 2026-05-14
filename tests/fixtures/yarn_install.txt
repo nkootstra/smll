@@ -1,0 +1,19 @@
+yarn add v1.22.19
+[1/4] Resolving packages...
+[2/4] Fetching packages...
+[3/4] Linking dependencies...
+warning " > eslint-config-react@1.0.0" has unmet peer dependency "eslint@^8.0.0".
+warning Workspaces can only be enabled in private projects.
+[4/4] Building fresh packages...
+success Saved lockfile.
+success Saved 3 new dependencies.
+info Direct dependencies
+├─ react@18.2.0
+├─ react-dom@18.2.0
+└─ vite@5.0.0
+info All dependencies
+├─ react@18.2.0
+├─ react-dom@18.2.0
+├─ scheduler@0.23.0
+└─ vite@5.0.0
+Done in 5.32s.

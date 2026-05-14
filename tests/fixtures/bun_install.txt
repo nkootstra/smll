@@ -1,0 +1,11 @@
+bun add v1.0.30 (a3ea4a3)
+
+warn: deprecated lodash.isequal@4.5.0: This package is deprecated.
+warn: deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported.
+
+ installed react@18.2.0
+ installed react-dom@18.2.0
+ installed vite@5.0.0 with binaries:
+  - vite
+
+ 3 packages installed [1.23s]

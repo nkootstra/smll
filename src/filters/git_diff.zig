@@ -22,6 +22,11 @@ const Writer = std.Io.Writer;
 //   copy to ...         (captured in d <old> -> <new>)
 //   --- a/...           (path in d line, --- noise)
 //   +++ b/...           (path in d line, +++ noise)
+//   \ No newline at end of file
+//                       (rarely actionable; agents don't need this)
+//
+// Collapsed:
+//   Binary files a/X and b/Y differ  →  B  (path already in d line)
 //
 // Preserved:
 //   new file mode ...   (semantic — tells reader this is a newly added file)
@@ -170,6 +175,17 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
         if (std.mem.startsWith(u8, line, "rename to ")) continue;
         if (std.mem.startsWith(u8, line, "copy from ")) continue;
         if (std.mem.startsWith(u8, line, "copy to ")) continue;
+        if (std.mem.startsWith(u8, line, "\\ No newline at end of file")) continue;
+
+        // Binary files a/X and b/Y differ  →  B
+        // The path is already on the preceding `d` line, so the marker
+        // can shrink to a single byte without losing actionable signal.
+        if (std.mem.startsWith(u8, line, "Binary files ") and std.mem.endsWith(u8, line, " differ")) {
+            if (!first_out) try writer.writeByte('\n');
+            try writer.writeByte('B');
+            first_out = false;
+            continue;
+        }
 
         // Everything else passes through verbatim:
         // new file mode, deleted file mode
@@ -411,6 +427,54 @@ test "apply: preserves trailing newline when input has one" {
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
+}
+
+test "apply: collapses Binary files differ to B sigil" {
+    const allocator = std.testing.allocator;
+    const input =
+        "diff --git a/img.png b/img.png\n" ++
+        "index abc..def 100644\n" ++
+        "Binary files a/img.png and b/img.png differ\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        "d img.png\nB\n",
+        out,
+    );
+}
+
+test "apply: collapses Binary files for new binary file" {
+    const allocator = std.testing.allocator;
+    const input =
+        "diff --git a/new.bin b/new.bin\n" ++
+        "new file mode 100644\n" ++
+        "index 0000000..abc1234\n" ++
+        "Binary files /dev/null and b/new.bin differ\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "d new.bin\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "new file mode 100644") != null);
+    try std.testing.expect(std.mem.find(u8, out, "B\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "Binary files") == null);
+}
+
+test "apply: drops No newline at end of file marker" {
+    const allocator = std.testing.allocator;
+    const input =
+        "diff --git a/x b/x\n" ++
+        "index abc..def 100644\n" ++
+        "--- a/x\n" ++
+        "+++ b/x\n" ++
+        "@@ -1 +1 @@\n" ++
+        "-old\n" ++
+        "\\ No newline at end of file\n" ++
+        "+new\n" ++
+        "\\ No newline at end of file\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "No newline") == null);
+    try std.testing.expect(std.mem.find(u8, out, "-old") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+new") != null);
 }
 
 test "pipe-mode idempotence: v0.4 diff output piped again is unchanged" {

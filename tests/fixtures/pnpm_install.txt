@@ -1,0 +1,19 @@
+Lockfile is up to date, resolution step is skipped
+Already up to date
+Progress: resolved 234, reused 234, downloaded 0, added 0, done
+
+ WARN  deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+ WARN  deprecated rimraf@3.0.2: Rimraf versions prior to v4 are no longer supported
+
+dependencies:
++ react 18.2.0
++ react-dom 18.2.0
+
+devDependencies:
++ vite 5.0.0
+
+Packages: +3
++++
+Progress: resolved 250, reused 250, downloaded 0, added 3, done
+
+Done in 1.2s

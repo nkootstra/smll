@@ -1,0 +1,27 @@
+> my-app@0.1.0 build
+> vite build
+
+vite v5.4.2 building for production...
+transforming...
+(node:84321) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✓ 1248 modules transformed.
+rendering chunks (0)...
+computing gzip size (0)...
+dist/index.html                                  0.46 kB │ gzip:   0.30 kB
+dist/assets/about-DkLm0eYf.css                   1.23 kB │ gzip:   0.50 kB
+dist/assets/index-Bj4i90KS.css                  18.42 kB │ gzip:   4.10 kB
+dist/assets/about-zUVKmGfM.js                    0.85 kB │ gzip:   0.42 kB
+dist/assets/login-CnSXBlqV.js                    2.34 kB │ gzip:   1.10 kB
+dist/assets/settings-aB9c4xxQ.js                 4.51 kB │ gzip:   1.92 kB
+dist/assets/dashboard-Mf3K2sxR.js               12.18 kB │ gzip:   4.43 kB
+dist/assets/vendor-react-Qf8X1pPw.js            142.65 kB │ gzip:  45.23 kB │ map: 408.91 kB
+dist/assets/vendor-chart-Lk2P0nMz.js            321.10 kB │ gzip:  98.42 kB │ map: 902.18 kB
+dist/assets/index-Bj4i90KS.js                   485.20 kB │ gzip: 148.71 kB │ map: 1,420.55 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit
+
+✓ built in 12.34s

@@ -1,0 +1,28 @@
+> nuxt-app@1.0.0 build
+> nuxt build
+
+Nuxt 3.13.0 with Nitro 2.9.7
+
+ℹ Building client...
+ℹ vite v5.4.2 building for production...
+ℹ ✓ 1842 modules transformed.
+ℹ rendering chunks (0)...
+ℹ computing gzip size (0)...
+ℹ .nuxt/dist/client/_nuxt/entry-CmDfX0pK.js                   12.18 kB │ gzip:   4.43 kB
+ℹ .nuxt/dist/client/_nuxt/error-404-3K1nQ4xL.js                4.51 kB │ gzip:   1.92 kB
+ℹ .nuxt/dist/client/_nuxt/error-500-Lk2P0nMz.js                3.18 kB │ gzip:   1.10 kB
+ℹ .nuxt/dist/client/_nuxt/index-Bj4i90KS.js                  142.65 kB │ gzip:  45.23 kB
+✔ Client built in 2345ms
+
+ℹ Building server...
+ℹ vite v5.4.2 building SSR bundle for production...
+ℹ ✓ 1024 modules transformed.
+ℹ .nuxt/dist/server/_nuxt/entry.mjs                          485.20 kB │ gzip: 148.71 kB
+✔ Server built in 1234ms
+
+ℹ Generated public .output/public
+ℹ Generated build .output/server
+
+Σ Total size: 1.23 MB (1.05 MB gzip)
+
+✔ You can preview this build using node .output/server/index.mjs

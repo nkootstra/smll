@@ -1,0 +1,12 @@
+1a1f2f7 HEAD@{0}: checkout: moving from main to main
+1a1f2f7 HEAD@{1}: pull --ff-only origin main: Fast-forward
+1edb490 HEAD@{2}: checkout: moving from harden-workflow-actions to main
+a8b4598 HEAD@{3}: commit: ci: pin actions to commit SHAs and harden tag-derived version interpolation
+1edb490 HEAD@{4}: checkout: moving from main to harden-workflow-actions
+1edb490 HEAD@{5}: pull --ff-only origin main: Fast-forward
+78a9d9e HEAD@{6}: checkout: moving from feat/generic-output-optimization to main
+474d0d9 HEAD@{7}: commit: fix: preserve actionable gh output
+9ce95e8 HEAD@{8}: commit: docs: document generic table fallback
+5a7170a HEAD@{9}: commit: feat: optimize generic table output
+78a9d9e HEAD@{10}: checkout: moving from main to feat/generic-output-optimization
+78a9d9e HEAD@{11}: commit: chore: release v1.2.5

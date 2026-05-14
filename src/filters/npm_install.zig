@@ -3,35 +3,59 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// LOSSY compact filter for `npm install` / `npm ci` — on by default
-// (v0.6). Set SMLL_LOSSLESS=1 to bypass.
+// LOSSY compact filter for package manager installs — npm, pnpm, bun,
+// yarn (JS) and composer (PHP). On by default (v0.6). Set SMLL_LOSSLESS=1
+// to bypass.
 //
-// Keeps: WARN/ERR!/error/deprecated lines, the install summary (added/removed/
-//        changed/up to date/audited), vulnerabilities lines.
+// Keeps: warnings/errors (any manager), the install summary line
+//        (added/removed/changed/up to date/audited for npm,
+//        Packages: +X for pnpm, X packages installed for bun,
+//        success Saved/Done in for yarn,
+//        Package/Lock file operations / Nothing to install / vulnerability
+//        advisories for composer), vulnerabilities.
 // Drops: "npm notice" upgrade prompts, "packages are looking for funding",
-//        "run `...`" instruction lines, blank padding.
+//        "run `...`" instruction lines, dependency trees, per-package add
+//        listings (covered by the count summary), progress visualizations,
+//        manager banners (`bun add vX.Y.Z`), composer scaffolding
+//        ("Loading composer repositories", "Writing lock file", "Generating
+//        ... autoload files", "Discovered Package: ..."), blank padding.
+//        Composer's "Using version <constraint> for <pkg>" is kept — it's
+//        the resolved version of a `composer require` call.
 //
 // If no keep lines captured, emits "up to date\n".
-//
-// Detection: "added " + "packages" OR "up to date" OR "audited " OR "npm error"
-//            OR "npm WARN".
 
 const KEEP_PREFIXES = [_][]const u8{
-    "npm WARN",
-    "npm ERR!",
-    "npm error",
-    "npm err!",
-    "added ",
-    "removed ",
-    "changed ",
-    "up to date",
-    "up-to-date",
-    "audited ",
-    "found 0 vulnerabilities",
-    "found ",
+    "npm WARN",         // npm
+    "npm ERR!",         // npm
+    "npm error",        // npm
+    "npm err!",         // npm
+    "WARN ",            // pnpm (and any tool using that shape)
+    "ERROR ",           // pnpm
+    "warn:",            // bun
+    "error:",           // bun
+    "warning ",         // yarn
+    "error ",           // yarn
+    "added ",           // npm summary
+    "removed ",         // npm summary
+    "changed ",         // npm summary
+    "up to date",       // npm/pnpm
+    "up-to-date",       // npm legacy
+    "Already up to date", // pnpm idempotent
+    "audited ",         // npm
+    "found 0 vulnerabilities", // npm
+    "found ",           // npm
+    "Packages: ",       // pnpm summary
+    "Done in ",         // pnpm / yarn summary
+    "success ",         // yarn (Saved / lockfile)
+    "Package operations:",       // composer summary
+    "Lock file operations:",     // composer summary
+    "Nothing to install",        // composer idempotent (full: "Nothing to install, update or remove")
+    "No security vulnerability", // composer advisory
+    "Your requirements could not be resolved", // composer error opener
 };
 
 pub fn matches(input: []const u8) bool {
+    // npm summary signals
     if (std.mem.find(u8, input, "added ") != null and
         std.mem.find(u8, input, "packages") != null) return true;
     // "up to date" must appear on the same line as "audited" or "packages"
@@ -49,6 +73,22 @@ pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "npm error") != null) return true;
     if (std.mem.find(u8, input, "npm ERR!") != null) return true;
     if (std.mem.find(u8, input, "npm WARN") != null) return true;
+    // pnpm signals
+    if (std.mem.find(u8, input, "Packages: +") != null) return true;
+    if (std.mem.find(u8, input, "Packages: -") != null) return true;
+    if (std.mem.find(u8, input, "Already up to date") != null) return true;
+    // bun signals — "<n> packages installed [<time>]"
+    if (std.mem.find(u8, input, " packages installed [") != null) return true;
+    // yarn signals
+    if (std.mem.find(u8, input, "success Saved ") != null) return true;
+    if (std.mem.find(u8, input, "Done in ") != null and
+        std.mem.find(u8, input, "s.") != null) return true;
+    // composer signals
+    if (std.mem.find(u8, input, "Package operations:") != null) return true;
+    if (std.mem.find(u8, input, "Lock file operations:") != null) return true;
+    if (std.mem.find(u8, input, "Nothing to install") != null) return true;
+    if (std.mem.find(u8, input, "No security vulnerability") != null) return true;
+    if (std.mem.find(u8, input, "Your requirements could not be resolved") != null) return true;
     return false;
 }
 
@@ -113,6 +153,43 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "npm notice")) return false;
     if (std.mem.find(u8, line, "packages are looking for funding") != null) return false;
     if (std.mem.startsWith(u8, line, "run `npm ")) return false;
+    // pnpm / bun / yarn chatter that survives ANSI strip.
+    if (std.mem.startsWith(u8, line, "Progress: ")) return false; // pnpm progress
+    if (std.mem.startsWith(u8, line, "Lockfile is up to date")) return false; // pnpm header
+    if (std.mem.startsWith(u8, line, "bun add v")) return false; // bun banner
+    if (std.mem.startsWith(u8, line, "bun install v")) return false; // bun banner
+    if (std.mem.startsWith(u8, line, "bun remove v")) return false; // bun banner
+    if (std.mem.startsWith(u8, line, "yarn add v")) return false; // yarn banner
+    if (std.mem.startsWith(u8, line, "yarn install v")) return false; // yarn banner
+    if (std.mem.startsWith(u8, line, "yarn remove v")) return false; // yarn banner
+    if (std.mem.startsWith(u8, line, "[1/4]") or std.mem.startsWith(u8, line, "[2/4]") or
+        std.mem.startsWith(u8, line, "[3/4]") or std.mem.startsWith(u8, line, "[4/4]")) return false;
+    if (std.mem.startsWith(u8, line, "info ")) return false; // yarn dep tree info
+    if (std.mem.startsWith(u8, line, "installed ")) return false; // bun per-pkg line; count summary survives
+    // composer scaffolding/chatter — summary lines above cover the actionable
+    // signal; per-package "  - Downloading/Installing/Locking" is redundant.
+    if (std.mem.startsWith(u8, line, "Loading composer repositories")) return false;
+    if (std.mem.startsWith(u8, line, "Updating dependencies")) return false;
+    if (std.mem.startsWith(u8, line, "Installing dependencies from lock file")) return false;
+    if (std.mem.startsWith(u8, line, "Writing lock file")) return false;
+    if (std.mem.startsWith(u8, line, "Generating ")) return false; // "Generating optimized autoload files"
+    if (std.mem.startsWith(u8, line, "Verifying lock file")) return false;
+    if (std.mem.startsWith(u8, line, "Running composer ")) return false;
+    if (std.mem.startsWith(u8, line, "Discovered Package:")) return false;
+    // "Using version ^X.Y for foo/bar" is the resolved version of a require —
+    // the most actionable signal of a composer require call.
+    if (std.mem.startsWith(u8, line, "Using version ")) return true;
+    if (std.mem.startsWith(u8, line, "Use the `composer ")) return false;
+    if (std.mem.startsWith(u8, line, "./composer.json has been updated")) return false;
+    if (std.mem.startsWith(u8, line, "> @")) return false; // composer script hooks (e.g. "> @php artisan ...")
+    if (std.mem.startsWith(u8, line, "- Downloading ") or
+        std.mem.startsWith(u8, line, "- Installing ") or
+        std.mem.startsWith(u8, line, "- Locking ") or
+        std.mem.startsWith(u8, line, "- Removing ")) return false; // composer per-pkg
+    // "<n> packages you rely on are looking for funding" — composer fund pitch
+    if (std.mem.find(u8, line, "packages you rely on are looking for funding") != null) return false;
+    // "<n> packages installed [<time>]" — bun summary (no fixed prefix).
+    if (std.mem.find(u8, line, " packages installed [") != null) return true;
     for (KEEP_PREFIXES) |p| {
         if (std.mem.startsWith(u8, line, p)) return true;
     }
@@ -168,4 +245,95 @@ test "apply: strips ANSI" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
     try std.testing.expect(std.mem.find(u8, got, "added 5 packages") != null);
+}
+
+test "matches: pnpm Packages summary" {
+    try std.testing.expect(matches("Packages: +3\n+++\nDone in 1.2s\n"));
+}
+
+test "matches: bun packages installed" {
+    try std.testing.expect(matches(" 3 packages installed [1.23s]\n"));
+}
+
+test "matches: yarn success Saved" {
+    try std.testing.expect(matches("success Saved 5 new dependencies.\nDone in 5.32s.\n"));
+}
+
+test "apply: pnpm fixture keeps WARN + Packages + Done, drops progress + dep list" {
+    const input = @embedFile("fixture_pnpm_install");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(got.len < input.len);
+    try std.testing.expect(std.mem.find(u8, got, "WARN  deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Packages: +3") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Done in 1.2s") != null);
+    // Dropped chatter.
+    try std.testing.expect(std.mem.find(u8, got, "Progress: ") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Lockfile is up to date") == null);
+    // Per-package add lines (`+ react 18.2.0`) are not kept — count summary covers them.
+    try std.testing.expect(std.mem.find(u8, got, "+ react ") == null);
+}
+
+test "apply: bun fixture keeps warn + packages installed, drops banner + per-pkg" {
+    const input = @embedFile("fixture_bun_install");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(got.len < input.len);
+    try std.testing.expect(std.mem.find(u8, got, "warn: deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.find(u8, got, "3 packages installed [1.23s]") != null);
+    // Dropped banner + per-package adds.
+    try std.testing.expect(std.mem.find(u8, got, "bun add v") == null);
+    try std.testing.expect(std.mem.find(u8, got, "installed react@18.2.0\n") == null);
+}
+
+test "matches: composer Package operations" {
+    try std.testing.expect(matches("Package operations: 4 installs, 0 updates, 0 removals\n"));
+}
+
+test "matches: composer Nothing to install" {
+    try std.testing.expect(matches("Nothing to install, update or remove\n"));
+}
+
+test "apply: composer require fixture keeps summary + advisory, drops scaffolding" {
+    const input = @embedFile("fixture_composer_require");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(got.len < input.len);
+    // Kept: summary lines + advisory + resolved version.
+    try std.testing.expect(std.mem.find(u8, got, "Lock file operations: 4 installs") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Package operations: 4 installs") != null);
+    try std.testing.expect(std.mem.find(u8, got, "No security vulnerability advisories found") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Using version ^7.8 for guzzlehttp/guzzle") != null);
+    // Dropped scaffolding.
+    try std.testing.expect(std.mem.find(u8, got, "Loading composer repositories") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Writing lock file") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Generating ") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Discovered Package:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Use the `composer fund`") == null);
+    try std.testing.expect(std.mem.find(u8, got, "> @php artisan") == null);
+    // Per-package install/download lines dropped (summary covers them).
+    try std.testing.expect(std.mem.find(u8, got, "- Downloading guzzlehttp") == null);
+    try std.testing.expect(std.mem.find(u8, got, "- Installing guzzlehttp") == null);
+}
+
+test "apply: yarn fixture keeps warning + success + Done, drops banner + dep tree" {
+    const input = @embedFile("fixture_yarn_install");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(got.len < input.len);
+    try std.testing.expect(std.mem.find(u8, got, "warning ") != null);
+    try std.testing.expect(std.mem.find(u8, got, "success Saved 3 new dependencies") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Done in 5.32s") != null);
+    // Dropped banner + progress + dep tree.
+    try std.testing.expect(std.mem.find(u8, got, "yarn add v") == null);
+    try std.testing.expect(std.mem.find(u8, got, "[1/4]") == null);
+    try std.testing.expect(std.mem.find(u8, got, "info Direct") == null);
 }

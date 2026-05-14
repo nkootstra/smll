@@ -435,6 +435,81 @@ fn findDivergedCounts(line: []const u8) ?[2][]const u8 {
     return .{ ahead, behind };
 }
 
+/// Apply dirname-prefix RLE to `git status --short` / `-s` porcelain v1 output.
+/// Input grammar (one line per entry):
+///   XY <path>                — X=index, Y=worktree, X|Y ∈ { ' ', M, A, D, R, C, U, ? }
+///   XY <old> -> <new>        — rename (X='R'); both paths preserved verbatim.
+///
+/// Compaction: consecutive entries with the same XY pair AND the same parent
+/// directory share ink — first entry full, subsequent entries emit XY plus the
+/// dirname-stripped basename. Untracked (`??`) is grouped the same way.
+/// Rename entries are never grouped (the `old -> new` shape breaks dirname
+/// equality). Lines that don't match the porcelain v1 grammar pass through
+/// verbatim — preserves any unexpected git output (warnings, etc.).
+pub fn applyShort(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = allocator;
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    var prev_xy: [2]u8 = .{ 0, 0 };
+    var prev_dir: []const u8 = "";
+    var run_len: usize = 0;
+
+    while (lines.next()) |line| {
+        if (line.len == 0) {
+            // Trailing newline yields a final empty split — skip silently.
+            continue;
+        }
+        if (!isShortStatusLine(line)) {
+            // Unknown line shape: passthrough verbatim and reset the run.
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            run_len = 0;
+            continue;
+        }
+
+        const xy: [2]u8 = .{ line[0], line[1] };
+        const path = line[3..];
+        const is_rename = xy[0] == 'R' or xy[0] == 'C';
+        const dir = if (is_rename) "" else parentDir(path);
+
+        const same_run =
+            run_len > 0 and
+            !is_rename and
+            dir.len > 0 and
+            xy[0] == prev_xy[0] and xy[1] == prev_xy[1] and
+            std.mem.eql(u8, dir, prev_dir);
+
+        if (same_run) {
+            try writer.writeAll(&xy);
+            try writer.writeByte(' ');
+            try writer.writeAll(path[dir.len..]);
+            try writer.writeByte('\n');
+        } else {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            prev_xy = xy;
+            prev_dir = dir;
+            run_len = if (is_rename) 0 else 1;
+        }
+        if (same_run) run_len += 1;
+    }
+}
+
+/// True when the line matches `git status --short` (porcelain v1) grammar:
+/// 2 sigil bytes from a fixed set, a space, then a non-empty path.
+fn isShortStatusLine(line: []const u8) bool {
+    if (line.len < 4) return false;
+    if (line[2] != ' ') return false;
+    return isShortSigil(line[0]) and isShortSigil(line[1]);
+}
+
+fn isShortSigil(c: u8) bool {
+    return c == ' ' or c == 'M' or c == 'A' or c == 'D' or
+        c == 'R' or c == 'C' or c == 'U' or c == '?' or c == '!' or c == 'T';
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures (embedded at compile time).
 // ---------------------------------------------------------------------------
@@ -442,6 +517,7 @@ fn findDivergedCounts(line: []const u8) ?[2][]const u8 {
 const dirty_fixture = @embedFile("fixture_git_status_dirty");
 const clean_fixture = @embedFile("fixture_git_status_clean");
 const conflict_fixture = @embedFile("fixture_git_status_conflict");
+const short_fixture = @embedFile("fixture_git_status_short");
 
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
@@ -625,4 +701,149 @@ test "apply: pipe-mode idempotence — v0.4 output is not re-filtered (passthrou
     // Confirm v0.4 output doesn't match pipe-mode filter.
     try std.testing.expect(!matches(out));
     // A second apply on v0.4 output would be a passthrough — verified by matches=false.
+}
+
+// ---------------------------------------------------------------------------
+// applyShort (porcelain v1 — `git status --short` / `-s`) tests.
+// ---------------------------------------------------------------------------
+
+fn applyShortToString(allocator: Allocator, input: []const u8) ![]u8 {
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyShort(allocator, input, &.{}, &out.writer);
+    return allocator.dupe(u8, out.written());
+}
+
+test "applyShort: basic dirname RLE on consecutive same-XY entries" {
+    const allocator = std.testing.allocator;
+    const input =
+        " M src/main.zig\n" ++
+        " M src/pipeline.zig\n" ++
+        " M src/util.zig\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        " M src/main.zig\n" ++
+        " M pipeline.zig\n" ++
+        " M util.zig\n",
+        out,
+    );
+}
+
+test "applyShort: XY change breaks the run" {
+    const allocator = std.testing.allocator;
+    const input =
+        " M src/a.zig\n" ++
+        "M  src/b.zig\n" ++
+        " M src/c.zig\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    // ` M src/a.zig` then `M  src/b.zig` (XY changed → full path) then ` M src/c.zig`
+    // (XY changed again → full path).
+    try std.testing.expectEqualStrings(
+        " M src/a.zig\n" ++
+        "M  src/b.zig\n" ++
+        " M src/c.zig\n",
+        out,
+    );
+}
+
+test "applyShort: dir change breaks the run" {
+    const allocator = std.testing.allocator;
+    const input =
+        " M src/a.zig\n" ++
+        " M tests/b.zig\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        " M src/a.zig\n" ++
+        " M tests/b.zig\n",
+        out,
+    );
+}
+
+test "applyShort: rename entries are emitted verbatim and never grouped" {
+    const allocator = std.testing.allocator;
+    const input =
+        "R  src/old.zig -> src/new.zig\n" ++
+        " M src/main.zig\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        "R  src/old.zig -> src/new.zig\n" ++
+        " M src/main.zig\n",
+        out,
+    );
+}
+
+test "applyShort: untracked entries compress like any other XY" {
+    const allocator = std.testing.allocator;
+    const input =
+        "?? tests/fixtures/a.txt\n" ++
+        "?? tests/fixtures/b.txt\n" ++
+        "?? tests/fixtures/c.txt\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        "?? tests/fixtures/a.txt\n" ++
+        "?? b.txt\n" ++
+        "?? c.txt\n",
+        out,
+    );
+}
+
+test "applyShort: unknown line shape passes through verbatim" {
+    const allocator = std.testing.allocator;
+    const input =
+        " M src/a.zig\n" ++
+        "warning: some message\n" ++
+        " M src/b.zig\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    // The warning resets the run, so src/b.zig emits its full path again.
+    try std.testing.expectEqualStrings(
+        " M src/a.zig\n" ++
+        "warning: some message\n" ++
+        " M src/b.zig\n",
+        out,
+    );
+}
+
+test "applyShort: top-level files (no dirname) never group" {
+    const allocator = std.testing.allocator;
+    const input =
+        " M foo.zig\n" ++
+        " M bar.zig\n";
+    const out = try applyShortToString(allocator, input);
+    defer allocator.free(out);
+    // No shared dirname → both emit verbatim.
+    try std.testing.expectEqualStrings(
+        " M foo.zig\n" ++
+        " M bar.zig\n",
+        out,
+    );
+}
+
+test "applyShort: empty input produces empty output" {
+    const allocator = std.testing.allocator;
+    const out = try applyShortToString(allocator, "");
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings("", out);
+}
+
+test "applyShort: fixture round-trip is strictly smaller and preserves every path" {
+    const allocator = std.testing.allocator;
+    const out = try applyShortToString(allocator, short_fixture);
+    defer allocator.free(out);
+    // Every basename in the fixture must remain in the output.
+    const paths = [_][]const u8{
+        "git_status.zig", "git_log.zig", "git_diff.zig",
+        "main.zig", "pipeline.zig", "git_reflog.zig",
+        "git_status_short.txt", "git_reflog.txt", "git_tag.txt",
+        "src/old.zig -> src/new.zig", "src/conflict.zig",
+    };
+    for (paths) |p| {
+        try std.testing.expect(std.mem.find(u8, out, p) != null);
+    }
+    try std.testing.expect(out.len < short_fixture.len);
 }
