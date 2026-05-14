@@ -464,6 +464,21 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("tests/fixtures/composer_require.txt"),
     });
 
+    const build_output_mod = b.createModule(.{
+        .root_source_file = b.path("src/filters/build_output.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    build_output_mod.addAnonymousImport("fixture_vite_build", .{
+        .root_source_file = b.path("tests/fixtures/vite_build.txt"),
+    });
+    build_output_mod.addAnonymousImport("fixture_next_build", .{
+        .root_source_file = b.path("tests/fixtures/next_build.txt"),
+    });
+    build_output_mod.addAnonymousImport("fixture_nuxt_build", .{
+        .root_source_file = b.path("tests/fixtures/nuxt_build.txt"),
+    });
+
     const build_compact_mod = b.createModule(.{
         .root_source_file = b.path("src/filters/build_compact.zig"),
         .target = target,
@@ -501,6 +516,7 @@ pub fn build(b: *std.Build) void {
     go_test_mod.addImport("ansi", ansi_mod);
     docker_logs_mod.addImport("ansi", ansi_mod);
     npm_install_mod.addImport("ansi", ansi_mod);
+    build_output_mod.addImport("ansi", ansi_mod);
     generic_compact_mod.addImport("ansi", ansi_mod);
     build_compact_mod.addImport("ansi", ansi_mod);
     cat_compact_mod.addImport("ansi", ansi_mod);
@@ -557,6 +573,7 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("go_test", go_test_mod);
     exe_mod.addImport("docker_logs", docker_logs_mod);
     exe_mod.addImport("npm_install", npm_install_mod);
+    exe_mod.addImport("build_output", build_output_mod);
     exe_mod.addImport("build_compact", build_compact_mod);
     exe_mod.addImport("generic_compact", generic_compact_mod);
     exe_mod.addImport("cat_compact", cat_compact_mod);
@@ -640,6 +657,7 @@ pub fn build(b: *std.Build) void {
     release_mod.addImport("go_test", go_test_mod);
     release_mod.addImport("docker_logs", docker_logs_mod);
     release_mod.addImport("npm_install", npm_install_mod);
+    release_mod.addImport("build_output", build_output_mod);
     release_mod.addImport("build_compact", build_compact_mod);
     release_mod.addImport("generic_compact", generic_compact_mod);
     release_mod.addImport("cat_compact", cat_compact_mod);
@@ -805,6 +823,9 @@ pub fn build(b: *std.Build) void {
 
     const npm_install_tests = b.addTest(.{ .root_module = npm_install_mod });
     const run_npm_install_tests = b.addRunArtifact(npm_install_tests);
+
+    const build_output_tests = b.addTest(.{ .root_module = build_output_mod });
+    const run_build_output_tests = b.addRunArtifact(build_output_tests);
 
     const build_compact_tests = b.addTest(.{ .root_module = build_compact_mod });
     const run_build_compact_tests = b.addRunArtifact(build_compact_tests);
@@ -1105,6 +1126,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_go_test_tests.step);
     test_step.dependOn(&run_docker_logs_tests.step);
     test_step.dependOn(&run_npm_install_tests.step);
+    test_step.dependOn(&run_build_output_tests.step);
     test_step.dependOn(&run_build_compact_tests.step);
     test_step.dependOn(&run_generic_compact_tests.step);
     test_step.dependOn(&run_cat_compact_tests.step);

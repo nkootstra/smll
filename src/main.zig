@@ -21,6 +21,7 @@ const git_rebase = @import("git_rebase");
 const git_checkout = @import("git_checkout");
 const git_branch = @import("git_branch");
 const git_reflog = @import("git_reflog");
+const build_output = @import("build_output");
 const git_stash = @import("git_stash");
 const git_blame = @import("git_blame");
 const rg = @import("rg");
@@ -941,6 +942,28 @@ fn runWrapperInner(
                 std.mem.eql(u8, arg1, "add") or
                 std.mem.eql(u8, arg1, "remove") or
                 std.mem.eql(u8, arg1, "rm"));
+        // `<manager> build` or `<manager> run build` — content signature
+        // (Vite banner, Next.js banner, "modules transformed") confirms it
+        // is a real build pipeline before we compact.
+        const is_build_subcmd =
+            (std.mem.eql(u8, cmd_basename, "pnpm") or
+                std.mem.eql(u8, cmd_basename, "yarn") or
+                std.mem.eql(u8, cmd_basename, "bun")) and
+            (std.mem.eql(u8, arg1, "build") or
+                (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
+        if (!lossless and is_build_subcmd and build_output.matches(stdout_slice)) {
+            build_output.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+            return exit_code;
+        } else if (!lossless and is_build_subcmd and build_output.matches(stderr_slice)) {
+            build_output.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+            return exit_code;
+        }
         if (exit_code != 0 and stderr_slice.len > 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless and is_js_install_subcmd and npm_install.matches(stdout_slice)) {
@@ -1160,8 +1183,24 @@ fn runWrapperInner(
             std.mem.eql(u8, cmd_basename, "yarn") or
             std.mem.eql(u8, cmd_basename, "bun");
         const is_js_install = is_js_pkg_manager and is_install_subcmd;
+        // JS package manager build — npm/pnpm/yarn/bun build (or run build).
+        // Content signature (vite/next/nuxt banner) confirms we have a real
+        // bundler pipeline before routing through build_output.
+        const is_js_build = is_js_pkg_manager and
+            (std.mem.eql(u8, arg1, "build") or
+                (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
         if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             docker_logs.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else if (!lossless and is_js_build and build_output.matches(stdout_slice)) {
+            build_output.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else if (!lossless and is_js_build and build_output.matches(stderr_slice)) {
+            build_output.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };

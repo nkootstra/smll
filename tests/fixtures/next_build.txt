@@ -1,0 +1,41 @@
+> my-app@0.1.0 build
+> next build
+
+  ▲ Next.js 14.2.5
+  - Environments: .env.local, .env
+
+   Creating an optimized production build ...
+ ✓ Compiled successfully
+   Linting and checking validity of types ...
+
+./app/dashboard/page.tsx
+12:8  Warning: 'useEffect' is defined but never used.  @typescript-eslint/no-unused-vars
+
+./app/settings/page.tsx
+27:14  Warning: React Hook useEffect has a missing dependency: 'userId'.  react-hooks/exhaustive-deps
+
+info  - Linting and checking validity of types
+ ✓ Collecting page data
+ ✓ Generating static pages (8/8)
+ ✓ Collecting build traces
+ ✓ Finalizing page optimization
+
+Route (app)                              Size     First Load JS
+┌ ○ /                                    1.84 kB         92.4 kB
+├ ○ /_not-found                          885 B          85.4 kB
+├ ○ /about                               142 B          84.7 kB
+├ ○ /dashboard                           4.21 kB         118 kB
+├ ○ /login                               2.34 kB         97.1 kB
+├ ○ /settings                            3.18 kB         115 kB
+├ λ /api/auth/[...nextauth]              0 B                0 B
+└ λ /api/foo                             0 B                0 B
++ First Load JS shared by all            84.6 kB
+  ├ chunks/472-9af3d2.js                 29 kB
+  ├ chunks/fd9d1056-bc8e2a.js            53.5 kB
+  └ other shared chunks (total)          1.92 kB
+
+○  (Static)   prerendered as static content
+λ  (Dynamic)  server-rendered on demand
+
+(node:84500) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
