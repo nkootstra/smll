@@ -1447,6 +1447,85 @@ test "wrapper: SMLL_LOSSLESS bypasses capture limit for large output" {
     try std.testing.expectEqualStrings("", wrapped.stderr);
 }
 
+test "wrapper: SMLL_LOSSLESS preserves mixed streams and child exit code" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "mixed-lossless",
+        \\#!/bin/sh
+        \\printf 'lossless-out\n'
+        \\printf 'lossless-err\n' >&2
+        \\exit 23
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("SMLL_LOSSLESS", "1");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "mixed-lossless" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("lossless-out\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("lossless-err\n", wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, wrapped.term);
+}
+
+test "wrapper: pre-capture streaming bypass with no output does not append hint" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "watchcmd",
+        \\#!/bin/sh
+        \\exit 0
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{ "watchcmd", "--watch" }, 1024);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: raw non-verbose curl with no output does not append hint" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "curl",
+        \\#!/bin/sh
+        \\exit 0
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{ "curl", "https://example.invalid/empty" }, 1024);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
 // ---------------------------------------------------------------------------
 // Unit 9: git_commit byte-equivalence tests (pipe-matching filter).
 // ---------------------------------------------------------------------------
