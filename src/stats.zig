@@ -5,7 +5,6 @@ const Writer = std.Io.Writer;
 
 /// Cumulative token-savings stats stored in ~/.smll/stats.json.
 /// Best-effort: stats failures never block command execution.
-
 const stats_dir = ".smll";
 const stats_file = ".smll/stats.json";
 const MAX_TRACKED_CMDS = 32;
@@ -41,11 +40,17 @@ fn writeU64(w: *Writer, val: u64) !void {
     var buf: [20]u8 = undefined;
     var n = val;
     var i: usize = buf.len;
-    if (n == 0) { try w.writeByte('0'); return; }
-    while (n > 0) { i -= 1; buf[i] = @intCast('0' + n % 10); n /= 10; }
+    if (n == 0) {
+        try w.writeByte('0');
+        return;
+    }
+    while (n > 0) {
+        i -= 1;
+        buf[i] = @intCast('0' + n % 10);
+        n /= 10;
+    }
     try w.writeAll(buf[i..]);
 }
-
 
 fn joinPath(allocator: Allocator, a: []const u8, b: []const u8) ![]u8 {
     const buf = try allocator.alloc(u8, a.len + 1 + b.len);
@@ -76,7 +81,10 @@ fn recordInner(allocator: Allocator, io: Io, home: []const u8, argv: []const []c
 
     var found: ?*CmdEntry = null;
     for (s.by_cmd[0..s.cmd_count]) |*entry| {
-        if (std.mem.eql(u8, entry.nameSlice(), label)) { found = entry; break; }
+        if (std.mem.eql(u8, entry.nameSlice(), label)) {
+            found = entry;
+            break;
+        }
     }
     if (found == null and s.cmd_count < MAX_TRACKED_CMDS) {
         const entry = &s.by_cmd[s.cmd_count];
@@ -159,7 +167,15 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
         const obj_start = pos;
         var depth: usize = 0;
         while (pos < data.len) : (pos += 1) {
-            if (data[pos] == '{') { depth += 1; } else if (data[pos] == '}') { depth -= 1; if (depth == 0) { pos += 1; break; } }
+            if (data[pos] == '{') {
+                depth += 1;
+            } else if (data[pos] == '}') {
+                depth -= 1;
+                if (depth == 0) {
+                    pos += 1;
+                    break;
+                }
+            }
         }
         const obj_slice = data[obj_start..pos];
         var entry = &s.by_cmd[s.cmd_count];
@@ -217,7 +233,20 @@ fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8
     }
     try w.writeAll("}\n");
 
-    try cwd.writeFile(io, .{ .sub_path = path, .data = out.written() });
+    // Atomic write: stage to <path>.tmp then rename. Avoids leaving a
+    // half-written stats file if the process is interrupted, and gives
+    // last-writer-wins semantics under concurrent invocations rather than
+    // arbitrary interleavings of two partial writes.
+    const tmp_path = try allocator.alloc(u8, path.len + 4);
+    defer allocator.free(tmp_path);
+    @memcpy(tmp_path[0..path.len], path);
+    @memcpy(tmp_path[path.len..], ".tmp");
+
+    try cwd.writeFile(io, .{ .sub_path = tmp_path, .data = out.written() });
+    cwd.rename(tmp_path, cwd, path, io) catch |err| {
+        cwd.deleteFile(io, tmp_path) catch {};
+        return err;
+    };
 }
 
 /// Handle `--stats` and `--stats --reset`.
@@ -265,17 +294,29 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
 
     try stdout.writeAll("\n  smll stats\n");
     try stdout.writeAll("  --------------------------------------\n");
-    try stdout.writeAll("  Commands:      "); try writeU64(stdout, s.commands); try stdout.writeByte('\n');
-    try stdout.writeAll("  Input:         "); try writeU64(stdout, s.input_bytes); try stdout.writeAll(" bytes (");
+    try stdout.writeAll("  Commands:      ");
+    try writeU64(stdout, s.commands);
+    try stdout.writeByte('\n');
+    try stdout.writeAll("  Input:         ");
+    try writeU64(stdout, s.input_bytes);
+    try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, s.input_bytes);
-    try stdout.writeAll(")\n  Output:        "); try writeU64(stdout, s.output_bytes); try stdout.writeAll(" bytes (");
+    try stdout.writeAll(")\n  Output:        ");
+    try writeU64(stdout, s.output_bytes);
+    try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, s.output_bytes);
-    try stdout.writeAll(")\n  Saved:         "); try writeU64(stdout, saved); try stdout.writeAll(" bytes (");
+    try stdout.writeAll(")\n  Saved:         ");
+    try writeU64(stdout, saved);
+    try stdout.writeAll(" bytes (");
     try writeHumanBytes(stdout, saved);
-    try stdout.writeAll(", "); try writeU64(stdout, pct); try stdout.writeAll("%)\n");
+    try stdout.writeAll(", ");
+    try writeU64(stdout, pct);
+    try stdout.writeAll("%)\n");
     try stdout.writeAll("  Tokens saved:  ~");
     try writeHumanCount(stdout, tokens_saved);
-    try stdout.writeAll(" (~"); try writeU64(stdout, tokens_saved); try stdout.writeAll(")\n");
+    try stdout.writeAll(" (~");
+    try writeU64(stdout, tokens_saved);
+    try stdout.writeAll(")\n");
 
     if (s.cmd_count > 0) {
         try stdout.writeAll("\n  Command              Runs     Input    Output   Saved\n");
@@ -342,24 +383,39 @@ fn cmpBySaved(entries: []const CmdEntry, a: usize, b: usize) bool {
 
 fn writeHumanBytes(w: *Writer, bytes: u64) !void {
     if (bytes < 1024) {
-        try writeU64(w, bytes); try w.writeAll(" B");
+        try writeU64(w, bytes);
+        try w.writeAll(" B");
     } else if (bytes < 1024 * 1024) {
-        try writeU64(w, bytes / 1024); try w.writeByte('.'); try writeU64(w, (bytes % 1024) * 10 / 1024); try w.writeAll(" KB");
+        try writeU64(w, bytes / 1024);
+        try w.writeByte('.');
+        try writeU64(w, (bytes % 1024) * 10 / 1024);
+        try w.writeAll(" KB");
     } else if (bytes < 1024 * 1024 * 1024) {
-        try writeU64(w, bytes / (1024 * 1024)); try w.writeByte('.'); try writeU64(w, (bytes % (1024 * 1024)) * 10 / (1024 * 1024)); try w.writeAll(" MB");
+        try writeU64(w, bytes / (1024 * 1024));
+        try w.writeByte('.');
+        try writeU64(w, (bytes % (1024 * 1024)) * 10 / (1024 * 1024));
+        try w.writeAll(" MB");
     } else {
-        try writeU64(w, bytes / (1024 * 1024 * 1024)); try w.writeByte('.'); try writeU64(w, (bytes % (1024 * 1024 * 1024)) * 10 / (1024 * 1024 * 1024)); try w.writeAll(" GB");
+        try writeU64(w, bytes / (1024 * 1024 * 1024));
+        try w.writeByte('.');
+        try writeU64(w, (bytes % (1024 * 1024 * 1024)) * 10 / (1024 * 1024 * 1024));
+        try w.writeAll(" GB");
     }
 }
-
 
 fn writeHumanCount(w: *Writer, n: u64) !void {
     if (n < 1000) {
         try writeU64(w, n);
     } else if (n < 1_000_000) {
-        try writeU64(w, n / 1000); try w.writeByte('.'); try writeU64(w, (n % 1000) / 100); try w.writeByte('K');
+        try writeU64(w, n / 1000);
+        try w.writeByte('.');
+        try writeU64(w, (n % 1000) / 100);
+        try w.writeByte('K');
     } else {
-        try writeU64(w, n / 1_000_000); try w.writeByte('.'); try writeU64(w, (n % 1_000_000) / 100_000); try w.writeByte('M');
+        try writeU64(w, n / 1_000_000);
+        try w.writeByte('.');
+        try writeU64(w, (n % 1_000_000) / 100_000);
+        try w.writeByte('M');
     }
 }
 

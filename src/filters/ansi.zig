@@ -7,8 +7,15 @@ pub noinline fn writeDecimal(w: *std.Io.Writer, val: usize) !void {
     var buf: [20]u8 = undefined;
     var n = val;
     var i: usize = buf.len;
-    if (n == 0) { try w.writeByte('0'); return; }
-    while (n > 0) { i -= 1; buf[i] = @intCast('0' + n % 10); n /= 10; }
+    if (n == 0) {
+        try w.writeByte('0');
+        return;
+    }
+    while (n > 0) {
+        i -= 1;
+        buf[i] = @intCast('0' + n % 10);
+        n /= 10;
+    }
     try w.writeAll(buf[i..]);
 }
 

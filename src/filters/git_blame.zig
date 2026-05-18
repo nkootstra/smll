@@ -88,7 +88,9 @@ fn truncateBlocks(output: []const u8, w: *Writer) !void {
                     if (next.len == 0) continue;
                     if (next[0] == 'b') {
                         // Next block starts — emit summary + block header
-                        try w.writeAll(" (+"); try ansi.writeDecimal(w, extra); try w.writeAll(")\n");
+                        try w.writeAll(" (+");
+                        try ansi.writeDecimal(w, extra);
+                        try w.writeAll(")\n");
                         // Reset and process this new block header
                         block_line_count = 0;
                         try w.writeAll(next);
@@ -98,7 +100,9 @@ fn truncateBlocks(output: []const u8, w: *Writer) !void {
                     if (next[0] == ' ') extra += 1;
                 } else {
                     // End of output — emit summary
-                    try w.writeAll(" (+"); try ansi.writeDecimal(w, extra); try w.writeAll(")\n");
+                    try w.writeAll(" (+");
+                    try ansi.writeDecimal(w, extra);
+                    try w.writeAll(")\n");
                 }
             }
         } else {
@@ -130,18 +134,24 @@ fn applyInner(input: []const u8, w: *Writer) !void {
         // We accept both by checking for a 40-char hex region (with optional '^' prefix).
         const sha_raw, const rest_after_sha = parseSha(line) orelse {
             // Not a blame line — emit verbatim (shouldn't happen in well-formed input).
-            try w.writeByte(' '); try w.writeAll(line); try w.writeByte('\n');
+            try w.writeByte(' ');
+            try w.writeAll(line);
+            try w.writeByte('\n');
             continue;
         };
         const sha7 = sha_raw[0..@min(sha_raw.len, 7)];
 
         // Parse the parenthesised metadata: (<Author> <YYYY-MM-DD> HH:MM:SS <tz> <line>)
         const paren_start = std.mem.findScalar(u8, rest_after_sha, '(') orelse {
-            try w.writeByte(' '); try w.writeAll(rest_after_sha); try w.writeByte('\n');
+            try w.writeByte(' ');
+            try w.writeAll(rest_after_sha);
+            try w.writeByte('\n');
             continue;
         };
         const paren_end = std.mem.findScalar(u8, rest_after_sha[paren_start..], ')') orelse {
-            try w.writeByte(' '); try w.writeAll(rest_after_sha); try w.writeByte('\n');
+            try w.writeByte(' ');
+            try w.writeAll(rest_after_sha);
+            try w.writeByte('\n');
             continue;
         };
         const paren_content = rest_after_sha[paren_start + 1 .. paren_start + paren_end];
@@ -289,7 +299,8 @@ test "pipe-mode matches blame output" {
 
 test "empty" {
     const a = std.testing.allocator;
-    const out = try str(a, "", ""); defer a.free(out);
+    const out = try str(a, "", "");
+    defer a.free(out);
     try std.testing.expectEqualStrings("", out);
 }
 
@@ -301,7 +312,8 @@ test "simple: 5-line file, 3 commits → 3 b headers" {
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Bob   2026-02-01 00:00:00 +0000  3) line three\n" ++
         "cccccccccccccccccccccccccccccccccccccccc (Carol 2026-03-01 00:00:00 +0000  4) line four\n" ++
         "cccccccccccccccccccccccccccccccccccccccc (Carol 2026-03-01 00:00:00 +0000  5) line five\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     var header_count: usize = 0;
     var it = std.mem.splitScalar(u8, out, '\n');
     while (it.next()) |line| {
@@ -316,7 +328,8 @@ test "simple: run-length — 1 commit, 1 header only" {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  1) fn foo() {}\n" ++
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  2) fn bar() {}\n" ++
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  3) fn baz() {}\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     var header_count: usize = 0;
     var code_count: usize = 0;
     var it = std.mem.splitScalar(u8, out, '\n');
@@ -332,21 +345,24 @@ test "simple: run-length — 1 commit, 1 header only" {
 test "simple: sha7 in header" {
     const a = std.testing.allocator;
     const input = "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37 (Alice 2026-01-01 00:00:00 +0000 1) code here\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "b 95cbeda ") != null);
 }
 
 test "simple: date in header" {
     const a = std.testing.allocator;
     const input = "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37 (Alice 2026-04-18 12:34:56 +0000 1) my code\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "2026-04-18") != null);
 }
 
 test "simple: code preserved verbatim" {
     const a = std.testing.allocator;
     const input = "95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37 (Alice 2026-01-01 00:00:00 +0000 1) fn init() { x = 1; }\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, " fn init() { x = 1; }\n") != null);
 }
 
@@ -354,14 +370,16 @@ test "simple: boundary ^ prefix (initial commit)" {
     const a = std.testing.allocator;
     // Git blame uses '^' prefix for the initial/boundary commit. SHA can be any length ≥7.
     const input = "^95cbeda (Alice 2026-01-01 00:00:00 +0000 1) initial\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "b "));
     try std.testing.expect(std.mem.find(u8, out, " initial\n") != null);
 }
 
 test "simple: fixture has 5 commits → 5 headers" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_simple, ""); defer a.free(out);
+    const out = try str(a, fixture_simple, "");
+    defer a.free(out);
     var header_count: usize = 0;
     var it = std.mem.splitScalar(u8, out, '\n');
     while (it.next()) |line| {
@@ -372,7 +390,8 @@ test "simple: fixture has 5 commits → 5 headers" {
 
 test "truncated: first code line per block preserved" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_simple, ""); defer a.free(out);
+    const out = try str(a, fixture_simple, "");
+    defer a.free(out);
     // First line of each block preserved
     try std.testing.expect(std.mem.find(u8, out, " fn init() {\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "     configure_logging();") != null);
@@ -385,7 +404,8 @@ test "RLE: same author across SHA changes → author elided" {
     const input =
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Alice 2026-02-01 00:00:01 +0000  2) two\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     // First header: full (b <sha> <date> <author>)
     try std.testing.expect(std.mem.find(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
     // Second header: author elided, date explicit (b <sha> <date>)
@@ -400,7 +420,8 @@ test "RLE: same author + same date across SHA changes → both elided" {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Alice 2026-01-01 00:00:02 +0000  2) two\n" ++
         "cccccccccccccccccccccccccccccccccccccccc (Alice 2026-01-01 00:00:03 +0000  3) three\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
     // Subsequent headers: sha only (b <sha>)
     try std.testing.expect(std.mem.find(u8, out, "b bbbbbbb\n") != null);
@@ -412,7 +433,8 @@ test "RLE: author change re-emits author" {
     const input =
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Bob   2026-01-01 00:00:02 +0000  2) two\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "b aaaaaaa 2026-01-01 Alice\n") != null);
     // Bob differs from Alice → author re-emitted; date redundantly emitted because author changed
     try std.testing.expect(std.mem.find(u8, out, "b bbbbbbb 2026-01-01 Bob\n") != null);
@@ -424,25 +446,26 @@ test "RLE: author returns to previous value → still re-emitted (stateful)" {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:01 +0000  1) one\n" ++
         "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (Bob   2026-01-01 00:00:02 +0000  2) two\n" ++
         "cccccccccccccccccccccccccccccccccccccccc (Alice 2026-01-01 00:00:03 +0000  3) three\n";
-    const out = try str(a, input, ""); defer a.free(out);
+    const out = try str(a, input, "");
+    defer a.free(out);
     // Third header: author went Alice→Bob→Alice, differs from last-emitted (Bob), so re-emit
     try std.testing.expect(std.mem.find(u8, out, "b ccccccc 2026-01-01 Alice\n") != null);
 }
 
 test "R3: simple fixture" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_simple, ""); defer a.free(out);
+    const out = try str(a, fixture_simple, "");
+    defer a.free(out);
     const raw = fixture_simple.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }
 
 test "R3: large fixture (headline compression target)" {
     // This is the v0.4 headline compression gate: run-length encoding of blame
     // output should deliver ≥60% reduction on a file with long runs per commit.
     const a = std.testing.allocator;
-    const out = try str(a, fixture_large, ""); defer a.free(out);
+    const out = try str(a, fixture_large, "");
+    defer a.free(out);
     const raw = fixture_large.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }

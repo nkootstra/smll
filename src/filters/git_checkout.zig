@@ -16,7 +16,10 @@ const util = @import("util");
 // stderr in current git versions, so pipe mode has nothing to match against;
 // wrapper-mode argv dispatch is the sole entry point.
 
-pub fn matches(input: []const u8) bool { _ = input; return false; }
+pub fn matches(input: []const u8) bool {
+    _ = input;
+    return false;
+}
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
     _ = a;
@@ -97,10 +100,27 @@ fn scanStdout(src: []const u8, w: *Writer) !void {
         if (line[1] == '\t') {
             const path = line[2..];
             switch (marker) {
-                'M' => { try w.writeAll("M "); try w.writeAll(path); try w.writeByte('\n'); },
-                'D' => { try w.writeAll("d "); try w.writeAll(path); try w.writeByte('\n'); },
-                'A' => { try w.writeAll("A "); try w.writeAll(path); try w.writeByte('\n'); },
-                else => { try w.writeByte(marker); try w.writeByte(' '); try w.writeAll(path); try w.writeByte('\n'); },
+                'M' => {
+                    try w.writeAll("M ");
+                    try w.writeAll(path);
+                    try w.writeByte('\n');
+                },
+                'D' => {
+                    try w.writeAll("d ");
+                    try w.writeAll(path);
+                    try w.writeByte('\n');
+                },
+                'A' => {
+                    try w.writeAll("A ");
+                    try w.writeAll(path);
+                    try w.writeByte('\n');
+                },
+                else => {
+                    try w.writeByte(marker);
+                    try w.writeByte(' ');
+                    try w.writeAll(path);
+                    try w.writeByte('\n');
+                },
             }
         }
         // Lines not matching the <X>\t<path> pattern are dropped (progress text etc.).
@@ -135,41 +155,47 @@ test "pipe-mode safety: matches returns false on fixture" {
 
 test "switch: basic branch switch" {
     const a = std.testing.allocator;
-    const out = try str(a, "", "Switched to branch 'feature-x'\n"); defer a.free(out);
+    const out = try str(a, "", "Switched to branch 'feature-x'\n");
+    defer a.free(out);
     try std.testing.expectEqualStrings("^ feature-x\n", out);
 }
 
 test "switch: new branch" {
     const a = std.testing.allocator;
-    const out = try str(a, "", "Switched to a new branch 'my-feature'\n"); defer a.free(out);
+    const out = try str(a, "", "Switched to a new branch 'my-feature'\n");
+    defer a.free(out);
     try std.testing.expectEqualStrings("^ my-feature\n", out);
 }
 
 test "switch: detached HEAD" {
     const a = std.testing.allocator;
     const input = "HEAD is now at abc1234f feat: add thing\n";
-    const out = try str(a, "", input); defer a.free(out);
+    const out = try str(a, "", input);
+    defer a.free(out);
     try std.testing.expectEqualStrings("^ detached abc1234 feat: add thing\n", out);
 }
 
 test "switch: detached HEAD sha truncated to 7" {
     const a = std.testing.allocator;
     const input = "HEAD is now at abcdefghij some commit\n";
-    const out = try str(a, "", input); defer a.free(out);
+    const out = try str(a, "", input);
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "^ detached abcdefg "));
 }
 
 test "switch: up-to-date with remote" {
     const a = std.testing.allocator;
     const input = "Switched to branch 'feature-x'\nYour branch is up to date with 'origin/feature-x'.\n";
-    const out = try str(a, "", input); defer a.free(out);
+    const out = try str(a, "", input);
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "^ feature-x\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "= origin/feature-x\n") != null);
 }
 
 test "switch: empty output (silent checkout) passthrough" {
     const a = std.testing.allocator;
-    const out = try str(a, "", ""); defer a.free(out);
+    const out = try str(a, "", "");
+    defer a.free(out);
     try std.testing.expectEqualStrings("", out);
 }
 
@@ -184,14 +210,16 @@ test "switch: dirty-state stdout markers" {
 
 test "switch fixture: emits ^ sigil" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_switch_stdout, fixture_switch_stderr); defer a.free(out);
+    const out = try str(a, fixture_switch_stdout, fixture_switch_stderr);
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "^ "));
 }
 
 test "R3: switch fixture (raw < 50 B → smll ≤ raw)" {
     // The switch fixture is small (< 50 B), so R3 requires smll ≤ raw only.
     const a = std.testing.allocator;
-    const out = try str(a, fixture_switch_stdout, fixture_switch_stderr); defer a.free(out);
+    const out = try str(a, fixture_switch_stdout, fixture_switch_stderr);
+    defer a.free(out);
     const raw = fixture_switch_stdout.len + fixture_switch_stderr.len;
     if (raw >= 50) {
         try std.testing.expect(out.len <= (raw * 80) / 100);
@@ -204,7 +232,8 @@ test "R3: larger checkout input (branch + remote)" {
     // Build a synthetic input ≥ 50 B to verify 20% reduction.
     const a = std.testing.allocator;
     const input = "Switched to branch 'very-long-feature-branch-name-for-testing'\nYour branch is up to date with 'origin/very-long-feature-branch-name-for-testing'.\n";
-    const out = try str(a, "", input); defer a.free(out);
+    const out = try str(a, "", input);
+    defer a.free(out);
     const raw = input.len;
     if (raw >= 50) {
         try std.testing.expect(out.len <= (raw * 80) / 100);
@@ -215,7 +244,8 @@ test "R3: larger checkout input (branch + remote)" {
 
 test "compressed output is not re-matched by matches (idempotent)" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_switch_stdout, fixture_switch_stderr); defer a.free(out);
+    const out = try str(a, fixture_switch_stdout, fixture_switch_stderr);
+    defer a.free(out);
     // ^ prefix does not match any pipe-mode pattern, so re-running gives passthrough.
     try std.testing.expect(!matches(out));
 }

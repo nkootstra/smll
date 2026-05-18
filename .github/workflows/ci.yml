@@ -10,6 +10,21 @@ permissions:
   contents: read
 
 jobs:
+  fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+          cache-size-limit: 64
+          cache-key: fmt-check
+      - name: Confirm Zig version
+        run: bash scripts/check-zig-version.sh
+      - name: Check formatting
+        run: zig fmt --check src tests build.zig
+
   test:
     strategy:
       fail-fast: false

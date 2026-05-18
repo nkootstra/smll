@@ -49,7 +49,6 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try applyInner(stdout, writer);
 }
 
-
 /// Apply the v0.4 diff grammar with proper sigil transformations.
 /// This is the real implementation that handles diff --git → d, @@ → @.
 fn applyInner(stdout: []const u8, writer: *Writer) !void {

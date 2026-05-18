@@ -90,7 +90,7 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
                 const prefix = "HEAD:";
                 const copy_len = @min(prefix.len + ref.len, branch_buf.len);
                 @memcpy(branch_buf[0..prefix.len], prefix);
-                @memcpy(branch_buf[prefix.len..copy_len], ref[0..copy_len - prefix.len]);
+                @memcpy(branch_buf[prefix.len..copy_len], ref[0 .. copy_len - prefix.len]);
                 branch_len = copy_len;
                 continue;
             } else if (line.len >= 30 and line[0] == 'i' and std.mem.startsWith(u8, line, "interactive rebase in progress")) {
@@ -210,10 +210,7 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
 
 fn sigilFor(section: Section, content: []const u8) u8 {
     return switch (section) {
-        .staged => if (std.mem.startsWith(u8, content, "new file:")) 'A'
-        else if (std.mem.startsWith(u8, content, "deleted:")) 'D'
-        else if (std.mem.startsWith(u8, content, "renamed:")) 'R'
-        else 'S',
+        .staged => if (std.mem.startsWith(u8, content, "new file:")) 'A' else if (std.mem.startsWith(u8, content, "deleted:")) 'D' else if (std.mem.startsWith(u8, content, "renamed:")) 'R' else 'S',
         .unstaged => if (std.mem.startsWith(u8, content, "deleted:")) 'd' else 'M',
         .untracked => '?',
         .unmerged => 'U',
@@ -258,8 +255,8 @@ fn parentDir(path: []const u8) []const u8 {
 /// Extract the file path from a status content line like "new file:   src/foo.rs".
 fn extractPath(content: []const u8) []const u8 {
     const prefixes = [_][]const u8{
-        "modified:   ", "new file:   ", "deleted:    ",
-        "renamed:    ", "copied:     ", "typechange: ",
+        "modified:   ",      "new file:   ",      "deleted:    ",
+        "renamed:    ",      "copied:     ",      "typechange: ",
         "both modified:   ", "both added:      ",
     };
     for (prefixes) |p| {
@@ -418,7 +415,7 @@ fn findDivergedCounts(line: []const u8) ?[2][]const u8 {
     var search = line;
     // Find "and have " which precedes the counts
     var idx = std.mem.find(u8, search, "and have ") orelse return null;
-    search = search[idx + "and have ".len..];
+    search = search[idx + "and have ".len ..];
     // Now parse X
     var end_x: usize = 0;
     while (end_x < search.len and search[end_x] >= '0' and search[end_x] <= '9') : (end_x += 1) {}
@@ -427,7 +424,7 @@ fn findDivergedCounts(line: []const u8) ?[2][]const u8 {
     // Skip " and "
     const and_marker = " and ";
     idx = std.mem.find(u8, search[end_x..], and_marker) orelse return null;
-    search = search[end_x + idx + and_marker.len..];
+    search = search[end_x + idx + and_marker.len ..];
     var end_y: usize = 0;
     while (end_y < search.len and search[end_y] >= '0' and search[end_y] <= '9') : (end_y += 1) {}
     if (end_y == 0) return null;
@@ -724,8 +721,8 @@ test "applyShort: basic dirname RLE on consecutive same-XY entries" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         " M src/main.zig\n" ++
-        " M pipeline.zig\n" ++
-        " M util.zig\n",
+            " M pipeline.zig\n" ++
+            " M util.zig\n",
         out,
     );
 }
@@ -742,8 +739,8 @@ test "applyShort: XY change breaks the run" {
     // (XY changed again → full path).
     try std.testing.expectEqualStrings(
         " M src/a.zig\n" ++
-        "M  src/b.zig\n" ++
-        " M src/c.zig\n",
+            "M  src/b.zig\n" ++
+            " M src/c.zig\n",
         out,
     );
 }
@@ -757,7 +754,7 @@ test "applyShort: dir change breaks the run" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         " M src/a.zig\n" ++
-        " M tests/b.zig\n",
+            " M tests/b.zig\n",
         out,
     );
 }
@@ -771,7 +768,7 @@ test "applyShort: rename entries are emitted verbatim and never grouped" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         "R  src/old.zig -> src/new.zig\n" ++
-        " M src/main.zig\n",
+            " M src/main.zig\n",
         out,
     );
 }
@@ -786,8 +783,8 @@ test "applyShort: untracked entries compress like any other XY" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         "?? tests/fixtures/a.txt\n" ++
-        "?? b.txt\n" ++
-        "?? c.txt\n",
+            "?? b.txt\n" ++
+            "?? c.txt\n",
         out,
     );
 }
@@ -803,8 +800,8 @@ test "applyShort: unknown line shape passes through verbatim" {
     // The warning resets the run, so src/b.zig emits its full path again.
     try std.testing.expectEqualStrings(
         " M src/a.zig\n" ++
-        "warning: some message\n" ++
-        " M src/b.zig\n",
+            "warning: some message\n" ++
+            " M src/b.zig\n",
         out,
     );
 }
@@ -819,7 +816,7 @@ test "applyShort: top-level files (no dirname) never group" {
     // No shared dirname → both emit verbatim.
     try std.testing.expectEqualStrings(
         " M foo.zig\n" ++
-        " M bar.zig\n",
+            " M bar.zig\n",
         out,
     );
 }
@@ -837,9 +834,9 @@ test "applyShort: fixture round-trip is strictly smaller and preserves every pat
     defer allocator.free(out);
     // Every basename in the fixture must remain in the output.
     const paths = [_][]const u8{
-        "git_status.zig", "git_log.zig", "git_diff.zig",
-        "main.zig", "pipeline.zig", "git_reflog.zig",
-        "git_status_short.txt", "git_reflog.txt", "git_tag.txt",
+        "git_status.zig",             "git_log.zig",      "git_diff.zig",
+        "main.zig",                   "pipeline.zig",     "git_reflog.zig",
+        "git_status_short.txt",       "git_reflog.txt",   "git_tag.txt",
         "src/old.zig -> src/new.zig", "src/conflict.zig",
     };
     for (paths) |p| {

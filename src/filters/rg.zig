@@ -416,35 +416,30 @@ test "pattern round-trip: single match" {
 }
 
 test "pattern round-trip: multiple matches same file" {
-    try roundTripPattern(std.testing.allocator,
-        "src/main.zig:7:pub fn matches\n" ++
+    try roundTripPattern(std.testing.allocator, "src/main.zig:7:pub fn matches\n" ++
         "src/main.zig:12:pub fn apply\n" ++
         "src/main.zig:21:pub fn run\n");
 }
 
 test "pattern round-trip: multiple files" {
-    try roundTripPattern(std.testing.allocator,
-        "src/main.zig:7:pub fn matches\n" ++
+    try roundTripPattern(std.testing.allocator, "src/main.zig:7:pub fn matches\n" ++
         "src/main.zig:12:pub fn apply\n" ++
         "src/util.zig:4:pub fn isHex40\n" ++
         "src/util.zig:12:pub fn sha7\n");
 }
 
 test "pattern round-trip: no trailing newline" {
-    try roundTripPattern(std.testing.allocator,
-        "src/main.zig:7:hello\n" ++
+    try roundTripPattern(std.testing.allocator, "src/main.zig:7:hello\n" ++
         "src/main.zig:8:world");
 }
 
 test "pattern round-trip: colon in content" {
-    try roundTripPattern(std.testing.allocator,
-        "src/main.zig:7:url: http://example.com\n" ++
+    try roundTripPattern(std.testing.allocator, "src/main.zig:7:url: http://example.com\n" ++
         "src/main.zig:8:key: value: extra\n");
 }
 
 test "pattern round-trip: context separator (--)" {
-    try roundTripPattern(std.testing.allocator,
-        "src/main.zig:7:pub fn foo\n" ++
+    try roundTripPattern(std.testing.allocator, "src/main.zig:7:pub fn foo\n" ++
         "--\n" ++
         "src/util.zig:4:pub fn bar\n");
 }

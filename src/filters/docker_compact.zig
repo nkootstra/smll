@@ -59,7 +59,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         break :blk "m";
     };
 
-    try writer.writeByte('d'); try ansi.writeDecimal(writer, count); try writer.writeAll(state);
+    try writer.writeByte('d');
+    try ansi.writeDecimal(writer, count);
+    try writer.writeAll(state);
 
     // Second pass: emit name, image, and status for each container.
     var emit = std.mem.splitScalar(u8, stdout, '\n');
