@@ -142,7 +142,7 @@ test "apply: consecutive same-sha entries collapse to a gutter" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         "1edb490 @4 checkout: a to b\n" ++
-        "        @5 pull --ff-only: Fast-forward\n",
+            "        @5 pull --ff-only: Fast-forward\n",
         out,
     );
 }
@@ -156,7 +156,7 @@ test "apply: sha change breaks the run" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         "1edb490 @4 checkout: a\n" ++
-        "78a9d9e @5 checkout: b\n",
+            "78a9d9e @5 checkout: b\n",
         out,
     );
 }
@@ -172,8 +172,8 @@ test "apply: unknown line shape passes through verbatim" {
     // The warning resets the run, so the second 1a1f2f7 emits its SHA again.
     try std.testing.expectEqualStrings(
         "1a1f2f7 @0 commit: foo\n" ++
-        "warning: something\n" ++
-        "1a1f2f7 @1 commit: bar\n",
+            "warning: something\n" ++
+            "1a1f2f7 @1 commit: bar\n",
         out,
     );
 }

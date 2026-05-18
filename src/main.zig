@@ -246,12 +246,16 @@ fn contentTypeLooksText(value: []const u8) bool {
         std.ascii.eqlIgnoreCase(t, "application/graphql");
 }
 
+/// True iff `name` equals any string in `options`. Replaces the
+/// repeated `std.mem.eql(u8, x, "a") or std.mem.eql(u8, x, "b") or ...`
+/// chains scattered throughout wrapper-mode dispatch.
+fn eqAny(name: []const u8, options: []const []const u8) bool {
+    for (options) |opt| if (std.mem.eql(u8, name, opt)) return true;
+    return false;
+}
+
 fn allowsShortWatchFlag(cmd_basename: []const u8) bool {
-    return std.mem.eql(u8, cmd_basename, "jest") or
-        std.mem.eql(u8, cmd_basename, "vitest") or
-        std.mem.eql(u8, cmd_basename, "tsc") or
-        std.mem.eql(u8, cmd_basename, "webpack") or
-        std.mem.eql(u8, cmd_basename, "nodemon");
+    return eqAny(cmd_basename, &.{ "jest", "vitest", "tsc", "webpack", "nodemon" });
 }
 
 /// Detect streaming/interactive commands that produce continuous output
@@ -272,10 +276,7 @@ fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
     if (hasArg(argv, "--follow") or hasArg(argv, "-f")) {
         // Exception: find -f is not streaming, rg -f is not streaming.
         // Only follow-capable commands should match.
-        if (std.mem.eql(u8, cmd_basename, "docker") or
-            std.mem.eql(u8, cmd_basename, "kubectl") or
-            std.mem.eql(u8, cmd_basename, "tail") or
-            std.mem.eql(u8, cmd_basename, "journalctl")) return true;
+        if (eqAny(cmd_basename, &.{ "docker", "kubectl", "tail", "journalctl" })) return true;
     }
 
     // Subcommand-based: watch, dev, serve, start
@@ -286,20 +287,15 @@ fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
         // "go run ." is commonly a long-running dev/server process.
         if (std.mem.eql(u8, cmd_basename, "go") and std.mem.eql(u8, sub, "run")) return true;
         // "npm run dev", "pnpm dev", etc.
-        if (std.mem.eql(u8, sub, "dev") or
-            std.mem.eql(u8, sub, "serve") or
-            std.mem.eql(u8, sub, "start")) return true;
+        if (eqAny(sub, &.{ "dev", "serve", "start" })) return true;
     }
 
     // "npm run dev" → argv = ["npm", "run", "dev"]
     if (argv.len >= 3) {
         const sub = argv[1];
         const arg2 = argv[2];
-        if (std.mem.eql(u8, sub, "run") or std.mem.eql(u8, sub, "exec")) {
-            if (std.mem.eql(u8, arg2, "dev") or
-                std.mem.eql(u8, arg2, "serve") or
-                std.mem.eql(u8, arg2, "start") or
-                std.mem.eql(u8, arg2, "watch")) return true;
+        if (eqAny(sub, &.{ "run", "exec" })) {
+            if (eqAny(arg2, &.{ "dev", "serve", "start", "watch" })) return true;
         }
     }
 
@@ -309,8 +305,7 @@ fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
     }
 
     // Inherently streaming commands
-    if (std.mem.eql(u8, cmd_basename, "nodemon") or
-        std.mem.eql(u8, cmd_basename, "watchman")) return true;
+    if (eqAny(cmd_basename, &.{ "nodemon", "watchman" })) return true;
 
     return false;
 }
@@ -904,7 +899,7 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    if (std.mem.eql(u8, cmd_basename, "head") or std.mem.eql(u8, cmd_basename, "tail")) {
+    if (eqAny(cmd_basename, &.{ "head", "tail" })) {
         passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         return exit_code;
     }
@@ -926,29 +921,17 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    if (std.mem.eql(u8, cmd_basename, "pnpm") or std.mem.eql(u8, cmd_basename, "yarn") or
-        std.mem.eql(u8, cmd_basename, "bun") or std.mem.eql(u8, cmd_basename, "uv") or
-        std.mem.eql(u8, cmd_basename, "uvx"))
-    {
+    if (eqAny(cmd_basename, &.{ "pnpm", "yarn", "bun", "uv", "uvx" })) {
+        const is_js_pkg_manager = eqAny(cmd_basename, &.{ "pnpm", "yarn", "bun" });
         // For JS-pkg-manager install subcommands, the bespoke npm_install
         // filter drops manager-specific chatter (Progress:, banner, dep trees)
         // that tool_compact.applyPackage's substring keep would let survive.
-        const is_js_install_subcmd =
-            (std.mem.eql(u8, cmd_basename, "pnpm") or
-                std.mem.eql(u8, cmd_basename, "yarn") or
-                std.mem.eql(u8, cmd_basename, "bun")) and
-            (std.mem.eql(u8, arg1, "install") or
-                std.mem.eql(u8, arg1, "i") or
-                std.mem.eql(u8, arg1, "add") or
-                std.mem.eql(u8, arg1, "remove") or
-                std.mem.eql(u8, arg1, "rm"));
+        const is_js_install_subcmd = is_js_pkg_manager and
+            eqAny(arg1, &.{ "install", "i", "add", "remove", "rm" });
         // `<manager> build` or `<manager> run build` — content signature
         // (Vite banner, Next.js banner, "modules transformed") confirms it
         // is a real build pipeline before we compact.
-        const is_build_subcmd =
-            (std.mem.eql(u8, cmd_basename, "pnpm") or
-                std.mem.eql(u8, cmd_basename, "yarn") or
-                std.mem.eql(u8, cmd_basename, "bun")) and
+        const is_build_subcmd = is_js_pkg_manager and
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
         if (!lossless and is_build_subcmd and build_output.matches(stdout_slice)) {
@@ -1016,7 +999,7 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    if (std.mem.eql(u8, cmd_basename, "swift") or std.mem.eql(u8, cmd_basename, "xcodebuild")) {
+    if (eqAny(cmd_basename, &.{ "swift", "xcodebuild" })) {
         if (exit_code != 0 and stderr_slice.len > 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless) {
@@ -1031,7 +1014,7 @@ fn runWrapperInner(
     }
 
     if (std.mem.eql(u8, cmd_basename, "dotnet")) {
-        if (!lossless and (std.mem.eql(u8, arg1, "build") or std.mem.eql(u8, arg1, "test") or std.mem.eql(u8, arg1, "format") or std.mem.eql(u8, arg1, "restore"))) {
+        if (!lossless and eqAny(arg1, &.{ "build", "test", "format", "restore" })) {
             dotnet_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
@@ -1054,8 +1037,8 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    if (std.mem.eql(u8, cmd_basename, "pip") or std.mem.eql(u8, cmd_basename, "pip3")) {
-        if (!lossless and (std.mem.eql(u8, arg1, "list") or std.mem.eql(u8, arg1, "outdated"))) {
+    if (eqAny(cmd_basename, &.{ "pip", "pip3" })) {
+        if (!lossless and eqAny(arg1, &.{ "list", "outdated" })) {
             pip_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
@@ -1151,18 +1134,7 @@ fn runWrapperInner(
     // docker routes through docker_compact (name-only summary); the rest fall
     // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
     // passthrough.
-    if (std.mem.eql(u8, cmd_basename, "docker") or
-        std.mem.eql(u8, cmd_basename, "kubectl") or
-        std.mem.eql(u8, cmd_basename, "gh") or
-        std.mem.eql(u8, cmd_basename, "ps") or
-        std.mem.eql(u8, cmd_basename, "systemctl") or
-        std.mem.eql(u8, cmd_basename, "lsof") or
-        std.mem.eql(u8, cmd_basename, "npm") or
-        std.mem.eql(u8, cmd_basename, "pnpm") or
-        std.mem.eql(u8, cmd_basename, "yarn") or
-        std.mem.eql(u8, cmd_basename, "brew") or
-        std.mem.eql(u8, cmd_basename, "bun"))
-    {
+    if (eqAny(cmd_basename, &.{ "docker", "kubectl", "gh", "ps", "systemctl", "lsof", "npm", "pnpm", "yarn", "brew", "bun" })) {
         const is_logs_subcmd = std.mem.eql(u8, arg1, "logs");
         // docker logs <container> — line dedup (before docker ps table dispatch).
         const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
@@ -1170,18 +1142,8 @@ fn runWrapperInner(
         const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
         // JS package manager installs — npm/pnpm/yarn/bun {install,i,ci,add,remove,rm}.
         // Keep summary + warnings, drop banners/progress/dep trees.
-        const is_install_subcmd =
-            std.mem.eql(u8, arg1, "install") or
-            std.mem.eql(u8, arg1, "i") or
-            std.mem.eql(u8, arg1, "ci") or
-            std.mem.eql(u8, arg1, "add") or
-            std.mem.eql(u8, arg1, "remove") or
-            std.mem.eql(u8, arg1, "rm");
-        const is_js_pkg_manager =
-            std.mem.eql(u8, cmd_basename, "npm") or
-            std.mem.eql(u8, cmd_basename, "pnpm") or
-            std.mem.eql(u8, cmd_basename, "yarn") or
-            std.mem.eql(u8, cmd_basename, "bun");
+        const is_install_subcmd = eqAny(arg1, &.{ "install", "i", "ci", "add", "remove", "rm" });
+        const is_js_pkg_manager = eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun" });
         const is_js_install = is_js_pkg_manager and is_install_subcmd;
         // JS package manager build — npm/pnpm/yarn/bun build (or run build).
         // Content signature (vite/next/nuxt banner) confirms we have a real

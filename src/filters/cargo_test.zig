@@ -337,7 +337,7 @@ test "apply: compiler error with ANSI preserves context" {
     const result = out.written();
     // Must contain file location
     try std.testing.expect(std.mem.indexOf(u8, result, "src/stream.rs:42:5") != null);
-    // Must contain the code line  
+    // Must contain the code line
     try std.testing.expect(std.mem.indexOf(u8, result, "let x: u32") != null);
     // Must contain the pointer
     try std.testing.expect(std.mem.indexOf(u8, result, "^^^^^^^") != null);

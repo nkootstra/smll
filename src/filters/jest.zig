@@ -101,8 +101,14 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
             continue;
         }
         // Explicit drops (PASS-only noise).
-        if (std.mem.startsWith(u8, trimmed, "PASS ")) { in_error_context = false; continue; }
-        if (std.mem.startsWith(u8, trimmed, "PASS\t")) { in_error_context = false; continue; }
+        if (std.mem.startsWith(u8, trimmed, "PASS ")) {
+            in_error_context = false;
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "PASS\t")) {
+            in_error_context = false;
+            continue;
+        }
         if (std.mem.startsWith(u8, trimmed, "\xe2\x9c\x93 ")) continue;
         if (std.mem.startsWith(u8, trimmed, "Snapshots:")) continue;
         if (std.mem.startsWith(u8, trimmed, "Time:")) continue;

@@ -55,7 +55,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         break :blk "m";
     };
 
-    try writer.writeByte('k'); try ansi.writeDecimal(writer, count); try writer.writeAll(agg);
+    try writer.writeByte('k');
+    try ansi.writeDecimal(writer, count);
+    try writer.writeAll(agg);
 
     // Pass 2: emit names with ready status for all pods.
     var pass2 = std.mem.splitScalar(u8, stdout, '\n');

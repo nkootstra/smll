@@ -107,7 +107,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             if (!first) try writer.writeByte('\n');
             first = false;
             try writer.writeAll(parent);
-            try writer.writeAll("/ ("); try ansi.writeDecimal(writer, count); try writer.writeAll(" entries)");
+            try writer.writeAll("/ (");
+            try ansi.writeDecimal(writer, count);
+            try writer.writeAll(" entries)");
         } else {
             for (entries.items[i..j]) |e| {
                 if (!first) try writer.writeByte('\n');

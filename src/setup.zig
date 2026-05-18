@@ -19,7 +19,10 @@ const JObject = struct {
     }
     fn put(self: *JObject, pa: std.mem.Allocator, key: []const u8, val: JValue) !void {
         for (self.items.items) |*kv| {
-            if (std.mem.eql(u8, kv.key, key)) { kv.val = val; return; }
+            if (std.mem.eql(u8, kv.key, key)) {
+                kv.val = val;
+                return;
+            }
         }
         try self.items.append(pa, .{ .key = key, .val = val });
     }
@@ -395,22 +398,43 @@ fn unsetupOpencode(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
-    _ = stderr;
-    const index_path = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy/index.ts");
+    const plugin_dir = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy");
+    defer allocator.free(plugin_dir);
+    const index_path = try concat2(allocator, plugin_dir, "/index.ts");
     defer allocator.free(index_path);
-    const pkg_path = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy/package.json");
+    const pkg_path = try concat2(allocator, plugin_dir, "/package.json");
     defer allocator.free(pkg_path);
     // Also clean up legacy single-file plugin if present.
     const legacy_path = try concat2(allocator, home, "/.config/opencode/plugins/smll-proxy.ts");
     defer allocator.free(legacy_path);
+    const config_path = try concat2(allocator, home, "/.config/opencode/opencode.json");
+    defer allocator.free(config_path);
 
-    var deleted_any = false;
+    // Unregister the plugin entry from opencode.json (symmetric to setupOpencode).
+    const existing_config = try readFileOptional(allocator, io, config_path);
+    defer if (existing_config) |buf| allocator.free(buf);
+
+    if (existing_config) |_| {
+        var config_json = loadOrCreateJsonObject(allocator, existing_config, false) catch {
+            try writeJsonError(stderr, "opencode.json");
+            return 1;
+        };
+        defer config_json.deinit();
+
+        const changed = try removeOpencodePluginEntry(&config_json.value, plugin_dir);
+        if (changed) {
+            try writeBackupIfExists(allocator, io, config_path, dry_run);
+            try writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
+        } else {
+            try stdout.writeAll("no plugin entry found\n");
+        }
+    }
+
     for ([_][]const u8{ index_path, pkg_path, legacy_path }) |path| {
         const existing = try readFileOptional(allocator, io, path);
         defer if (existing) |buf| allocator.free(buf);
         if (existing != null) {
             try deleteOrReport(allocator, io, path, dry_run, stdout);
-            deleted_any = true;
         }
     }
 
@@ -520,7 +544,6 @@ fn unsetupCursor(
     return 0;
 }
 
-
 fn ensureCursorPreToolHook(pa: std.mem.Allocator, root: *JValue, hook_command: []const u8) !bool {
     if (root.* != .object) return SetupError.InvalidSettingsJson;
     const root_obj = &root.object;
@@ -564,9 +587,18 @@ fn removeCursorPreToolHook(root: *JValue, hook_command: []const u8) !bool {
     var i: usize = 0;
     while (i < pre_val.array.items.len) {
         const entry = pre_val.array.items[i];
-        if (entry != .object) { i += 1; continue; }
-        const cmd = entry.object.get("command") orelse { i += 1; continue; };
-        if (cmd != .string) { i += 1; continue; }
+        if (entry != .object) {
+            i += 1;
+            continue;
+        }
+        const cmd = entry.object.get("command") orelse {
+            i += 1;
+            continue;
+        };
+        if (cmd != .string) {
+            i += 1;
+            continue;
+        }
         if (std.mem.eql(u8, cmd.string, hook_command)) {
             _ = pre_val.array.swapRemove(i);
             removed = true;
@@ -589,7 +621,7 @@ const hook_prefix =
 
 fn buildCursorHookScript() []const u8 {
     return hook_prefix ++
-    \\printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$c";exit 0;;*)exit 0;;esac
+        \\printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$c";exit 0;;*)exit 0;;esac
     ;
 }
 
@@ -761,10 +793,14 @@ fn writeFileEnsuringParent(io: std.Io, path: []const u8, data: []const u8) !void
 fn writeOrReport(allocator: std.mem.Allocator, io: std.Io, path: []const u8, data: []const u8, dry_run: bool, stdout: *std.Io.Writer) !void {
     try writeBackupIfExists(allocator, io, path, dry_run);
     if (dry_run) {
-        try stdout.writeAll("[dry-run] would write "); try stdout.writeAll(path); try stdout.writeByte('\n');
+        try stdout.writeAll("[dry-run] would write ");
+        try stdout.writeAll(path);
+        try stdout.writeByte('\n');
     } else {
         try writeFileEnsuringParent(io, path, data);
-        try stdout.writeAll("wrote "); try stdout.writeAll(path); try stdout.writeByte('\n');
+        try stdout.writeAll("wrote ");
+        try stdout.writeAll(path);
+        try stdout.writeByte('\n');
     }
 }
 
@@ -772,10 +808,14 @@ fn writeOrReport(allocator: std.mem.Allocator, io: std.Io, path: []const u8, dat
 fn deleteOrReport(allocator: std.mem.Allocator, io: std.Io, path: []const u8, dry_run: bool, stdout: *std.Io.Writer) !void {
     try writeBackupIfExists(allocator, io, path, dry_run);
     if (dry_run) {
-        try stdout.writeAll("[dry-run] would delete "); try stdout.writeAll(path); try stdout.writeByte('\n');
+        try stdout.writeAll("[dry-run] would delete ");
+        try stdout.writeAll(path);
+        try stdout.writeByte('\n');
     } else {
         try deleteFileIfExists(io, path);
-        try stdout.writeAll("deleted "); try stdout.writeAll(path); try stdout.writeByte('\n');
+        try stdout.writeAll("deleted ");
+        try stdout.writeAll(path);
+        try stdout.writeByte('\n');
     }
 }
 
@@ -796,7 +836,14 @@ fn writeJsonValue(w: *std.Io.Writer, val: JValue) !void {
             if (i < 0) try w.writeByte('-');
             var buf: [20]u8 = undefined;
             var pos: usize = buf.len;
-            if (n == 0) { pos -= 1; buf[pos] = '0'; } else while (n > 0) { pos -= 1; buf[pos] = @intCast('0' + n % 10); n /= 10; }
+            if (n == 0) {
+                pos -= 1;
+                buf[pos] = '0';
+            } else while (n > 0) {
+                pos -= 1;
+                buf[pos] = @intCast('0' + n % 10);
+                n /= 10;
+            }
             try w.writeAll(buf[pos..]);
         },
         .string => |s| {
@@ -836,7 +883,6 @@ fn writeJsonValue(w: *std.Io.Writer, val: JValue) !void {
     }
 }
 
-
 fn writeJsonValueToPath(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -851,16 +897,20 @@ fn writeJsonValueToPath(
     try out.writer.writeByte('\n');
 
     if (dry_run) {
-        try stdout.writeAll("[dry-run] would update ");  try stdout.writeAll(path); try stdout.writeByte('\n');
+        try stdout.writeAll("[dry-run] would update ");
+        try stdout.writeAll(path);
+        try stdout.writeByte('\n');
     } else {
         try writeFileEnsuringParent(io, path, out.written());
-        try stdout.writeAll("updated ");  try stdout.writeAll(path); try stdout.writeByte('\n');
+        try stdout.writeAll("updated ");
+        try stdout.writeAll(path);
+        try stdout.writeByte('\n');
     }
 }
 
 fn buildClaudeHookScript() []const u8 {
     return hook_prefix ++
-    \\echo "smll hook: wrap noisy command with smll (example: smll $c)">&2;exit 2;;*)exit 0;;esac
+        \\echo "smll hook: wrap noisy command with smll (example: smll $c)">&2;exit 2;;*)exit 0;;esac
     ;
 }
 
@@ -938,6 +988,51 @@ test "containsRtkIntegration detects common RTK markers" {
     try std.testing.expect(!containsRtkIntegration("plugin: smll-proxy"));
 }
 
+test "removeOpencodePluginEntry: removes matching plugin path from array" {
+    const allocator = std.testing.allocator;
+    var parsed = try miniJsonParse(allocator,
+        \\{"plugin":["other-plugin","/home/u/.config/opencode/plugins/smll-proxy"]}
+    );
+    defer {
+        parsed.arena.deinit();
+        allocator.destroy(parsed.arena);
+    }
+
+    const changed = try removeOpencodePluginEntry(&parsed.value, "/home/u/.config/opencode/plugins/smll-proxy");
+    try std.testing.expect(changed);
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.object.getPtr("plugin").?.array.items.len);
+    try std.testing.expectEqualStrings("other-plugin", parsed.value.object.getPtr("plugin").?.array.items[0].string);
+}
+
+test "removeOpencodePluginEntry: returns false when entry not present" {
+    const allocator = std.testing.allocator;
+    var parsed = try miniJsonParse(allocator,
+        \\{"plugin":["other-plugin"]}
+    );
+    defer {
+        parsed.arena.deinit();
+        allocator.destroy(parsed.arena);
+    }
+
+    const changed = try removeOpencodePluginEntry(&parsed.value, "/missing/path");
+    try std.testing.expect(!changed);
+    try std.testing.expectEqual(@as(usize, 1), parsed.value.object.getPtr("plugin").?.array.items.len);
+}
+
+test "removeOpencodePluginEntry: missing plugin field is a no-op" {
+    const allocator = std.testing.allocator;
+    var parsed = try miniJsonParse(allocator,
+        \\{"other":42}
+    );
+    defer {
+        parsed.arena.deinit();
+        allocator.destroy(parsed.arena);
+    }
+
+    const changed = try removeOpencodePluginEntry(&parsed.value, "/anything");
+    try std.testing.expect(!changed);
+}
+
 /// Minimal JSON parser producing JValue. Handles objects, arrays,
 /// strings, integers, booleans, and null — sufficient for settings/hooks JSON.
 /// Replaces std.json.parseFromSlice to avoid pulling in the full std.json parser.
@@ -967,9 +1062,18 @@ fn parseValue(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseEr
         '{' => try parseObject(pa, input, pos),
         '[' => try parseArray(pa, input, pos),
         '"' => .{ .string = try parseString(pa, input, pos) },
-        't' => blk: { pos.* += 4; break :blk .{ .bool = true }; },
-        'f' => blk: { pos.* += 5; break :blk .{ .bool = false }; },
-        'n' => blk: { pos.* += 4; break :blk .null; },
+        't' => blk: {
+            pos.* += 4;
+            break :blk .{ .bool = true };
+        },
+        'f' => blk: {
+            pos.* += 5;
+            break :blk .{ .bool = false };
+        },
+        'n' => blk: {
+            pos.* += 4;
+            break :blk .null;
+        },
         '-', '0'...'9' => try parseNumber(input, pos),
         else => error.UnexpectedEndOfInput,
     };
@@ -979,7 +1083,10 @@ fn parseObject(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseE
     pos.* += 1; // skip {
     var obj: JObject = .empty;
     skipWs(input, pos);
-    if (pos.* < input.len and input[pos.*] == '}') { pos.* += 1; return .{ .object = obj }; }
+    if (pos.* < input.len and input[pos.*] == '}') {
+        pos.* += 1;
+        return .{ .object = obj };
+    }
     while (pos.* < input.len) {
         skipWs(input, pos);
         const key = try parseString(pa, input, pos);
@@ -988,7 +1095,10 @@ fn parseObject(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseE
         const val = try parseValue(pa, input, pos);
         try obj.put(pa, key, val);
         skipWs(input, pos);
-        if (pos.* < input.len and input[pos.*] == ',') { pos.* += 1; continue; }
+        if (pos.* < input.len and input[pos.*] == ',') {
+            pos.* += 1;
+            continue;
+        }
         break;
     }
     skipWs(input, pos);
@@ -1000,12 +1110,18 @@ fn parseArray(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseEr
     pos.* += 1; // skip [
     var arr = JArray.init(pa);
     skipWs(input, pos);
-    if (pos.* < input.len and input[pos.*] == ']') { pos.* += 1; return .{ .array = arr }; }
+    if (pos.* < input.len and input[pos.*] == ']') {
+        pos.* += 1;
+        return .{ .array = arr };
+    }
     while (pos.* < input.len) {
         const val = try parseValue(pa, input, pos);
         try arr.append(val);
         skipWs(input, pos);
-        if (pos.* < input.len and input[pos.*] == ',') { pos.* += 1; continue; }
+        if (pos.* < input.len and input[pos.*] == ',') {
+            pos.* += 1;
+            continue;
+        }
         break;
     }
     skipWs(input, pos);
@@ -1019,7 +1135,10 @@ fn parseString(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseE
     const start = pos.*;
     var has_escape = false;
     while (pos.* < input.len and input[pos.*] != '"') {
-        if (input[pos.*] == '\\') { has_escape = true; pos.* += 2; } else pos.* += 1;
+        if (input[pos.*] == '\\') {
+            has_escape = true;
+            pos.* += 2;
+        } else pos.* += 1;
     }
     const raw = input[start..pos.*];
     if (pos.* < input.len) pos.* += 1; // skip closing "
@@ -1031,9 +1150,19 @@ fn parseString(pa: std.mem.Allocator, input: []const u8, pos: *usize) JsonParseE
     while (i < raw.len) {
         if (raw[i] == '\\' and i + 1 < raw.len) {
             i += 1;
-            buf[o] = switch (raw[i]) { 'n' => '\n', 'r' => '\r', 't' => '\t', else => raw[i] };
-            o += 1; i += 1;
-        } else { buf[o] = raw[i]; o += 1; i += 1; }
+            buf[o] = switch (raw[i]) {
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                else => raw[i],
+            };
+            o += 1;
+            i += 1;
+        } else {
+            buf[o] = raw[i];
+            o += 1;
+            i += 1;
+        }
     }
     return buf[0..o];
 }
@@ -1056,7 +1185,10 @@ fn parseNumber(input: []const u8, pos: *usize) JsonParseError!JValue {
     // Parse as integer
     var neg = false;
     var idx: usize = 0;
-    if (num_str[0] == '-') { neg = true; idx = 1; }
+    if (num_str[0] == '-') {
+        neg = true;
+        idx = 1;
+    }
     var val: i64 = 0;
     while (idx < num_str.len and num_str[idx] >= '0' and num_str[idx] <= '9') {
         val = val *| 10 +| (num_str[idx] - '0');

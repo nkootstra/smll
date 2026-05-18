@@ -25,31 +25,31 @@ const Writer = std.Io.Writer;
 // If no keep lines captured, emits "up to date\n".
 
 const KEEP_PREFIXES = [_][]const u8{
-    "npm WARN",         // npm
-    "npm ERR!",         // npm
-    "npm error",        // npm
-    "npm err!",         // npm
-    "WARN ",            // pnpm (and any tool using that shape)
-    "ERROR ",           // pnpm
-    "warn:",            // bun
-    "error:",           // bun
-    "warning ",         // yarn
-    "error ",           // yarn
-    "added ",           // npm summary
-    "removed ",         // npm summary
-    "changed ",         // npm summary
-    "up to date",       // npm/pnpm
-    "up-to-date",       // npm legacy
+    "npm WARN", // npm
+    "npm ERR!", // npm
+    "npm error", // npm
+    "npm err!", // npm
+    "WARN ", // pnpm (and any tool using that shape)
+    "ERROR ", // pnpm
+    "warn:", // bun
+    "error:", // bun
+    "warning ", // yarn
+    "error ", // yarn
+    "added ", // npm summary
+    "removed ", // npm summary
+    "changed ", // npm summary
+    "up to date", // npm/pnpm
+    "up-to-date", // npm legacy
     "Already up to date", // pnpm idempotent
-    "audited ",         // npm
+    "audited ", // npm
     "found 0 vulnerabilities", // npm
-    "found ",           // npm
-    "Packages: ",       // pnpm summary
-    "Done in ",         // pnpm / yarn summary
-    "success ",         // yarn (Saved / lockfile)
-    "Package operations:",       // composer summary
-    "Lock file operations:",     // composer summary
-    "Nothing to install",        // composer idempotent (full: "Nothing to install, update or remove")
+    "found ", // npm
+    "Packages: ", // pnpm summary
+    "Done in ", // pnpm / yarn summary
+    "success ", // yarn (Saved / lockfile)
+    "Package operations:", // composer summary
+    "Lock file operations:", // composer summary
+    "Nothing to install", // composer idempotent (full: "Nothing to install, update or remove")
     "No security vulnerability", // composer advisory
     "Your requirements could not be resolved", // composer error opener
 };
@@ -65,7 +65,7 @@ pub fn matches(input: []const u8) bool {
         while (it.next()) |line| {
             if (std.mem.find(u8, line, "up to date") != null and
                 (std.mem.find(u8, line, "audited") != null or
-                std.mem.find(u8, line, "packages") != null)) return true;
+                    std.mem.find(u8, line, "packages") != null)) return true;
         }
     }
     if (std.mem.find(u8, input, "audited ") != null and

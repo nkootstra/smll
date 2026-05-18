@@ -63,12 +63,16 @@ fn groupMergeEntries(output: []const u8, w: *Writer) !void {
             if (run_end - i >= 3) {
                 if (is_stat) {
                     try w.writeAll(d);
-                    try w.writeAll(" ×"); try ansi.writeDecimal(w, run_end - i); try w.writeByte('\n');
+                    try w.writeAll(" ×");
+                    try ansi.writeDecimal(w, run_end - i);
+                    try w.writeByte('\n');
                 } else {
                     // Preserve the sigil (+ or -)
                     try w.writeAll(line[0..2]);
                     try w.writeAll(d);
-                    try w.writeAll(" ×"); try ansi.writeDecimal(w, run_end - i); try w.writeByte('\n');
+                    try w.writeAll(" ×");
+                    try ansi.writeDecimal(w, run_end - i);
+                    try w.writeByte('\n');
                 }
                 i = run_end;
                 continue;
@@ -104,7 +108,12 @@ fn applyInner(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) 
 
     var it = std.mem.splitScalar(u8, src, '\n');
     var first: []const u8 = "";
-    while (it.next()) |ln| { if (ln.len > 0) { first = ln; break; } }
+    while (it.next()) |ln| {
+        if (ln.len > 0) {
+            first = ln;
+            break;
+        }
+    }
 
     if (std.mem.startsWith(u8, first, "Updating ")) {
         const r = first["Updating ".len..];
@@ -113,12 +122,15 @@ fn applyInner(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) 
             try w.writeAll(r[0..@min(d, 7)]);
             try w.writeAll("..");
             const b = r[d + 2 ..];
-            var be: usize = 0; while (be < b.len and b[be] != ' ') be += 1;
+            var be: usize = 0;
+            while (be < b.len and b[be] != ' ') be += 1;
             try w.writeAll(b[0..@min(be, 7)]);
             try w.writeByte('\n');
         }
         // skip "Fast-forward" line
-        while (it.next()) |ln| { if (std.mem.eql(u8, ln, "Fast-forward")) break; }
+        while (it.next()) |ln| {
+            if (std.mem.eql(u8, ln, "Fast-forward")) break;
+        }
         try emitBody(&it, w);
     } else if (std.mem.startsWith(u8, first, "Merge made by")) {
         var strat: []const u8 = "ort";
@@ -126,7 +138,9 @@ fn applyInner(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) 
             const s = first[q + 1 ..];
             if (std.mem.find(u8, s, "'")) |e| strat = s[0..e];
         }
-        try w.writeAll("@ merge "); try w.writeAll(strat); try w.writeByte('\n');
+        try w.writeAll("@ merge ");
+        try w.writeAll(strat);
+        try w.writeByte('\n');
         try emitBody(&it, w);
     } else if (std.mem.startsWith(u8, first, "Already up to date")) {
         try w.writeAll("up to date\n");
@@ -148,8 +162,16 @@ fn emitBody(it: *std.mem.SplitIterator(u8, .scalar), w: *Writer) !void {
         switch (t[0]) {
             'C' => if (std.mem.startsWith(u8, t, "CONFLICT (")) try emitConflictLine(t, w),
             'A' => if (std.mem.startsWith(u8, t, "Automatic merge failed")) try w.writeAll("! failed\n"),
-            'c' => if (std.mem.startsWith(u8, t, "create mode ")) { try w.writeAll("+ "); try w.writeAll(util.skipModeNum(t[12..])); try w.writeByte('\n'); },
-            'd' => if (std.mem.startsWith(u8, t, "delete mode ")) { try w.writeAll("- "); try w.writeAll(util.skipModeNum(t[12..])); try w.writeByte('\n'); },
+            'c' => if (std.mem.startsWith(u8, t, "create mode ")) {
+                try w.writeAll("+ ");
+                try w.writeAll(util.skipModeNum(t[12..]));
+                try w.writeByte('\n');
+            },
+            'd' => if (std.mem.startsWith(u8, t, "delete mode ")) {
+                try w.writeAll("- ");
+                try w.writeAll(util.skipModeNum(t[12..]));
+                try w.writeByte('\n');
+            },
             else => if (std.mem.find(u8, t, " | ") != null) {
                 try util.writeStatLine(t, w);
             } else if (std.mem.find(u8, t, " changed") != null) {
@@ -172,10 +194,12 @@ fn emitConflicts(it: *std.mem.SplitIterator(u8, .scalar), w: *Writer) !void {
 
 fn emitConflictLine(t: []const u8, w: *Writer) !void {
     const p = util.conflictPath(t);
-    if (p.len > 0) { try w.writeAll("! conflict "); try w.writeAll(p); try w.writeByte('\n'); }
+    if (p.len > 0) {
+        try w.writeAll("! conflict ");
+        try w.writeAll(p);
+        try w.writeByte('\n');
+    }
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Fixtures + tests.
@@ -211,44 +235,51 @@ test "pipe-mode matches merge fixtures" {
 
 test "ff: header" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_ff, ""); defer a.free(out);
+    const out = try str(a, fixture_ff, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "@ ff 81a7b77..af90dc8\n"));
 }
 
 test "ff: summary" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_ff, ""); defer a.free(out);
+    const out = try str(a, fixture_ff, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "+1/-0 files=1\n") != null);
 }
 
 test "ff: stat path" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_ff, ""); defer a.free(out);
+    const out = try str(a, fixture_ff, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "fx.txt") != null);
 }
 
 test "ff: create mode" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_ff, ""); defer a.free(out);
+    const out = try str(a, fixture_ff, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "+ fx.txt\n") != null);
 }
 
 test "merge-commit: header" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_commit, ""); defer a.free(out);
+    const out = try str(a, fixture_commit, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.startsWith(u8, out, "@ merge ort\n"));
 }
 
 test "merge-commit: summary and path" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_commit, ""); defer a.free(out);
+    const out = try str(a, fixture_commit, "");
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "+1/-0 files=1\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "fy.txt") != null);
 }
 
 test "conflict: path and failed" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_conflict_stdout, fixture_conflict_stderr); defer a.free(out);
+    const out = try str(a, fixture_conflict_stdout, fixture_conflict_stderr);
+    defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "! conflict conflict.txt\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "! failed\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "Auto-merging") == null);
@@ -256,7 +287,8 @@ test "conflict: path and failed" {
 
 test "large: grouped stat paths and summary" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_large, ""); defer a.free(out);
+    const out = try str(a, fixture_large, "");
+    defer a.free(out);
     // Stat lines grouped by directory
     try std.testing.expect(std.mem.find(u8, out, "src/") != null);
     try std.testing.expect(std.mem.find(u8, out, "+300/-0 files=60\n") != null);
@@ -264,38 +296,39 @@ test "large: grouped stat paths and summary" {
 
 test "R3: ff" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_ff, ""); defer a.free(out);
+    const out = try str(a, fixture_ff, "");
+    defer a.free(out);
     const raw = fixture_ff.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }
 
 test "R3: merge-commit" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_commit, ""); defer a.free(out);
+    const out = try str(a, fixture_commit, "");
+    defer a.free(out);
     const raw = fixture_commit.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }
 
 test "R3: conflict" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_conflict_stdout, fixture_conflict_stderr); defer a.free(out);
+    const out = try str(a, fixture_conflict_stdout, fixture_conflict_stderr);
+    defer a.free(out);
     const raw = fixture_conflict_stdout.len + fixture_conflict_stderr.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }
 
 test "R3: large" {
     const a = std.testing.allocator;
-    const out = try str(a, fixture_large, ""); defer a.free(out);
+    const out = try str(a, fixture_large, "");
+    defer a.free(out);
     const raw = fixture_large.len;
-    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100)
-    else try std.testing.expect(out.len <= raw);
+    if (raw >= 50) try std.testing.expect(out.len <= (raw * 80) / 100) else try std.testing.expect(out.len <= raw);
 }
 
 test "empty" {
     const a = std.testing.allocator;
-    const out = try str(a, "", ""); defer a.free(out);
+    const out = try str(a, "", "");
+    defer a.free(out);
     try std.testing.expectEqualStrings("", out);
 }

@@ -125,17 +125,19 @@ pub fn apply(
         }
         try writer.writeByte('\n');
         try emitHumanSize(writer, remaining_bytes);
-        try writer.writeAll("\t(+"); try ansi.writeDecimal(writer, rows.items.len - TOP_N); try writer.writeAll(")\n");
+        try writer.writeAll("\t(+");
+        try ansi.writeDecimal(writer, rows.items.len - TOP_N);
+        try writer.writeAll(")\n");
     } else if (rows.items.len > 0) {
         try writer.writeByte('\n');
     }
 }
 
 const Parsed = struct {
-    num: []const u8,   // numeric token as written ("234", "1.2", "17")
-    unit: u8,          // 0 when no unit; otherwise uppercase K/M/G/T/P/E
-    bytes: u64,        // approximate byte count for sort ordering
-    path: []const u8,  // remainder of the line (path, trimmed trailing ws)
+    num: []const u8, // numeric token as written ("234", "1.2", "17")
+    unit: u8, // 0 when no unit; otherwise uppercase K/M/G/T/P/E
+    bytes: u64, // approximate byte count for sort ordering
+    path: []const u8, // remainder of the line (path, trimmed trailing ws)
 };
 
 /// Parse a single du line. Returns null on shape mismatch.

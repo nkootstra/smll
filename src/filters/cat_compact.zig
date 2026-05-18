@@ -208,7 +208,10 @@ fn compressCode(input: []const u8, lang: Lang, writer: *Writer) !void {
                 var skipped: usize = 0;
                 while (lines.next()) |body_line| {
                     const bt = std.mem.trim(u8, body_line, " \t\r");
-                    if (bt.len == 0) { skipped += 1; continue; }
+                    if (bt.len == 0) {
+                        skipped += 1;
+                        continue;
+                    }
                     if (leadingSpaces(body_line) > sig_indent) {
                         skipped += 1;
                         continue;
@@ -362,14 +365,20 @@ fn isModuleLevelStatement(trimmed: []const u8, lang: Lang) bool {
 
 fn countChar(s: []const u8, c: u8) usize {
     var n: usize = 0;
-    for (s) |b| if (b == c) { n += 1; };
+    for (s) |b| if (b == c) {
+        n += 1;
+    };
     return n;
 }
 
 fn leadingSpaces(line: []const u8) usize {
     var n: usize = 0;
     for (line) |c| {
-        if (c == ' ') { n += 1; } else if (c == '\t') { n += 4; } else break;
+        if (c == ' ') {
+            n += 1;
+        } else if (c == '\t') {
+            n += 4;
+        } else break;
     }
     return n;
 }

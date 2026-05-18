@@ -82,13 +82,19 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &make_count, &go_count);
 
     if (cargo_count > 0) {
-        try writer.writeAll("Compiled "); try ansi.writeDecimal(writer, cargo_count); try writer.writeAll(" (cargo)\n");
+        try writer.writeAll("Compiled ");
+        try ansi.writeDecimal(writer, cargo_count);
+        try writer.writeAll(" (cargo)\n");
     }
     if (make_count > 0) {
-        try writer.writeAll("Compiled "); try ansi.writeDecimal(writer, make_count); try writer.writeAll(" (make)\n");
+        try writer.writeAll("Compiled ");
+        try ansi.writeDecimal(writer, make_count);
+        try writer.writeAll(" (make)\n");
     }
     if (go_count > 0) {
-        try writer.writeAll("Compiled "); try ansi.writeDecimal(writer, go_count); try writer.writeAll(" (go)\n");
+        try writer.writeAll("Compiled ");
+        try ansi.writeDecimal(writer, go_count);
+        try writer.writeAll(" (go)\n");
     }
 }
 

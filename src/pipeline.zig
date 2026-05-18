@@ -3,12 +3,19 @@ const Allocator = std.mem.Allocator;
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
 
+/// Upper bound on pipe-mode input. Matches the wrapper-mode cap in main.zig
+/// (MAX_OUTPUT_BYTES) so a runaway pipe doesn't silently grow unbounded.
+pub const MAX_PIPE_INPUT_BYTES: usize = 16 * 1024 * 1024;
+
 pub const Passthrough = struct {
     pub fn matches(input: []const u8) bool {
         _ = input;
         return false;
     }
 
+    // Pipe-mode dispatch always passes stderr as &.{} — stdin is a single
+    // stream that the dispatcher routes to the matching filter's `stdout`
+    // argument. This stub is never actually invoked.
     pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
         _ = allocator;
         _ = stdout;
@@ -48,8 +55,11 @@ pub fn run(
     // Read remaining data directly into the buffer.
     while (true) {
         if (total >= buf.len) {
-            // Grow buffer (double).
-            const new_cap = buf.len * 2;
+            // Grow buffer (double), but stop at MAX_PIPE_INPUT_BYTES. If we
+            // reach the cap and still have data to read, return error.StreamTooLong
+            // so the caller can fall open to a safer behavior.
+            if (buf.len >= MAX_PIPE_INPUT_BYTES) return error.StreamTooLong;
+            const new_cap = @min(buf.len * 2, MAX_PIPE_INPUT_BYTES);
             const new_buf = try allocator.alloc(u8, new_cap);
             @memcpy(new_buf[0..total], buf[0..total]);
             allocator.free(buf);
