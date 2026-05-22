@@ -181,9 +181,15 @@ fn rotate(allocator: Allocator, io: Io, dir_path: []const u8) !void {
 
     if (entries.items.len <= MAX_TEE_FILES) return;
 
+    // Primary: mtime ascending. Secondary: name ascending, so that bursts of
+    // failures that land in the same filesystem mtime tick (or even the same
+    // millisecond, given our `epoch_ms`-prefixed naming) still rotate in a
+    // stable, predictable order. Without the tiebreaker, `std.mem.sort` is
+    // unstable and the deleted set is filesystem/iterator-order dependent.
     std.mem.sort(Entry, entries.items, {}, struct {
         fn lt(_: void, a: Entry, b: Entry) bool {
-            return a.mtime_ns < b.mtime_ns;
+            if (a.mtime_ns != b.mtime_ns) return a.mtime_ns < b.mtime_ns;
+            return std.mem.lessThan(u8, a.name, b.name);
         }
     }.lt);
 
