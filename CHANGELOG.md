@@ -227,6 +227,7 @@ in the git log.
 [1.1.1]: https://github.com/nkootstra/smll/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/nkootstra/smll/compare/v1.0.7...v1.1.0
 [1.0.7]: https://github.com/nkootstra/smll/compare/v1.0.0...v1.0.7
+[1.0.0]: https://github.com/nkootstra/smll/releases/tag/v1.0.0
 [0.9.0]: https://github.com/nkootstra/smll/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/nkootstra/smll/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/nkootstra/smll/compare/v0.7.0...v0.7.1
