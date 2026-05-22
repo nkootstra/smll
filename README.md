@@ -116,6 +116,24 @@ Best-effort — if the file can't be read or written, smll silently skips stats
 and the wrapped command runs normally. Pipe mode (stdin) does not record stats.
 Set `DO_NOT_TRACK=1` to skip local stats writes as well.
 
+## Failure recovery
+
+When a wrapped command exits non-zero, the compacted output an agent sees may
+have already collapsed the warnings or stack frames that explain the failure.
+smll persists the *raw* stdout+stderr to `~/.smll/tee/<timestamp>_<cmd>.log`
+and appends a one-line breadcrumb so the agent can fetch the full bytes:
+
+```
+fatal: not a git repository (or any of the parent directories): .git
+
+(smll: full output saved to /Users/you/.smll/tee/1716393724812_git_status.log)
+```
+
+Only failed runs are recorded; successful commands write nothing. The newest
+20 logs are kept; older ones are deleted automatically. Best-effort — any I/O
+failure is swallowed so the wrapped command's exit path is never disturbed.
+Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
+
 ## Supported commands
 
 | Category | Commands | Default behavior |
