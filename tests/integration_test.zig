@@ -88,12 +88,17 @@ const RunResult = struct {
 };
 
 fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("SMLL_TEE", "0");
+
     const io = std.testing.io;
     var child = try std.process.spawn(io, .{
         .argv = &.{exe_path},
         .stdin = .pipe,
         .stdout = .pipe,
         .stderr = .pipe,
+        .environ_map = &env,
     });
 
     if (input.len > 0) {
@@ -108,6 +113,7 @@ fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
 fn runSmllWithEnv(allocator: std.mem.Allocator, input: []const u8, name: []const u8, value: []const u8) !RunResult {
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
+    try env.put("SMLL_TEE", "0");
     try env.put(name, value);
 
     const io = std.testing.io;
@@ -515,10 +521,15 @@ fn runSmllWrapper(
     try full.append(allocator, exe_path);
     for (inner_argv) |a| try full.append(allocator, a);
 
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("SMLL_TEE", "0");
+
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = full.items,
         .stdout_limit = .limited(2 * 1024 * 1024),
         .stderr_limit = .limited(2 * 1024 * 1024),
+        .environ_map = &env,
     });
     return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
 }
@@ -533,12 +544,17 @@ fn runSmllWrapperWithStdin(
     try full.append(allocator, exe_path);
     for (inner_argv) |a| try full.append(allocator, a);
 
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("SMLL_TEE", "0");
+
     const io = std.testing.io;
     var child = try std.process.spawn(io, .{
         .argv = full.items,
         .stdin = .pipe,
         .stdout = .pipe,
         .stderr = .pipe,
+        .environ_map = &env,
     });
 
     if (input.len > 0) try child.stdin.?.writeStreamingAll(io, input);
@@ -569,10 +585,14 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
 
 test "meta: --version prints package version" {
     const allocator = std.testing.allocator;
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("SMLL_TEE", "0");
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = &.{ exe_path, "--version" },
         .stdout_limit = .limited(1024),
         .stderr_limit = .limited(1024),
+        .environ_map = &env,
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
@@ -1089,6 +1109,7 @@ fn runSmllWrapperFakePathLimited(
     const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
     defer allocator.free(new_path);
     try env.put("PATH", new_path);
+    try env.put("SMLL_TEE", "0");
 
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = full.items,
@@ -1804,6 +1825,7 @@ fn runSmllWrapperEnv(
     const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
     defer allocator.free(new_path);
     try env.put("PATH", new_path);
+    try env.put("SMLL_TEE", "0");
     for (extra_env) |kv| try env.put(kv[0], kv[1]);
 
     const result = try std.process.run(allocator, std.testing.io, .{

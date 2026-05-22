@@ -7,6 +7,7 @@ pub const std_options: std.Options = .{
 };
 const pipeline = @import("pipeline.zig");
 const stats = @import("stats.zig");
+const tee = @import("tee.zig");
 const git_status = @import("git_status");
 const git_diff = @import("git_diff");
 const git_log = @import("git_log");
@@ -136,12 +137,22 @@ const GitLogCompact = struct {
 
 test {
     _ = pipeline;
+    _ = tee;
 }
 
 /// Returns true when `name` env var is set and its first byte is '1'.
 fn envFlagOn(environ_map: *const std.process.Environ.Map, name: []const u8) bool {
     const v = environ_map.get(name) orelse return false;
     return v.len > 0 and v[0] == '1';
+}
+
+/// Tee recovery is on by default; users opt out with `SMLL_TEE=0` (matching
+/// the SMLL_LOSSLESS shape) or with the conventional `DO_NOT_TRACK=1`.
+fn teeEnabled(environ_map: *const std.process.Environ.Map) bool {
+    if (envFlagOn(environ_map, "DO_NOT_TRACK")) return false;
+    const v = environ_map.get("SMLL_TEE") orelse return true;
+    if (v.len > 0 and v[0] == '0') return false;
+    return true;
 }
 
 /// Returns true when `argv` contains an exact-match token equal to `arg`.
@@ -566,6 +577,8 @@ fn runWrapper(
     var capture = std.Io.Writer.Allocating.init(allocator);
     defer capture.deinit();
     last_output_inherited = false;
+    last_raw_stdout = &.{};
+    last_raw_stderr = &.{};
     const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
     const output = capture.written();
 
@@ -577,6 +590,18 @@ fn runWrapper(
         try writeNoOutputHint(writer, argv, exit_code);
     } else {
         try writer.writeAll(output);
+    }
+
+    // Tee recovery: on a failed wrapped command, persist the *raw* (pre-filter)
+    // stdout+stderr under `~/.smll/tee/` and append a breadcrumb to stdout so
+    // the agent can fetch the unredacted output when the compact summary isn't
+    // enough. Streaming/lossless modes inherit stdio directly so there's
+    // nothing to record. Best-effort: failures never surface to the user.
+    if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
+        const home = environ.get("HOME") orelse "";
+        if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
+            writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+        }
     }
 
     // Input bytes = captured child stdout (before filtering). We approximate
@@ -596,6 +621,11 @@ fn runWrapper(
 var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
+/// Raw child streams stashed for the tee-recovery hook in `runWrapper`. The
+/// slices remain valid for the wrapper's lifetime (arena-owned) but only the
+/// outermost `runWrapper` call reads them, so module-level state is safe.
+var last_raw_stdout: []const u8 = &.{};
+var last_raw_stderr: []const u8 = &.{};
 
 /// Write stdout through safe generic fallbacks: high-confidence table/list
 /// compaction first, then size-gated generic text compaction, then raw output.
@@ -730,6 +760,8 @@ fn runWrapperInner(
     // Record raw stream sizes for stats tracking and empty-output detection.
     last_input_bytes = stdout_slice.len;
     last_stderr_bytes = stderr_slice.len;
+    last_raw_stdout = stdout_slice;
+    last_raw_stderr = stderr_slice;
 
     const term = try child.wait(io);
     const exit_code: u8 = switch (term) {
