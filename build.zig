@@ -226,7 +226,7 @@ const integration_extra_fixtures = [_]Fixture{
 /// `@import("<name>")`). Used only to wire those imports into
 /// integration_mod.
 const integration_module_imports = [_][]const u8{
-    "git_status", "git_diff", "git_log", "git_show",
+    "git_status", "git_diff",   "git_log",    "git_show",
     "git_commit", "git_branch", "git_reflog",
 };
 
