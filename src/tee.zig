@@ -15,7 +15,6 @@ const Writer = std.Io.Writer;
 /// Best-effort: every I/O step is `catch null`-ed and never blocks the
 /// pipeline. Disable via `SMLL_TEE=0` or `DO_NOT_TRACK=1` in `main.zig`.
 /// Rotation: keep at most `MAX_TEE_FILES`; older logs are deleted oldest-first.
-
 const tee_subdir = ".smll/tee";
 const MAX_TEE_FILES: usize = 20;
 const MAX_LABEL_LEN: usize = 48;
