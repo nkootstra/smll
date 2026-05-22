@@ -169,6 +169,10 @@ fn rotate(allocator: Allocator, io: Io, dir_path: []const u8) !void {
         const st = dir.statFile(io, entry.name, .{}) catch continue;
         const name_dup = try allocator.dupe(u8, entry.name);
         errdefer allocator.free(name_dup);
+        // `Io.Timestamp.nanoseconds` is the *full* epoch nanoseconds (i96),
+        // not the sub-second component of a POSIX timespec — see
+        // std/Io.zig: `pub const Timestamp = struct { nanoseconds: i96 }`
+        // and the doc on File.Stat.mtime ("relative to UTC 1970-01-01").
         try entries.append(allocator, .{
             .name = name_dup,
             .mtime_ns = @as(i128, st.mtime.nanoseconds),
@@ -193,15 +197,11 @@ fn rotate(allocator: Allocator, io: Io, dir_path: []const u8) !void {
 // Test helpers
 // ---------------------------------------------------------------------------
 
-fn cleanupTeeDir(allocator: Allocator, io: Io, home: []const u8) void {
-    const tee_dir_path = std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, tee_subdir }) catch return;
-    defer allocator.free(tee_dir_path);
-    var tee_dir = Io.Dir.cwd().openDir(io, tee_dir_path, .{ .iterate = true }) catch return;
-    defer tee_dir.close(io);
-    var it = tee_dir.iterate();
-    while (it.next(io) catch null) |entry| {
-        tee_dir.deleteFile(io, entry.name) catch {};
-    }
+/// Recursively remove the synthetic test home so we don't leak the
+/// three-level `<home>/.smll/tee/` tree under `/tmp` after each test run.
+/// Best-effort: any failure is swallowed.
+fn cleanupTeeDir(_: Allocator, io: Io, home: []const u8) void {
+    Io.Dir.cwd().deleteTree(io, home) catch {};
 }
 
 // ---------------------------------------------------------------------------
@@ -305,10 +305,13 @@ test "rotate: keeps newest MAX_TEE_FILES, deletes older" {
     try Io.Dir.cwd().createDirPath(io, tee_dir_path);
     defer cleanupTeeDir(allocator, io, home);
 
-    // Write MAX_TEE_FILES + 5 dummy log files via maybeRecord-equivalent
-    // paths. We control naming so that lexical order also matches mtime.
+    const total = MAX_TEE_FILES + 5;
+    const expected_deleted = total - MAX_TEE_FILES;
+
+    // Write `total` dummy logs sequentially so mtime ordering matches the
+    // 4-digit lexical prefix: 0000 is oldest, (total-1) is newest.
     var i: usize = 0;
-    while (i < MAX_TEE_FILES + 5) : (i += 1) {
+    while (i < total) : (i += 1) {
         const fp = try std.fmt.allocPrint(allocator, "{s}/{d:0>4}_dummy.log", .{ tee_dir_path, i });
         defer allocator.free(fp);
         try Io.Dir.cwd().writeFile(io, .{ .sub_path = fp, .data = "x" });
@@ -316,15 +319,23 @@ test "rotate: keeps newest MAX_TEE_FILES, deletes older" {
 
     try rotate(allocator, io, tee_dir_path);
 
-    // Count remaining files
     var dir = try Io.Dir.cwd().openDir(io, tee_dir_path, .{ .iterate = true });
     defer dir.close(io);
-    var remaining: usize = 0;
-    var it = dir.iterate();
-    while (try it.next(io)) |entry| {
-        if (entry.kind == .file and std.mem.endsWith(u8, entry.name, ".log")) {
-            remaining += 1;
-        }
+
+    // Verify *which* files survived: the oldest `expected_deleted` should be
+    // gone (0000..0004), the newest `MAX_TEE_FILES` should remain
+    // (0005..0024). A sort-order regression — e.g., reversing the
+    // comparator — passes the bare count check but fails this one.
+    i = 0;
+    while (i < total) : (i += 1) {
+        const fname = try std.fmt.allocPrint(allocator, "{d:0>4}_dummy.log", .{i});
+        defer allocator.free(fname);
+        const f = dir.openFile(io, fname, .{}) catch |err| {
+            try std.testing.expectEqual(error.FileNotFound, err);
+            try std.testing.expect(i < expected_deleted);
+            continue;
+        };
+        f.close(io);
+        try std.testing.expect(i >= expected_deleted);
     }
-    try std.testing.expectEqual(MAX_TEE_FILES, remaining);
 }
