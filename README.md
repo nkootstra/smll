@@ -112,9 +112,10 @@ smll --stats --reset
 ```
 
 Stats are stored locally in `~/.smll/stats.json` (~80 bytes). No network calls.
-Best-effort — if the file can't be read or written, smll silently skips stats
-and the wrapped command runs normally. Pipe mode (stdin) does not record stats.
-Set `DO_NOT_TRACK=1` to skip local stats writes as well.
+Wrapper mode records raw stdout+stderr input bytes and compact stdout+stderr
+output bytes. Best-effort — if the file can't be read or written, smll silently
+skips stats and the wrapped command runs normally. Pipe mode (stdin) does not
+record stats. Set `DO_NOT_TRACK=1` to skip local stats writes as well.
 
 ## Failure recovery
 

@@ -58,18 +58,88 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
-    var kept_lines: usize = 0;
-    try scanAndKeep(allocator, stdout, &scratch, &kept_lines);
-    try scanAndKeep(allocator, stderr, &scratch, &kept_lines);
+    var assets = AssetSummary.init();
+    defer assets.deinit(allocator);
 
-    if (kept_lines == 0) {
+    var kept_lines: usize = 0;
+    try scanAndKeep(allocator, stdout, &scratch, &assets, &kept_lines);
+    try scanAndKeep(allocator, stderr, &scratch, &assets, &kept_lines);
+    try assets.write(allocator, &scratch);
+
+    if (kept_lines == 0 and assets.count == 0) {
         try writer.writeAll("build complete\n");
         return;
     }
     try writer.writeAll(scratch.items);
 }
 
-fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
+const max_asset_rows = 5;
+
+const AssetEntry = struct {
+    bytes: usize,
+    line: []u8,
+};
+
+const AssetSummary = struct {
+    count: usize = 0,
+    top: [max_asset_rows]?AssetEntry = .{null} ** max_asset_rows,
+
+    fn init() AssetSummary {
+        return .{};
+    }
+
+    fn deinit(self: *AssetSummary, allocator: Allocator) void {
+        for (&self.top) |*slot| {
+            if (slot.*) |entry| allocator.free(entry.line);
+            slot.* = null;
+        }
+    }
+
+    fn add(self: *AssetSummary, allocator: Allocator, line: []const u8, bytes: usize) !void {
+        self.count += 1;
+        const compact = try compactSpaces(allocator, stripBuildPrefix(line));
+        errdefer allocator.free(compact);
+
+        var idx: usize = 0;
+        while (idx < max_asset_rows) : (idx += 1) {
+            if (self.top[idx] == null or bytes > self.top[idx].?.bytes) break;
+        }
+        if (idx == max_asset_rows) {
+            allocator.free(compact);
+            return;
+        }
+
+        var displaced: ?AssetEntry = .{ .bytes = bytes, .line = compact };
+        var i = idx;
+        while (i < max_asset_rows) : (i += 1) {
+            const next = self.top[i];
+            self.top[i] = displaced;
+            displaced = next;
+        }
+        if (displaced) |entry| allocator.free(entry.line);
+    }
+
+    fn write(self: *const AssetSummary, allocator: Allocator, out: *std.ArrayList(u8)) !void {
+        if (self.count == 0) return;
+        try out.appendSlice(allocator, "assets x");
+        try appendDecimal(allocator, out, self.count);
+        try out.appendSlice(allocator, "; largest:\n");
+        for (self.top) |slot| {
+            const entry = slot orelse continue;
+            try out.appendSlice(allocator, "- ");
+            try out.appendSlice(allocator, entry.line);
+            try out.append(allocator, '\n');
+        }
+    }
+};
+
+fn scanAndKeep(
+    allocator: Allocator,
+    input: []const u8,
+    out: *std.ArrayList(u8),
+    assets: *AssetSummary,
+    kept: *usize,
+) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
     // 200 lines is enough for Vite/Next/Nuxt builds in normal projects:
@@ -92,6 +162,10 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         }
         const body = std.mem.trimStart(u8, trimmed, " \t");
         if (shouldDrop(body)) continue;
+        if (assetSizeBytes(body)) |bytes| {
+            try assets.add(allocator, body, bytes);
+            continue;
+        }
         try out.appendSlice(allocator, trimmed);
         try out.append(allocator, '\n');
         kept.* += 1;
@@ -107,6 +181,91 @@ fn shouldDrop(line: []const u8) bool {
         if (std.mem.find(u8, line, c) != null) return true;
     }
     return false;
+}
+
+fn assetSizeBytes(line: []const u8) ?usize {
+    const marker = std.mem.indexOf(u8, line, "\xe2\x94\x82 gzip:") orelse return null; // │ gzip:
+    const before = stripBuildPrefix(std.mem.trim(u8, line[0..marker], " \t\r"));
+    var tokens = std.mem.tokenizeAny(u8, before, " \t");
+    var prev: []const u8 = "";
+    var cur: []const u8 = "";
+    while (tokens.next()) |tok| {
+        prev = cur;
+        cur = tok;
+    }
+    if (prev.len == 0 or cur.len == 0) return null;
+    return parseSizeBytes(prev, cur);
+}
+
+fn parseSizeBytes(number: []const u8, unit: []const u8) ?usize {
+    const multiplier: u64 = if (std.ascii.eqlIgnoreCase(unit, "B"))
+        1
+    else if (std.ascii.eqlIgnoreCase(unit, "kB") or std.ascii.eqlIgnoreCase(unit, "KB"))
+        1024
+    else if (std.ascii.eqlIgnoreCase(unit, "MB"))
+        1024 * 1024
+    else if (std.ascii.eqlIgnoreCase(unit, "GB"))
+        1024 * 1024 * 1024
+    else
+        return null;
+
+    var whole: u64 = 0;
+    var frac: u64 = 0;
+    var scale: u64 = 1;
+    var seen_digit = false;
+    var seen_dot = false;
+
+    for (number) |c| {
+        if (c == ',') continue;
+        if (c == '.') {
+            if (seen_dot) return null;
+            seen_dot = true;
+            continue;
+        }
+        if (!std.ascii.isDigit(c)) return null;
+        seen_digit = true;
+        const digit: u64 = c - '0';
+        if (seen_dot) {
+            if (scale < 1_000_000) {
+                frac = frac * 10 + digit;
+                scale *= 10;
+            }
+        } else {
+            whole = whole * 10 + digit;
+        }
+    }
+    if (!seen_digit) return null;
+
+    const bytes = whole * multiplier + (frac * multiplier) / scale;
+    return std.math.cast(usize, bytes);
+}
+
+fn stripBuildPrefix(line: []const u8) []const u8 {
+    var out = std.mem.trim(u8, line, " \t\r");
+    if (std.mem.startsWith(u8, out, "\xe2\x84\xb9 ")) out = std.mem.trim(u8, out[4..], " \t\r"); // ℹ
+    return out;
+}
+
+fn compactSpaces(allocator: Allocator, input: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    var in_space = false;
+    for (input) |c| {
+        if (c == ' ' or c == '\t') {
+            in_space = true;
+            continue;
+        }
+        if (in_space and out.items.len > 0) try out.append(allocator, ' ');
+        try out.append(allocator, c);
+        in_space = false;
+    }
+    return out.toOwnedSlice(allocator);
+}
+
+fn appendDecimal(allocator: Allocator, out: *std.ArrayList(u8), value: usize) !void {
+    var buf: [32]u8 = undefined;
+    const s = try std.fmt.bufPrint(&buf, "{d}", .{value});
+    try out.appendSlice(allocator, s);
 }
 
 test "matches: vite build banner" {

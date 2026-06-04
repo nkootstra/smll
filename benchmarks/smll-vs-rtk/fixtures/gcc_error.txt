@@ -1,0 +1,11 @@
+In file included from /usr/include/stdio.h:42:
+                 from main.c:1:
+main.c:10:5: error: use of undeclared identifier 'foo'
+    foo();
+    ^
+main.c:15:12: warning: unused variable 'x' [-Wunused-variable]
+    int x = 42;
+        ^
+2 warnings generated.
+1 error generated.
+

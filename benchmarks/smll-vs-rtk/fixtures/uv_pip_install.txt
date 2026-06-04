@@ -1,0 +1,10 @@
+  Downloading requests-2.31.0-py3-none-any.whl (62.6 kB)
+  Using cached certifi-2023.11.17-py3-none-any.whl (162 kB)
+  Preparing packages...
+Installed 5 packages in 23ms
+ + certifi==2023.11.17
+ + charset-normalizer==3.3.2
+ + idna==3.6
+ + requests==2.31.0
+ + urllib3==2.1.0
+

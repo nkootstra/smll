@@ -1,0 +1,9 @@
+{"Time":"2026-06-04T00:00:00Z","Action":"run","Package":"github.com/example/math","Test":"TestDivide"}
+{"Time":"2026-06-04T00:00:00Z","Action":"output","Package":"github.com/example/math","Test":"TestDivide","Output":"=== RUN   TestDivide\n"}
+{"Time":"2026-06-04T00:00:00Z","Action":"output","Package":"github.com/example/math","Test":"TestDivide","Output":"    math_test.go:42: divide(10, 0) panic expected but got 0\n"}
+{"Time":"2026-06-04T00:00:00Z","Action":"fail","Package":"github.com/example/math","Test":"TestDivide","Elapsed":0}
+{"Time":"2026-06-04T00:00:00Z","Action":"run","Package":"github.com/example/math","Test":"TestSqrt"}
+{"Time":"2026-06-04T00:00:00Z","Action":"output","Package":"github.com/example/math","Test":"TestSqrt","Output":"=== RUN   TestSqrt\n"}
+{"Time":"2026-06-04T00:00:00Z","Action":"output","Package":"github.com/example/math","Test":"TestSqrt","Output":"    math_test.go:58: sqrt(-1) = 0, want NaN\n"}
+{"Time":"2026-06-04T00:00:00Z","Action":"fail","Package":"github.com/example/math","Test":"TestSqrt","Elapsed":0}
+{"Time":"2026-06-04T00:00:00Z","Action":"fail","Package":"github.com/example/math","Elapsed":0.012}

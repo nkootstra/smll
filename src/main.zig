@@ -50,6 +50,10 @@ const go_test = @import("go_test");
 const docker_logs = @import("docker_logs");
 const npm_install = @import("npm_install");
 const build_compact = @import("build_compact");
+const gradle_compact = @import("gradle_compact");
+const maven_compact = @import("maven_compact");
+const precommit_compact = @import("precommit_compact");
+const package_tree = @import("package_tree");
 const generic_compact = @import("generic_compact");
 const setup = @import("setup.zig");
 const cat_compact = @import("cat_compact");
@@ -536,6 +540,36 @@ noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Writer, s
     stderr_writer.writeAll(stderr_slice) catch {};
 }
 
+const CountingWriter = struct {
+    out: *std.Io.Writer,
+    count: usize = 0,
+    writer: std.Io.Writer = .{
+        .buffer = &.{},
+        .vtable = &.{ .drain = drain },
+    },
+
+    fn init(out: *std.Io.Writer) CountingWriter {
+        return .{ .out = out };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *CountingWriter = @fieldParentPtr("writer", w);
+        var written: usize = 0;
+        for (data[0 .. data.len - 1]) |bytes| {
+            try self.out.writeAll(bytes);
+            written += bytes.len;
+        }
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            try self.out.writeAll(pattern);
+            written += pattern.len;
+        }
+        self.count += written;
+        w.end = 0;
+        return written;
+    }
+};
+
 /// Emit a hint to stdout when the wrapped child produced no stdout AND no
 /// stderr. Without a hint, agents commonly retry the command in a loop,
 /// mistaking the silence for a tool-side failure. The hint always includes
@@ -573,23 +607,28 @@ fn runWrapper(
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !WrapperResult {
-    // Capture filter output in a buffer to measure output bytes for stats.
+    // Capture compacted stdout separately; stderr is forwarded through a
+    // counting proxy so stats match the full agent-visible stream.
     var capture = std.Io.Writer.Allocating.init(allocator);
     defer capture.deinit();
+    var counted_stderr = CountingWriter.init(stderr_writer);
     last_output_inherited = false;
     last_raw_stdout = &.{};
     last_raw_stderr = &.{};
-    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
+    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, &counted_stderr.writer);
     const output = capture.written();
+
+    var final_stdout = std.Io.Writer.Allocating.init(allocator);
+    defer final_stdout.deinit();
 
     // When both captured stdout and stderr are empty, emit a contextual hint
     // so agents don't loop retrying the command. Streaming commands inherit
     // stdio directly, so their output bypasses this capture buffer and must
     // not get an extra hint appended.
     if (output.len == 0 and last_stderr_bytes == 0 and !last_output_inherited) {
-        try writeNoOutputHint(writer, argv, exit_code);
+        try writeNoOutputHint(&final_stdout.writer, argv, exit_code);
     } else {
-        try writer.writeAll(output);
+        try final_stdout.writer.writeAll(output);
     }
 
     // Tee recovery: on a failed wrapped command, persist the *raw* (pre-filter)
@@ -600,27 +639,34 @@ fn runWrapper(
     if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
         const home = environ.get("HOME") orelse "";
         if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
-            writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+            final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
         }
     }
 
-    // Input bytes = captured child stdout (before filtering). We approximate
-    // with the output bytes when the filter expands (rare) or report what we
-    // have. The actual input_bytes is stdout_slice.len inside runWrapperInner,
-    // but plumbing it out would require changing every return site. Instead,
-    // we track it via a module-level var that runWrapperInner sets.
+    const final_stdout_bytes = final_stdout.written().len;
+    try writer.writeAll(final_stdout.written());
+
+    // Input bytes are raw child stdout+stderr. Output bytes are compacted
+    // stdout plus any stderr smll forwarded, matching what an agent sees.
     return .{
         .exit_code = exit_code,
         .input_bytes = last_input_bytes,
-        .output_bytes = output.len,
+        .output_bytes = final_stdout_bytes + counted_stderr.count,
         .record_stats = !last_output_inherited,
     };
 }
 
-/// Set by runWrapperInner to communicate input bytes to runWrapper.
+/// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.
 var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
+/// Coarse dispatch label for `--explain` / `SMLL_DEBUG=1`. Each top-level
+/// command-family arm in runWrapperInner sets this before its filter runs;
+/// the default "passthrough" stands for head/tail, lossless mode, and any
+/// command that no bespoke arm claims. Granularity is intentionally
+/// command-family level for v1 — the in/out byte counts in the `--explain`
+/// footer already reveal whether compaction actually happened.
+var last_filter_name: []const u8 = "passthrough";
 /// Raw child streams stashed for the tee-recovery hook in `runWrapper`. The
 /// slices remain valid for the wrapper's lifetime (arena-owned) but only the
 /// outermost `runWrapper` call reads them, so module-level state is safe.
@@ -689,18 +735,16 @@ fn runWrapperInner(
     else
         outer_cmd;
 
-    var ls_env_old_lc_all: ?[]const u8 = null;
-    var ls_env_modified = false;
-    defer if (ls_env_modified) {
-        // Restore original LC_ALL (best-effort, single-threaded so safe).
-        @constCast(environ).put("LC_ALL", ls_env_old_lc_all orelse "") catch {};
-    };
+    var ls_env_map = std.process.Environ.Map.init(allocator);
+    var ls_env_map_active = false;
+    defer if (ls_env_map_active) ls_env_map.deinit();
     const spawn_env: ?*const std.process.Environ.Map = blk: {
         if (std.mem.eql(u8, cmd_basename, "ls")) {
-            ls_env_old_lc_all = environ.get("LC_ALL");
-            @constCast(environ).put("LC_ALL", "C") catch break :blk null;
-            ls_env_modified = true;
-            break :blk environ;
+            ls_env_map = environ.clone(allocator) catch break :blk null;
+            ls_env_map_active = true;
+            ls_env_map.put("LC_ALL", "C") catch break :blk null;
+            ls_env_map.put("LANG", "C") catch break :blk null;
+            break :blk &ls_env_map;
         }
         break :blk null;
     };
@@ -758,7 +802,7 @@ fn runWrapperInner(
     const stderr_slice = captured.stderr;
 
     // Record raw stream sizes for stats tracking and empty-output detection.
-    last_input_bytes = stdout_slice.len;
+    last_input_bytes = stdout_slice.len + stderr_slice.len;
     last_stderr_bytes = stderr_slice.len;
     last_raw_stdout = stdout_slice;
     last_raw_stderr = stderr_slice;
@@ -777,6 +821,7 @@ fn runWrapperInner(
 
     const has_arg1 = argv.len >= 2;
     const arg1 = if (has_arg1) argv[1] else "";
+    const arg2 = if (argv.len >= 3) argv[2] else "";
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
     // via dirname RLE. `find -ls` goes through find_compact instead
@@ -820,9 +865,25 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    // Package dependency tree wrappers. `bun pm ls` emits a nested dependency
+    // tree; default output keeps direct deps + transitive count so agents get
+    // dependency signal without the full nested tree.
+    if (std.mem.eql(u8, cmd_basename, "bun") and
+        std.mem.eql(u8, arg1, "pm") and
+        std.mem.eql(u8, arg2, "ls") and
+        !lossless and
+        package_tree.matches(stdout_slice))
+    {
+        package_tree.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            return 1;
+        };
+        return exit_code;
+    }
+
     // tree wrapper: requires box-drawing chars in the first few lines.
-    // `bun` emits tree output for `bun pm ls` — routed through tree first,
-    // falls through to columnar opt-in below if tree doesn't match.
+    // `bun` can emit other tree-shaped output; route it through tree when the
+    // package-tree filter above did not match.
     if (std.mem.eql(u8, cmd_basename, "tree") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
@@ -1057,6 +1118,42 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    if (eqAny(cmd_basename, &.{ "gradle", "gradlew" })) {
+        if (!lossless and (gradle_compact.matches(stdout_slice) or gradle_compact.matches(stderr_slice))) {
+            gradle_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "mvn", "mvnw" })) {
+        if (!lossless and (maven_compact.matches(stdout_slice) or maven_compact.matches(stderr_slice))) {
+            maven_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "pre-commit")) {
+        if (!lossless and (precommit_compact.matches(stdout_slice) or precommit_compact.matches(stderr_slice))) {
+            precommit_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
     if (std.mem.eql(u8, cmd_basename, "prettier")) {
         if (!lossless) {
             prettier_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
@@ -1070,7 +1167,9 @@ fn runWrapperInner(
     }
 
     if (eqAny(cmd_basename, &.{ "pip", "pip3" })) {
-        if (!lossless and eqAny(arg1, &.{ "list", "outdated" })) {
+        const is_pip_table = eqAny(arg1, &.{ "list", "outdated" });
+        const is_pip_install = eqAny(arg1, &.{ "install", "download", "wheel" });
+        if (!lossless and (is_pip_table or (is_pip_install and (pip_compact.matches(stdout_slice) or pip_compact.matches(stderr_slice))))) {
             pip_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;

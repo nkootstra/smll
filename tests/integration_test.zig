@@ -69,6 +69,7 @@ const docker_ps_fixture = @embedFile("fixture_docker_ps");
 const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
 const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
 const gh_run_list_fixture = @embedFile("fixture_gh_run_list");
+const ls_la_fixture = @embedFile("fixture_ls_la");
 // v0.9 smoke-test fixtures
 const jest_failing_fixture = @embedFile("fixture_jest_failing");
 const tsc_errors_fixture = @embedFile("fixture_tsc_errors");
@@ -783,6 +784,50 @@ test "wrapper: raw inherited output is not recorded as zero-byte stats" {
     try std.testing.expectEqualStrings("raw-body\n", wrapped.stdout);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
     try expectNoStatsFile(tmp.dir);
+}
+
+test "wrapper: stats record agent-visible stdout and stderr bytes" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "noisy",
+        \\#!/bin/sh
+        \\printf 'stdout\n'
+        \\printf 'stderr!\n' >&2
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "0");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "noisy" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("stdout\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("stderr!\n", wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+
+    const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(1024));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"input_bytes\":15") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"output_bytes\":15") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"noisy\":{\"n\":1,\"in\":15,\"out\":15}") != null);
 }
 
 test "wrapper: large stderr does not deadlock while stdout is still open" {
@@ -1808,6 +1853,25 @@ test "broken pipe mid-stream returns non-zero exit without panic" {
 // Columnar filter dispatch (default-lossy; SMLL_LOSSLESS=1 opts out)
 // ---------------------------------------------------------------------------
 
+test "wrapper: ls -la fixture compacts without crashing" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "ls", ls_la_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "ls", "-la" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < ls_la_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "filters/") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "main.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "pipeline.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "nielskootstra") == null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
 fn runSmllWrapperEnv(
     allocator: std.mem.Allocator,
     bin_dir: []const u8,
@@ -2255,10 +2319,12 @@ test "smoke: npm install keeps WARN + summary, drops notice (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < npm_install_fixture.len);
-    // Deprecation warnings + install summary survive.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "npm WARN deprecated lodash.isequal") != null);
+    // Deprecation summary + install/audit summary survive.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "deprecated x5: lodash.isequal, rimraf, inflight, glob, querystring") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "added 847 packages") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "run `npm audit` for details") != null);
     // Upgrade-nag "npm notice" + funding prompts drop.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "npm WARN deprecated") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "npm notice") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "looking for funding") == null);
 }
@@ -2793,6 +2859,36 @@ test "smoke: dotnet test keeps failure summary" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "Failed: 1") != null);
 }
 
+const dotnet_xunit_failure_fixture =
+    "  Determining projects to restore...\n" ++
+    "Starting test execution, please wait...\n" ++
+    "[xUnit.net 00:00:00.11]     MyApp.Tests.CalculatorTests.Subtract [FAIL]\n" ++
+    "  Failed MyApp.Tests.CalculatorTests.Subtract [4 ms]\n" ++
+    "  Error Message:\n" ++
+    "   Assert.Equal() Failure: Values differ\n" ++
+    "Expected: 2\n" ++
+    "Actual:   3\n" ++
+    "  Stack Trace:\n" ++
+    "     at MyApp.Tests.CalculatorTests.Subtract() in /home/user/MyApp/tests/CalculatorTests.cs:line 8\n" ++
+    "Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 13 ms - MyApp.dll (net8.0)\n";
+
+test "smoke: dotnet test keeps xunit failure detail" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "dotnet", dotnet_xunit_failure_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "dotnet", "test" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "CalculatorTests.Subtract") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Assert.Equal") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Failed:     1") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Starting test execution") == null);
+}
+
 const gh_fixture = "noise\n✓ build passed\nhttps://github.com/o/r/pull/1\n";
 
 const gh_pr_checks_fixture =
@@ -2925,7 +3021,7 @@ test "smoke: pnpm keeps package warnings and summary" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expectEqualStrings("WARN deprecated left-pad\nadded 12 packages\n", result.stdout);
+    try std.testing.expectEqualStrings("deprecated x1: left-pad\nadded 12 packages\n", result.stdout);
 }
 
 test "smoke: bun keeps package warnings and summary" {
@@ -2939,7 +3035,7 @@ test "smoke: bun keeps package warnings and summary" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expectEqualStrings("WARN deprecated left-pad\nadded 12 packages\n", result.stdout);
+    try std.testing.expectEqualStrings("deprecated x1: left-pad\nadded 12 packages\n", result.stdout);
 }
 
 test "smoke: uv keeps package errors" {
@@ -2955,6 +3051,29 @@ test "smoke: uv keeps package errors" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Resolved 3 packages") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "error: failed to resolve") != null);
+}
+
+const uv_pip_install_fixture =
+    "  Downloading requests-2.31.0-py3-none-any.whl (62.6 kB)\n" ++
+    "  Preparing packages...\n" ++
+    "Installed 5 packages in 23ms\n" ++
+    " + certifi==2023.11.17\n" ++
+    " + requests==2.31.0\n";
+
+test "smoke: uv pip install keeps installed package lines" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "uv", uv_pip_install_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "uv", "pip", "install", "-r", "requirements.txt" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Installed 5 packages") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "requests==2.31.0") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Preparing packages") == null);
 }
 
 test "smoke: uvx keeps package errors" {
@@ -3068,11 +3187,11 @@ test "smoke: curl -v drops TLS chatter, keeps headers + body (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // Kept
-    try std.testing.expect(std.mem.find(u8, result.stdout, "< HTTP/2 200") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "> GET / HTTP/2") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "curl GET example.com/ -> HTTP/2 200") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Example Domain") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "> GET / HTTP/2") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---") == null);
     // Dropped
     try std.testing.expect(std.mem.find(u8, result.stdout, "TLSv1.3") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
@@ -3096,9 +3215,9 @@ test "smoke: curl large -vvv fixture strips verbose noise but preserves body" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "BEGIN CERTIFICATE") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "MIIFaz") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "subject:") == null);
-    // First 5 requests show full status; rest are summarized.
-    const int_status_count = std.mem.count(u8, result.stdout, "< HTTP/2 200");
-    try std.testing.expect(int_status_count >= 1 and int_status_count <= 5);
+    // Repeated same-status requests collapse to one readable trace summary.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "curl 30 GET api.example.com/v1/resources/1../v1/resources/30 -> HTTP/2 200 x30 application/json") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "< HTTP/2 200") == null);
 }
 
 test "smoke: curl -v preserves response bodies larger than default capture cap" {
@@ -3119,7 +3238,8 @@ test "smoke: curl -v preserves response bodies larger than default capture cap" 
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len > 17 * 1024 * 1024);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "curl GET /huge -> HTTP/1.1 200 OK") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "--- body ---\n") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "64M+") == null);
 }
 

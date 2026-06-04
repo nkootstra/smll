@@ -40,6 +40,14 @@ fn shouldKeep(line: []const u8) bool {
     if (containsIgnoreCase(trimmed, "restore failed")) return true;
     if (containsIgnoreCase(trimmed, "restore succeeded")) return true;
     if (containsIgnoreCase(trimmed, "test run failed")) return true;
+    if (std.mem.startsWith(u8, trimmed, "[xUnit.net ") and std.mem.indexOf(u8, trimmed, "[FAIL]") != null) return true;
+    if (std.mem.startsWith(u8, trimmed, "Failed ")) return true;
+    if (containsIgnoreCase(trimmed, "error message:")) return true;
+    if (std.mem.indexOf(u8, trimmed, "Assert.") != null) return true;
+    if (std.mem.startsWith(u8, trimmed, "Expected:")) return true;
+    if (std.mem.startsWith(u8, trimmed, "Actual:")) return true;
+    if (containsIgnoreCase(trimmed, "stack trace:")) return true;
+    if (std.mem.startsWith(u8, trimmed, "at ") and std.mem.indexOf(u8, trimmed, ".cs:line ") != null) return true;
     if (containsIgnoreCase(trimmed, "failed!")) return true;
     if (containsIgnoreCase(trimmed, "passed!")) return true;
     if (containsIgnoreCase(trimmed, "failed:")) return true;
@@ -85,6 +93,30 @@ test "test failure summary is preserved" {
     try apply(std.testing.allocator, input, "", &out.writer);
     try std.testing.expect(std.mem.find(u8, out.written(), "Test run failed") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "Failed: 1") != null);
+}
+
+test "xunit failure detail is preserved" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    const input =
+        "Starting test execution, please wait...\n" ++
+        "[xUnit.net 00:00:00.11]     MyApp.Tests.CalculatorTests.Subtract [FAIL]\n" ++
+        "  Failed MyApp.Tests.CalculatorTests.Subtract [4 ms]\n" ++
+        "  Error Message:\n" ++
+        "   Assert.Equal() Failure: Values differ\n" ++
+        "Expected: 2\n" ++
+        "Actual:   3\n" ++
+        "  Stack Trace:\n" ++
+        "     at MyApp.Tests.CalculatorTests.Subtract() in /home/user/MyApp/tests/CalculatorTests.cs:line 8\n" ++
+        "Failed!  - Failed:     1, Passed:     0, Skipped:     0, Total:     1, Duration: 13 ms - MyApp.dll (net8.0)\n";
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "CalculatorTests.Subtract") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Assert.Equal") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Expected: 2") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Actual:   3") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Failed:     1") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Starting test execution") == null);
 }
 
 test "test pass summary is preserved" {

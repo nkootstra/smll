@@ -21,11 +21,14 @@ const Writer = std.Io.Writer;
 //   • Drop PEM-encoded certificate blocks (`-----BEGIN CERTIFICATE-----`
 //     through `-----END CERTIFICATE-----`, inclusive).
 //
-// Output shape (when stdout is non-empty):
-//   --- headers ---
-//   <filtered stderr>
-//   --- body ---
+// Output shape (when stdout is non-empty and the trace has one request, or a
+// repeated same-status request batch):
+//   curl GET example.com/ -> HTTP/2 200 text/html len=1256
+//   curl 30 GET api.example.com /v1/a/1../v1/a/30 -> HTTP/2 200 x30 application/json
 //   <stdout verbatim>
+//
+// Redirect chains or mixed-status batches fall back to the filtered trace so
+// every status/location remains visible.
 //
 // When stdout is empty, only the filtered stderr block is emitted (no
 // `--- body ---` separator).
@@ -97,6 +100,13 @@ pub fn apply(
 
     const has_stderr_content = stderr.len > 0 and matches(stderr);
     if (has_stderr_content) {
+        if (stdout.len > 0) {
+            if (summarizeRequests(stderr)) |summary| {
+                try writeCurlSummary(writer, summary);
+                try writer.writeAll(stdout);
+                return;
+            }
+        }
         if (stdout.len > 0) try writer.writeAll("--- headers ---\n");
         try emitFilteredStderr(writer, stderr);
     }
@@ -108,6 +118,151 @@ pub fn apply(
         // preserve stdout byte-for-byte.
         try writer.writeAll(stdout);
     }
+}
+
+const CurlSummary = struct {
+    method: []const u8 = "",
+    path: []const u8 = "",
+    host: []const u8 = "",
+    status: []const u8 = "",
+    content_type: []const u8 = "",
+    content_length: []const u8 = "",
+    last_path: []const u8 = "",
+    request_count: usize = 0,
+};
+
+fn summarizeRequests(stderr: []const u8) ?CurlSummary {
+    var summary: CurlSummary = .{};
+    var request_count: usize = 0;
+    var status_count: usize = 0;
+    var same_status = true;
+    var location_count: usize = 0;
+
+    var lines = std.mem.splitScalar(u8, stderr, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len < 3) continue;
+
+        if (std.mem.startsWith(u8, line, "> ")) {
+            const after = line[2..];
+            if (parseRequestLine(after)) |request| {
+                request_count += 1;
+                if (request_count == 1) {
+                    summary.method = request.method;
+                    summary.path = request.path;
+                }
+                summary.last_path = request.path;
+                continue;
+            }
+            if (startsWithHeader(line, "> Host:")) {
+                if (summary.host.len == 0) {
+                    summary.host = std.mem.trim(u8, line["> Host:".len..], " \t\r");
+                }
+            }
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, line, "< HTTP/")) {
+            status_count += 1;
+            const status = line[2..];
+            if (status_count == 1) {
+                summary.status = status;
+            } else if (!std.mem.eql(u8, status, summary.status)) {
+                same_status = false;
+            }
+            continue;
+        }
+        if (startsWithHeader(line, "< location:")) {
+            location_count += 1;
+            continue;
+        }
+        if (startsWithHeader(line, "< content-type:")) {
+            if (summary.content_type.len == 0) {
+                summary.content_type = compactContentType(line["< content-type:".len..]);
+            }
+            continue;
+        }
+        if (startsWithHeader(line, "< content-length:")) {
+            if (summary.content_length.len == 0) {
+                summary.content_length = std.mem.trim(u8, line["< content-length:".len..], " \t\r");
+            }
+            continue;
+        }
+    }
+
+    if (request_count == 0 or status_count == 0 or summary.status.len == 0) return null;
+    if (location_count > 0) return null;
+    if (request_count == 1 and status_count != 1) return null;
+    if (request_count > 1 and (status_count != request_count or !same_status)) return null;
+    summary.request_count = request_count;
+    return summary;
+}
+
+const ParsedRequest = struct {
+    method: []const u8,
+    path: []const u8,
+};
+
+fn parseRequestLine(line: []const u8) ?ParsedRequest {
+    var it = std.mem.tokenizeScalar(u8, line, ' ');
+    const method = it.next() orelse return null;
+    for (method) |c| {
+        if (c < 'A' or c > 'Z') return null;
+    }
+    const path = it.next() orelse return null;
+    const proto = it.next() orelse return null;
+    if (!std.mem.startsWith(u8, proto, "HTTP/")) return null;
+    return .{ .method = method, .path = path };
+}
+
+fn startsWithHeader(line: []const u8, prefix: []const u8) bool {
+    if (line.len < prefix.len) return false;
+    return std.ascii.eqlIgnoreCase(line[0..prefix.len], prefix);
+}
+
+fn compactContentType(value: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t\r");
+    const end = std.mem.indexOfAny(u8, trimmed, " ;\t\r") orelse trimmed.len;
+    return trimmed[0..end];
+}
+
+fn writeCurlSummary(writer: *Writer, summary: CurlSummary) !void {
+    try writer.writeAll("curl");
+    if (summary.request_count > 1) {
+        try writer.writeByte(' ');
+        try ansi.writeDecimal(writer, summary.request_count);
+    }
+    if (summary.method.len > 0) {
+        try writer.writeByte(' ');
+        try writer.writeAll(summary.method);
+    }
+    try writer.writeByte(' ');
+    if (summary.host.len > 0) try writer.writeAll(summary.host);
+    if (summary.path.len > 0) {
+        if (summary.host.len > 0 and summary.path[0] != '/') try writer.writeByte(' ');
+        try writer.writeAll(summary.path);
+    }
+    if (summary.request_count > 1 and summary.last_path.len > 0 and
+        !std.mem.eql(u8, summary.path, summary.last_path))
+    {
+        try writer.writeAll("..");
+        try writer.writeAll(summary.last_path);
+    }
+    try writer.writeAll(" -> ");
+    try writer.writeAll(summary.status);
+    if (summary.request_count > 1) {
+        try writer.writeAll(" x");
+        try ansi.writeDecimal(writer, summary.request_count);
+    }
+    if (summary.content_type.len > 0) {
+        try writer.writeByte(' ');
+        try writer.writeAll(summary.content_type);
+    }
+    if (summary.request_count == 1 and summary.content_length.len > 0) {
+        try writer.writeAll(" len=");
+        try writer.writeAll(summary.content_length);
+    }
+    try writer.writeByte('\n');
 }
 
 fn emitFilteredStderr(writer: *Writer, stderr: []const u8) !void {
@@ -275,7 +430,7 @@ test "hasVerboseFlag: detects short/long/clustered forms" {
     try std.testing.expect(!hasVerboseFlag(&.{ "curl", "--foo=vbar" }));
 }
 
-test "apply: keeps status line, headers, body; drops TLS chatter" {
+test "apply: summarizes one request, keeps body, drops TLS chatter" {
     const stderr =
         "*   Trying 1.2.3.4:443...\n" ++
         "* Connected to example.com (1.2.3.4) port 443\n" ++
@@ -290,7 +445,7 @@ test "apply: keeps status line, headers, body; drops TLS chatter" {
         "> Host: example.com\n" ++
         "> User-Agent: curl/8.0\n" ++
         "< HTTP/2 200\n" ++
-        "< content-type: text/html\n" ++
+        "< content-type: text/html; charset=utf-8\n" ++
         "< content-length: 1256\n" ++
         "* Connection #0 to host example.com left intact\n";
     const stdout = "<html>body</html>\n";
@@ -299,14 +454,14 @@ test "apply: keeps status line, headers, body; drops TLS chatter" {
     try apply(std.testing.allocator, stdout, stderr, &out.writer);
     const got = out.written();
     // Kept
-    try std.testing.expect(std.mem.find(u8, got, "* Connected to example.com") != null);
-    try std.testing.expect(std.mem.find(u8, got, "> GET / HTTP/2") != null);
-    try std.testing.expect(std.mem.find(u8, got, "< HTTP/2 200") != null);
-    try std.testing.expect(std.mem.find(u8, got, "< content-type: text/html") != null);
+    try std.testing.expect(std.mem.find(u8, got, "curl GET example.com/ -> HTTP/2 200 text/html len=1256") != null);
     try std.testing.expect(std.mem.find(u8, got, "<html>body</html>") != null);
-    try std.testing.expect(std.mem.find(u8, got, "--- headers ---") != null);
-    try std.testing.expect(std.mem.find(u8, got, "--- body ---") != null);
+    try std.testing.expect(std.mem.find(u8, got, "charset=utf-8") == null);
     // Dropped
+    try std.testing.expect(std.mem.find(u8, got, "* Connected to example.com") == null);
+    try std.testing.expect(std.mem.find(u8, got, "> GET / HTTP/2") == null);
+    try std.testing.expect(std.mem.find(u8, got, "--- headers ---") == null);
+    try std.testing.expect(std.mem.find(u8, got, "--- body ---") == null);
     try std.testing.expect(std.mem.find(u8, got, "TLSv1.3") == null);
     try std.testing.expect(std.mem.find(u8, got, "subject:") == null);
     try std.testing.expect(std.mem.find(u8, got, "issuer:") == null);
@@ -353,6 +508,34 @@ test "apply: redirect chain preserved" {
     try std.testing.expect(std.mem.find(u8, got, "302 Found") != null);
     try std.testing.expect(std.mem.find(u8, got, "200 OK") != null);
     try std.testing.expect(std.mem.count(u8, got, "< HTTP/1.1") == 3);
+}
+
+test "apply: repeated same-status requests summarize to one trace line" {
+    const stderr =
+        "> GET /v1/resources/1 HTTP/2\n" ++
+        "> Host: api.example.com\n" ++
+        "< HTTP/2 200\n" ++
+        "< content-type: application/json\n" ++
+        "< content-length: 128\n" ++
+        "> GET /v1/resources/2 HTTP/2\n" ++
+        "< HTTP/2 200\n" ++
+        "< content-type: application/json\n" ++
+        "> GET /v1/resources/3 HTTP/2\n" ++
+        "< HTTP/2 200\n" ++
+        "< content-type: application/json\n";
+    const stdout =
+        "{\"id\":1}\n" ++
+        "{\"id\":2}\n" ++
+        "{\"id\":3}\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, stdout, stderr, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "curl 3 GET api.example.com/v1/resources/1../v1/resources/3 -> HTTP/2 200 x3 application/json") != null);
+    try std.testing.expect(std.mem.find(u8, got, "{\"id\":3}") != null);
+    try std.testing.expect(std.mem.find(u8, got, "--- headers ---") == null);
+    try std.testing.expect(std.mem.count(u8, got, "HTTP/2 200") == 1);
+    try std.testing.expect(std.mem.find(u8, got, "< HTTP/2 200") == null);
 }
 
 test "apply: empty stderr with body emits body only" {

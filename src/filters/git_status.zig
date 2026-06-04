@@ -23,8 +23,9 @@ const Writer = std.Io.Writer;
 //
 // All section headers ("Changes to be committed:", etc.), hint lines
 // ("  (use "git add ...""), and the trailing summary line are dropped.
-// Every path is preserved verbatim. Branch name and ahead/behind counts
-// are preserved. Output is ≤ 80% of raw git output on fixtures ≥ 50 B.
+// Branch name and ahead/behind counts are preserved. Every ordinary path is
+// preserved verbatim; long sequential numeric runs in one directory are
+// summarized as an explicit first..last range.
 
 pub fn matches(input: []const u8) bool {
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -52,6 +53,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 }
 
 const DIR_GROUP_THRESHOLD: usize = 3;
+const NUMERIC_RANGE_THRESHOLD: usize = 6;
 
 /// Single-pass streaming apply: parses input lines, formats sigil output,
 /// and groups consecutive same-dir entries on the fly without buffering.
@@ -170,6 +172,11 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
                         run_sections[run_len] = section;
                         run_contents[run_len] = content;
                         run_len += 1;
+                    } else {
+                        try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+                        run_sections[0] = section;
+                        run_contents[0] = content;
+                        run_len = 1;
                     }
                 } else {
                     // Flush previous run, start new one
@@ -254,10 +261,14 @@ fn parentDir(path: []const u8) []const u8 {
 
 /// Extract the file path from a status content line like "new file:   src/foo.rs".
 fn extractPath(content: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, content, "deleted by them:")) {
+        return std.mem.trimStart(u8, content["deleted by them:".len..], " ");
+    }
     const prefixes = [_][]const u8{
         "modified:   ",      "new file:   ",      "deleted:    ",
         "renamed:    ",      "copied:     ",      "typechange: ",
-        "both modified:   ", "both added:      ",
+        "both modified:   ", "both added:      ", "added by us:    ",
+        "added by them:  ",  "deleted by us:  ",
     };
     for (prefixes) |p| {
         if (std.mem.startsWith(u8, content, p)) return content[p.len..];
@@ -267,6 +278,7 @@ fn extractPath(content: []const u8) []const u8 {
 
 fn flushRun(writer: *Writer, sections: []const Section, contents: []const []const u8, sigil: u8, dir: []const u8) !void {
     if (sections.len == 0) return;
+    if (try writeNumericRangeGroup(writer, contents, sigil, dir)) return;
     if (sections.len >= DIR_GROUP_THRESHOLD and dir.len > 0) {
         // Dirname-prefix RLE: emit first entry fully, then subsequent
         // entries without the shared directory prefix so agents can
@@ -279,7 +291,8 @@ fn flushRun(writer: *Writer, sections: []const Section, contents: []const []cons
                 const path = extractPath(content);
                 if (path.len > dir.len and std.mem.startsWith(u8, path, dir)) {
                     if (sigil == 'U') {
-                        writer.writeAll("UU ") catch {};
+                        writer.writeAll(unmergedCode(content)) catch {};
+                        writer.writeByte(' ') catch {};
                     } else {
                         writer.writeByte(sigil) catch {};
                         writer.writeByte(' ') catch {};
@@ -296,6 +309,84 @@ fn flushRun(writer: *Writer, sections: []const Section, contents: []const []cons
             writeSectionEntry(writer, sec, content) catch {};
         }
     }
+}
+
+const NumericBasename = struct {
+    basename: []const u8,
+    prefix: []const u8,
+    suffix: []const u8,
+    value: usize,
+};
+
+fn writeNumericRangeGroup(writer: *Writer, contents: []const []const u8, sigil: u8, dir: []const u8) !bool {
+    if (contents.len < NUMERIC_RANGE_THRESHOLD or dir.len == 0) return false;
+
+    const first_path = extractPath(contents[0]);
+    const first = parseNumericBasename(first_path, dir) orelse return false;
+    const first_unmerged_code = if (sigil == 'U') unmergedCode(contents[0]) else "";
+    var last = first;
+
+    for (contents[1..], 1..) |content, i| {
+        const path = extractPath(content);
+        const parsed = parseNumericBasename(path, dir) orelse return false;
+        if (!std.mem.eql(u8, parsed.prefix, first.prefix)) return false;
+        if (!std.mem.eql(u8, parsed.suffix, first.suffix)) return false;
+        const expected = std.math.add(usize, first.value, i) catch return false;
+        if (parsed.value != expected) return false;
+        if (sigil == 'U' and !std.mem.eql(u8, unmergedCode(content), first_unmerged_code)) return false;
+        last = parsed;
+    }
+
+    if (sigil == 'U') {
+        try writer.writeAll(first_unmerged_code);
+        try writer.writeByte(' ');
+    } else {
+        try writer.writeByte(sigil);
+        try writer.writeByte(' ');
+    }
+    try writer.writeAll(dir);
+    try writer.writeAll(first.basename);
+    try writer.writeAll("..");
+    try writer.writeAll(last.basename);
+    try writer.writeByte('\n');
+    return true;
+}
+
+fn parseNumericBasename(path: []const u8, dir: []const u8) ?NumericBasename {
+    if (!std.mem.startsWith(u8, path, dir) or path.len <= dir.len) return null;
+    const basename = path[dir.len..];
+
+    var digit_end: ?usize = null;
+    var i = basename.len;
+    while (i > 0) {
+        i -= 1;
+        if (std.ascii.isDigit(basename[i])) {
+            digit_end = i + 1;
+            break;
+        }
+    }
+    const end = digit_end orelse return null;
+
+    var start = end;
+    while (start > 0 and std.ascii.isDigit(basename[start - 1])) : (start -= 1) {}
+    if (start == end) return null;
+
+    const value = std.fmt.parseUnsigned(usize, basename[start..end], 10) catch return null;
+    return .{
+        .basename = basename,
+        .prefix = basename[0..start],
+        .suffix = basename[end..],
+        .value = value,
+    };
+}
+
+fn unmergedCode(content: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, content, "both modified:   ")) return "UU";
+    if (std.mem.startsWith(u8, content, "added by us:    ")) return "AU";
+    if (std.mem.startsWith(u8, content, "added by them:  ")) return "UA";
+    if (std.mem.startsWith(u8, content, "deleted by us:  ")) return "DU";
+    if (std.mem.startsWith(u8, content, "deleted by them:")) return "UD";
+    return "UU";
 }
 
 fn writeSectionEntry(writer: *Writer, section: Section, content: []const u8) !void {
@@ -654,6 +745,80 @@ test "apply: staged-new-file uses A sigil" {
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
     try std.testing.expect(std.mem.find(u8, out, "A src/new_module.zig\n") != null);
+}
+
+test "apply: sequential numeric paths compact to an explicit range" {
+    const allocator = std.testing.allocator;
+    const input =
+        "On branch feat\n" ++
+        "Changes to be committed:\n" ++
+        "\tnew file:   src/components/comp_01.rs\n" ++
+        "\tnew file:   src/components/comp_02.rs\n" ++
+        "\tnew file:   src/components/comp_03.rs\n" ++
+        "\tnew file:   src/components/comp_04.rs\n" ++
+        "\tnew file:   src/components/comp_05.rs\n" ++
+        "\tnew file:   src/components/comp_06.rs\n" ++
+        "\tnew file:   src/components/comp_07.rs\n" ++
+        "\tnew file:   src/components/comp_08.rs\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "# feat\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "A src/components/comp_01.rs..comp_08.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "comp_02.rs\n") == null);
+}
+
+test "apply: unmerged numeric range preserves conflict type" {
+    const allocator = std.testing.allocator;
+    const input =
+        "On branch feat\n" ++
+        "You have unmerged paths.\n" ++
+        "  (fix conflicts and run \"git commit\")\n" ++
+        "\n" ++
+        "Unmerged paths:\n" ++
+        "\tadded by us:    generated/conflict_01.rs\n" ++
+        "\tadded by us:    generated/conflict_02.rs\n" ++
+        "\tadded by us:    generated/conflict_03.rs\n" ++
+        "\tadded by us:    generated/conflict_04.rs\n" ++
+        "\tadded by us:    generated/conflict_05.rs\n" ++
+        "\tadded by us:    generated/conflict_06.rs\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "AU generated/conflict_01.rs..conflict_06.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "UU generated/conflict_01.rs..conflict_06.rs\n") == null);
+}
+
+test "apply: unmerged dirname grouping preserves conflict type" {
+    const allocator = std.testing.allocator;
+    const input =
+        "On branch feat\n" ++
+        "You have unmerged paths.\n" ++
+        "\n" ++
+        "Unmerged paths:\n" ++
+        "\tdeleted by them: generated/alpha.rs\n" ++
+        "\tdeleted by them: generated/beta.rs\n" ++
+        "\tdeleted by them: generated/gamma.rs\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "UD generated/alpha.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "UD beta.rs\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "UU beta.rs\n") == null);
+}
+
+test "apply: numeric range sequence overflow falls back" {
+    const allocator = std.testing.allocator;
+    const input =
+        "On branch feat\n" ++
+        "Changes to be committed:\n" ++
+        "\tnew file:   generated/file_18446744073709551612.rs\n" ++
+        "\tnew file:   generated/file_18446744073709551613.rs\n" ++
+        "\tnew file:   generated/file_18446744073709551614.rs\n" ++
+        "\tnew file:   generated/file_18446744073709551615.rs\n" ++
+        "\tnew file:   generated/file_0.rs\n" ++
+        "\tnew file:   generated/file_1.rs\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "generated/file_18446744073709551612.rs..") == null);
+    try std.testing.expect(std.mem.find(u8, out, "A generated/file_18446744073709551612.rs\n") != null);
 }
 
 test "apply: ahead/behind counts preserved" {

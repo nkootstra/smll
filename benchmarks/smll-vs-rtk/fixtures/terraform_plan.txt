@@ -1,0 +1,12 @@
+Acquiring state lock. This may take a few moments...
+Refreshing state... [id=vpc-abc]
+Refreshing state... [id=sg-123]
+Releasing state lock. This may take a few moments...
+
+Terraform will perform the following actions:
+
+  # aws_instance.web will be created
+  + resource "aws_instance" "web" {}
+
+Plan: 1 to add, 0 to change, 0 to destroy.
+

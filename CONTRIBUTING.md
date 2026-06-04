@@ -84,10 +84,22 @@ remain green.
 ```sh
 scripts/measure.sh           # latency + compression ratio per fixture
 scripts/generate_large_fixtures.sh   # regenerate large fixtures
+scripts/compare-rtk-container.sh     # Dockerized default agent-profile comparison vs rtk
+scripts/compare-rtk-container.sh --profile rtk     # rtk-suite-inspired cases only
+scripts/compare-rtk-container.sh --profile stress  # oversized coverage-gap probes
+scripts/compare-rtk-container.sh --profile all     # every committed case
 ```
 
 The large fixtures are committed and reproducible; regenerate them only
 when adding a new one.
+
+The rtk comparison is intentionally container-first so contributors do not need
+rtk, Rust, Zig, or tokenizer packages installed locally. It pins rtk to
+`v0.42.1` by default; set `RTK_REF=<tag-or-sha>` to compare another revision.
+The default `agent` profile focuses on commands agent harnesses commonly run;
+the `rtk` profile tracks cases inspired by rtk's own filter/test surface; and
+`stress` keeps very large pass-through probes out of the default headline.
+For local development, use `RTK_BIN=/path/to/rtk python3 scripts/compare-rtk.py`.
 
 ## Adding a filter
 

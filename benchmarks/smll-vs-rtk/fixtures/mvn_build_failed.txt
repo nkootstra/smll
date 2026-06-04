@@ -1,0 +1,10 @@
+[INFO] ---
+[INFO] Building myapp 1.0-SNAPSHOT
+[INFO] Downloading org.apache.maven.plugins:maven-compiler-plugin:3.11.0
+[INFO] Downloaded org.apache.maven.plugins:maven-compiler-plugin:3.11.0
+[INFO]
+[ERROR] /src/main/java/Main.java:[10,5] cannot find symbol
+  symbol: method foo()
+[INFO] BUILD FAILURE
+[INFO] Total time: 2.543 s
+
