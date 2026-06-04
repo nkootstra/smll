@@ -46,6 +46,37 @@ const Section = enum {
     unmerged,
 };
 
+const StatusEntry = struct {
+    code: []const u8,
+    path: []const u8,
+};
+
+const StatusPrefix = struct {
+    prefix: []const u8,
+    code: []const u8,
+    trim_path_start: bool = false,
+};
+
+const staged_prefixes = [_]StatusPrefix{
+    .{ .prefix = "modified:   ", .code = "S" },
+    .{ .prefix = "new file:   ", .code = "A" },
+    .{ .prefix = "deleted:    ", .code = "D" },
+    .{ .prefix = "renamed:    ", .code = "R" },
+};
+
+const unstaged_prefixes = [_]StatusPrefix{
+    .{ .prefix = "modified:   ", .code = "M" },
+    .{ .prefix = "deleted:    ", .code = "d" },
+};
+
+const unmerged_prefixes = [_]StatusPrefix{
+    .{ .prefix = "both modified:   ", .code = "UU" },
+    .{ .prefix = "added by us:    ", .code = "AU" },
+    .{ .prefix = "added by them:  ", .code = "UA" },
+    .{ .prefix = "deleted by us:  ", .code = "DU" },
+    .{ .prefix = "deleted by them:", .code = "UD", .trim_path_start = true },
+};
+
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
@@ -68,12 +99,11 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
     var ahead: ?[]const u8 = null;
     var behind: ?[]const u8 = null;
 
-    // Streaming directory grouping state
-    var run_sigil: u8 = 0;
+    // Streaming directory grouping state.
+    var run_key: []const u8 = "";
     var run_dir: []const u8 = "";
-    // Store pointers to sigil lines (they point into per-line stack buffers,
-    // so we re-derive them). Instead, store the original content lines and
-    // section to replay formatting.
+    // Store original content lines and sections; formatting is re-derived from
+    // the status-entry table when the run flushes.
     var run_sections: [64]Section = undefined;
     var run_contents: [64][]const u8 = undefined;
     var run_len: usize = 0;
@@ -159,12 +189,23 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
             }
 
             const content = line[1..];
-            const sigil = sigilFor(section, content);
-            const path = pathFor(section, content);
+            const entry = entryFor(section, content);
 
-            if (sigil != 0 and path.len > 0) {
-                const dir = parentDir(path);
-                if (dir.len > 0 and run_len > 0 and sigil == run_sigil and
+            if (entry) |e| {
+                if (e.path.len == 0) {
+                    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
+                    run_len = 0;
+                    run_key = "";
+                    writeSectionEntry(writer, section, content) catch {
+                        try writer.writeAll(line);
+                        try writer.writeByte('\n');
+                    };
+                    continue;
+                }
+
+                const dir = parentDir(e.path);
+                const key = groupKey(section, e.code);
+                if (dir.len > 0 and run_len > 0 and std.mem.eql(u8, key, run_key) and
                     std.mem.eql(u8, dir, run_dir))
                 {
                     // Extend current run
@@ -173,24 +214,24 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
                         run_contents[run_len] = content;
                         run_len += 1;
                     } else {
-                        try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+                        try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
                         run_sections[0] = section;
                         run_contents[0] = content;
                         run_len = 1;
                     }
                 } else {
                     // Flush previous run, start new one
-                    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+                    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
                     run_sections[0] = section;
                     run_contents[0] = content;
                     run_len = 1;
-                    run_sigil = sigil;
+                    run_key = key;
                     run_dir = if (dir.len > 0) dir else "";
                 }
             } else {
-                try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+                try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
                 run_len = 0;
-                run_sigil = 0;
+                run_key = "";
                 writeSectionEntry(writer, section, content) catch {
                     try writer.writeAll(line);
                     try writer.writeByte('\n');
@@ -200,56 +241,46 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
         }
 
         if (branch_written) {
-            try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+            try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
             run_len = 0;
-            run_sigil = 0;
+            run_key = "";
             try writer.writeAll(line);
             try writer.writeByte('\n');
         }
     }
 
-    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_sigil, run_dir);
+    try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
 
     if (!branch_written and branch_len > 0) {
         try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
     }
 }
 
-fn sigilFor(section: Section, content: []const u8) u8 {
+fn entryFor(section: Section, content: []const u8) ?StatusEntry {
     return switch (section) {
-        .staged => if (std.mem.startsWith(u8, content, "new file:")) 'A' else if (std.mem.startsWith(u8, content, "deleted:")) 'D' else if (std.mem.startsWith(u8, content, "renamed:")) 'R' else 'S',
-        .unstaged => if (std.mem.startsWith(u8, content, "deleted:")) 'd' else 'M',
-        .untracked => '?',
-        .unmerged => 'U',
-        .none => 0,
+        .staged => entryFromPrefixes(content, staged_prefixes[0..], "S"),
+        .unstaged => entryFromPrefixes(content, unstaged_prefixes[0..], "M"),
+        .untracked => .{ .code = "?", .path = content },
+        .unmerged => entryFromPrefixes(content, unmerged_prefixes[0..], "UU"),
+        .none => null,
     };
 }
 
-fn pathFor(section: Section, content: []const u8) []const u8 {
-    return switch (section) {
-        .staged => {
-            if (std.mem.startsWith(u8, content, "modified:   ")) return content["modified:   ".len..];
-            if (std.mem.startsWith(u8, content, "new file:   ")) return content["new file:   ".len..];
-            if (std.mem.startsWith(u8, content, "deleted:    ")) return content["deleted:    ".len..];
-            if (std.mem.startsWith(u8, content, "renamed:    ")) return content["renamed:    ".len..];
-            return content;
-        },
-        .unstaged => {
-            if (std.mem.startsWith(u8, content, "modified:   ")) return content["modified:   ".len..];
-            if (std.mem.startsWith(u8, content, "deleted:    ")) return content["deleted:    ".len..];
-            return content;
-        },
-        .untracked => content,
-        .unmerged => {
-            if (std.mem.startsWith(u8, content, "both modified:   ")) return content["both modified:   ".len..];
-            if (std.mem.startsWith(u8, content, "added by us:    ")) return content["added by us:    ".len..];
-            if (std.mem.startsWith(u8, content, "added by them:  ")) return content["added by them:  ".len..];
-            if (std.mem.startsWith(u8, content, "deleted by us:  ")) return content["deleted by us:  ".len..];
-            if (std.mem.startsWith(u8, content, "deleted by them:")) return std.mem.trimStart(u8, content["deleted by them:".len..], " ");
-            return content;
-        },
-        .none => "",
-    };
+fn entryFromPrefixes(content: []const u8, prefixes: []const StatusPrefix, fallback_code: []const u8) StatusEntry {
+    for (prefixes) |prefix| {
+        if (!std.mem.startsWith(u8, content, prefix.prefix)) continue;
+        const raw_path = content[prefix.prefix.len..];
+        return .{
+            .code = prefix.code,
+            .path = if (prefix.trim_path_start) std.mem.trimStart(u8, raw_path, " ") else raw_path,
+        };
+    }
+    return .{ .code = fallback_code, .path = content };
+}
+
+fn groupKey(section: Section, code: []const u8) []const u8 {
+    if (section == .unmerged) return "U";
+    return code;
 }
 
 fn parentDir(path: []const u8) []const u8 {
@@ -259,54 +290,34 @@ fn parentDir(path: []const u8) []const u8 {
     return "";
 }
 
-/// Extract the file path from a status content line like "new file:   src/foo.rs".
-fn extractPath(content: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, content, "deleted by them:")) {
-        return std.mem.trimStart(u8, content["deleted by them:".len..], " ");
-    }
-    const prefixes = [_][]const u8{
-        "modified:   ",      "new file:   ",      "deleted:    ",
-        "renamed:    ",      "copied:     ",      "typechange: ",
-        "both modified:   ", "both added:      ", "added by us:    ",
-        "added by them:  ",  "deleted by us:  ",
-    };
-    for (prefixes) |p| {
-        if (std.mem.startsWith(u8, content, p)) return content[p.len..];
-    }
-    return content;
-}
-
-fn flushRun(writer: *Writer, sections: []const Section, contents: []const []const u8, sigil: u8, dir: []const u8) !void {
+fn flushRun(writer: *Writer, sections: []const Section, contents: []const []const u8, dir: []const u8) !void {
     if (sections.len == 0) return;
-    if (try writeNumericRangeGroup(writer, contents, sigil, dir)) return;
+    if (try writeNumericRangeGroup(writer, sections, contents, dir)) return;
     if (sections.len >= DIR_GROUP_THRESHOLD and dir.len > 0) {
         // Dirname-prefix RLE: emit first entry fully, then subsequent
         // entries without the shared directory prefix so agents can
         // see every individual filename.
         for (sections, contents, 0..) |sec, content, i| {
             if (i == 0) {
-                writeSectionEntry(writer, sec, content) catch {};
+                try writeSectionEntry(writer, sec, content);
             } else {
                 // Emit just sigil + filename (strip shared dir prefix)
-                const path = extractPath(content);
-                if (path.len > dir.len and std.mem.startsWith(u8, path, dir)) {
-                    if (sigil == 'U') {
-                        writer.writeAll(unmergedCode(content)) catch {};
-                        writer.writeByte(' ') catch {};
-                    } else {
-                        writer.writeByte(sigil) catch {};
-                        writer.writeByte(' ') catch {};
-                    }
-                    writer.writeAll(path[dir.len..]) catch {};
-                    writer.writeByte('\n') catch {};
+                const entry = entryFor(sec, content) orelse {
+                    try writeSectionEntry(writer, sec, content);
+                    continue;
+                };
+                if (entry.path.len > dir.len and std.mem.startsWith(u8, entry.path, dir)) {
+                    try writeCode(writer, entry.code);
+                    try writer.writeAll(entry.path[dir.len..]);
+                    try writer.writeByte('\n');
                 } else {
-                    writeSectionEntry(writer, sec, content) catch {};
+                    try writeSectionEntry(writer, sec, content);
                 }
             }
         }
     } else {
         for (sections, contents) |sec, content| {
-            writeSectionEntry(writer, sec, content) catch {};
+            try writeSectionEntry(writer, sec, content);
         }
     }
 }
@@ -318,32 +329,26 @@ const NumericBasename = struct {
     value: usize,
 };
 
-fn writeNumericRangeGroup(writer: *Writer, contents: []const []const u8, sigil: u8, dir: []const u8) !bool {
+fn writeNumericRangeGroup(writer: *Writer, sections: []const Section, contents: []const []const u8, dir: []const u8) !bool {
     if (contents.len < NUMERIC_RANGE_THRESHOLD or dir.len == 0) return false;
 
-    const first_path = extractPath(contents[0]);
-    const first = parseNumericBasename(first_path, dir) orelse return false;
-    const first_unmerged_code = if (sigil == 'U') unmergedCode(contents[0]) else "";
+    const first_entry = entryFor(sections[0], contents[0]) orelse return false;
+    const code = first_entry.code;
+    const first = parseNumericBasename(first_entry.path, dir) orelse return false;
     var last = first;
 
     for (contents[1..], 1..) |content, i| {
-        const path = extractPath(content);
-        const parsed = parseNumericBasename(path, dir) orelse return false;
+        const entry = entryFor(sections[i], content) orelse return false;
+        if (!std.mem.eql(u8, entry.code, code)) return false;
+        const parsed = parseNumericBasename(entry.path, dir) orelse return false;
         if (!std.mem.eql(u8, parsed.prefix, first.prefix)) return false;
         if (!std.mem.eql(u8, parsed.suffix, first.suffix)) return false;
         const expected = std.math.add(usize, first.value, i) catch return false;
         if (parsed.value != expected) return false;
-        if (sigil == 'U' and !std.mem.eql(u8, unmergedCode(content), first_unmerged_code)) return false;
         last = parsed;
     }
 
-    if (sigil == 'U') {
-        try writer.writeAll(first_unmerged_code);
-        try writer.writeByte(' ');
-    } else {
-        try writer.writeByte(sigil);
-        try writer.writeByte(' ');
-    }
+    try writeCode(writer, code);
     try writer.writeAll(dir);
     try writer.writeAll(first.basename);
     try writer.writeAll("..");
@@ -380,30 +385,19 @@ fn parseNumericBasename(path: []const u8, dir: []const u8) ?NumericBasename {
     };
 }
 
-fn unmergedCode(content: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, content, "both modified:   ")) return "UU";
-    if (std.mem.startsWith(u8, content, "added by us:    ")) return "AU";
-    if (std.mem.startsWith(u8, content, "added by them:  ")) return "UA";
-    if (std.mem.startsWith(u8, content, "deleted by us:  ")) return "DU";
-    if (std.mem.startsWith(u8, content, "deleted by them:")) return "UD";
-    return "UU";
+fn writeCode(writer: *Writer, code: []const u8) !void {
+    try writer.writeAll(code);
+    try writer.writeByte(' ');
 }
 
 fn writeSectionEntry(writer: *Writer, section: Section, content: []const u8) !void {
-    switch (section) {
-        .staged => try writeStagedEntry(writer, content),
-        .unstaged => try writeUnstagedEntry(writer, content),
-        .untracked => {
-            try writer.writeAll("? ");
-            try writer.writeAll(content);
-            try writer.writeByte('\n');
-        },
-        .unmerged => try writeUnmergedEntry(writer, content),
-        .none => {
-            try writer.writeAll(content);
-            try writer.writeByte('\n');
-        },
+    if (entryFor(section, content)) |entry| {
+        try writeCode(writer, entry.code);
+        try writer.writeAll(entry.path);
+    } else {
+        try writer.writeAll(content);
     }
+    try writer.writeByte('\n');
 }
 
 fn writeBranchLine(writer: *Writer, branch: []const u8, ahead: ?[]const u8, behind: ?[]const u8) !void {
@@ -416,69 +410,6 @@ fn writeBranchLine(writer: *Writer, branch: []const u8, ahead: ?[]const u8, behi
     if (behind) |b| {
         try writer.writeAll(" -");
         try writer.writeAll(b);
-    }
-    try writer.writeByte('\n');
-}
-
-fn writeStagedEntry(writer: *Writer, content: []const u8) !void {
-    if (std.mem.startsWith(u8, content, "modified:   ")) {
-        try writer.writeAll("S ");
-        try writer.writeAll(content["modified:   ".len..]);
-    } else if (std.mem.startsWith(u8, content, "new file:   ")) {
-        try writer.writeAll("A ");
-        try writer.writeAll(content["new file:   ".len..]);
-    } else if (std.mem.startsWith(u8, content, "deleted:    ")) {
-        try writer.writeAll("D ");
-        try writer.writeAll(content["deleted:    ".len..]);
-    } else if (std.mem.startsWith(u8, content, "renamed:    ")) {
-        // "old -> new" — preserve both paths as-is
-        try writer.writeAll("R ");
-        try writer.writeAll(content["renamed:    ".len..]);
-    } else {
-        // Unknown staged type — pass through with 'S' as best-effort.
-        try writer.writeAll("S ");
-        try writer.writeAll(content);
-    }
-    try writer.writeByte('\n');
-}
-
-fn writeUnstagedEntry(writer: *Writer, content: []const u8) !void {
-    if (std.mem.startsWith(u8, content, "modified:   ")) {
-        try writer.writeAll("M ");
-        try writer.writeAll(content["modified:   ".len..]);
-    } else if (std.mem.startsWith(u8, content, "deleted:    ")) {
-        try writer.writeAll("d ");
-        try writer.writeAll(content["deleted:    ".len..]);
-    } else {
-        // Unknown unstaged type — pass through with 'M' as best-effort.
-        try writer.writeAll("M ");
-        try writer.writeAll(content);
-    }
-    try writer.writeByte('\n');
-}
-
-fn writeUnmergedEntry(writer: *Writer, content: []const u8) !void {
-    if (std.mem.startsWith(u8, content, "both modified:   ")) {
-        try writer.writeAll("UU ");
-        try writer.writeAll(content["both modified:   ".len..]);
-    } else if (std.mem.startsWith(u8, content, "added by us:    ")) {
-        try writer.writeAll("AU ");
-        try writer.writeAll(content["added by us:    ".len..]);
-    } else if (std.mem.startsWith(u8, content, "added by them:  ")) {
-        try writer.writeAll("UA ");
-        try writer.writeAll(content["added by them:  ".len..]);
-    } else if (std.mem.startsWith(u8, content, "deleted by us:  ")) {
-        try writer.writeAll("DU ");
-        try writer.writeAll(content["deleted by us:  ".len..]);
-    } else if (std.mem.startsWith(u8, content, "deleted by them:")) {
-        try writer.writeAll("UD ");
-        // "deleted by them:" may have 1 or 2 trailing spaces before path
-        const rest = std.mem.trimStart(u8, content["deleted by them:".len..], " ");
-        try writer.writeAll(rest);
-    } else {
-        // Unknown unmerged type — preserve with UU.
-        try writer.writeAll("UU ");
-        try writer.writeAll(content);
     }
     try writer.writeByte('\n');
 }

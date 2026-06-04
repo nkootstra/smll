@@ -89,9 +89,14 @@ const RunResult = struct {
 };
 
 fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
+    return runSmllWithEnv(allocator, input, &.{});
+}
+
+fn runSmllWithEnv(allocator: std.mem.Allocator, input: []const u8, extra_env: []const [2][]const u8) !RunResult {
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
     try env.put("SMLL_TEE", "0");
+    for (extra_env) |kv| try env.put(kv[0], kv[1]);
 
     const io = std.testing.io;
     var child = try std.process.spawn(io, .{
@@ -105,28 +110,6 @@ fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
     if (input.len > 0) {
         try child.stdin.?.writeStreamingAll(io, input);
     }
-    child.stdin.?.close(io);
-    child.stdin = null;
-
-    return try drainChild(allocator, io, &child);
-}
-
-fn runSmllWithEnv(allocator: std.mem.Allocator, input: []const u8, name: []const u8, value: []const u8) !RunResult {
-    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
-    defer env.deinit();
-    try env.put("SMLL_TEE", "0");
-    try env.put(name, value);
-
-    const io = std.testing.io;
-    var child = try std.process.spawn(io, .{
-        .argv = &.{exe_path},
-        .stdin = .pipe,
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .environ_map = &env,
-    });
-
-    if (input.len > 0) try child.stdin.?.writeStreamingAll(io, input);
     child.stdin.?.close(io);
     child.stdin = null;
 
@@ -225,16 +208,16 @@ test "buffer_size + 1 bytes pass through correctly (writer flush fires)" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
-fn expectedFilterOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
+fn expectedApplyOutput(comptime apply: anytype, allocator: std.mem.Allocator, input: []const u8) ![]u8 {
     var out = std.Io.Writer.Allocating.init(allocator);
     defer out.deinit();
-    try git_status.apply(allocator, input, &.{}, &out.writer);
+    try apply(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
 test "dirty fixture: smll output == GitStatusFilter.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedFilterOutput(allocator, dirty_fixture);
+    const expected = try expectedApplyOutput(git_status.apply, allocator, dirty_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, dirty_fixture);
@@ -247,7 +230,7 @@ test "dirty fixture: smll output == GitStatusFilter.apply byte-for-byte" {
 
 test "clean fixture: smll output == GitStatusFilter.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedFilterOutput(allocator, clean_fixture);
+    const expected = try expectedApplyOutput(git_status.apply, allocator, clean_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, clean_fixture);
@@ -260,7 +243,7 @@ test "clean fixture: smll output == GitStatusFilter.apply byte-for-byte" {
 
 test "conflict fixture: smll output == GitStatusFilter.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedFilterOutput(allocator, conflict_fixture);
+    const expected = try expectedApplyOutput(git_status.apply, allocator, conflict_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, conflict_fixture);
@@ -361,16 +344,9 @@ test "pipe-mode idempotence: v0.4 status output piped into smll again is unchang
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, second.term);
 }
 
-fn expectedDiffOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-    try git_diff.apply(allocator, input, &.{}, &out.writer);
-    return allocator.dupe(u8, out.written());
-}
-
 test "diff simple fixture: smll output == git_diff.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedDiffOutput(allocator, diff_simple_fixture);
+    const expected = try expectedApplyOutput(git_diff.apply, allocator, diff_simple_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, diff_simple_fixture);
@@ -382,7 +358,7 @@ test "diff simple fixture: smll output == git_diff.apply byte-for-byte" {
 
 test "diff multi fixture: smll output == git_diff.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedDiffOutput(allocator, diff_multi_fixture);
+    const expected = try expectedApplyOutput(git_diff.apply, allocator, diff_multi_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, diff_multi_fixture);
@@ -394,7 +370,7 @@ test "diff multi fixture: smll output == git_diff.apply byte-for-byte" {
 
 test "diff rename+modify fixture: smll output == git_diff.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedDiffOutput(allocator, diff_rename_modify_fixture);
+    const expected = try expectedApplyOutput(git_diff.apply, allocator, diff_rename_modify_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, diff_rename_modify_fixture);
@@ -411,16 +387,9 @@ test "diff multi fixture: smll output is strictly smaller than input" {
     try std.testing.expect(result.stdout.len < diff_multi_fixture.len);
 }
 
-fn expectedLogOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-    try git_log.applyCompact(allocator, input, &.{}, &out.writer);
-    return allocator.dupe(u8, out.written());
-}
-
 test "log linear fixture: smll output == git_log.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedLogOutput(allocator, log_linear_fixture);
+    const expected = try expectedApplyOutput(git_log.applyCompact, allocator, log_linear_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, log_linear_fixture);
@@ -432,7 +401,7 @@ test "log linear fixture: smll output == git_log.apply byte-for-byte" {
 
 test "log merge fixture: smll output == git_log.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedLogOutput(allocator, log_merge_fixture);
+    const expected = try expectedApplyOutput(git_log.applyCompact, allocator, log_merge_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, log_merge_fixture);
@@ -449,16 +418,9 @@ test "log merge fixture: smll output is strictly smaller than input" {
     try std.testing.expect(result.stdout.len < log_merge_fixture.len);
 }
 
-fn expectedShowOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-    try git_show.apply(allocator, input, &.{}, &out.writer);
-    return allocator.dupe(u8, out.written());
-}
-
 test "show simple fixture: smll output == git_show.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedShowOutput(allocator, show_simple_fixture);
+    const expected = try expectedApplyOutput(git_show.apply, allocator, show_simple_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, show_simple_fixture);
@@ -470,7 +432,7 @@ test "show simple fixture: smll output == git_show.apply byte-for-byte" {
 
 test "show body fixture: smll output == git_show.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedShowOutput(allocator, show_body_fixture);
+    const expected = try expectedApplyOutput(git_show.apply, allocator, show_body_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, show_body_fixture);
@@ -489,9 +451,9 @@ test "show body fixture: smll output is strictly smaller than input" {
 
 test "show: priority over log (show output routes to git_show, not git_log)" {
     const allocator = std.testing.allocator;
-    const expected_show = try expectedShowOutput(allocator, show_simple_fixture);
+    const expected_show = try expectedApplyOutput(git_show.apply, allocator, show_simple_fixture);
     defer allocator.free(expected_show);
-    const expected_log = try expectedLogOutput(allocator, show_simple_fixture);
+    const expected_log = try expectedApplyOutput(git_log.applyCompact, allocator, show_simple_fixture);
     defer allocator.free(expected_log);
     try std.testing.expect(!std.mem.eql(u8, expected_show, expected_log));
 
@@ -517,22 +479,7 @@ fn runSmllWrapper(
     allocator: std.mem.Allocator,
     inner_argv: []const []const u8,
 ) !RunResult {
-    var full: std.ArrayList([]const u8) = .empty;
-    defer full.deinit(allocator);
-    try full.append(allocator, exe_path);
-    for (inner_argv) |a| try full.append(allocator, a);
-
-    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
-    defer env.deinit();
-    try env.put("SMLL_TEE", "0");
-
-    const result = try std.process.run(allocator, std.testing.io, .{
-        .argv = full.items,
-        .stdout_limit = .limited(2 * 1024 * 1024),
-        .stderr_limit = .limited(2 * 1024 * 1024),
-        .environ_map = &env,
-    });
-    return .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    return runSmllWrapperWithStdin(allocator, inner_argv, "");
 }
 
 fn runSmllWrapperWithStdin(
@@ -860,7 +807,7 @@ test "wrapper: non-zero exit still emits filtered stdout" {
 
 test "large status fixture: smll output == git_status.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedFilterOutput(allocator, status_large_fixture);
+    const expected = try expectedApplyOutput(git_status.apply, allocator, status_large_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, status_large_fixture);
@@ -891,7 +838,7 @@ test "large status fixture: R3 gate — smll ≤ 80% of raw bytes" {
 
 test "large diff fixture: smll output == git_diff.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedDiffOutput(allocator, diff_large_fixture);
+    const expected = try expectedApplyOutput(git_diff.apply, allocator, diff_large_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, diff_large_fixture);
@@ -903,7 +850,7 @@ test "large diff fixture: smll output == git_diff.apply byte-for-byte" {
 
 test "large log fixture: smll output == git_log.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedLogOutput(allocator, log_large_fixture);
+    const expected = try expectedApplyOutput(git_log.applyCompact, allocator, log_large_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, log_large_fixture);
@@ -915,7 +862,7 @@ test "large log fixture: smll output == git_log.apply byte-for-byte" {
 
 test "large show fixture: smll output == git_show.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedShowOutput(allocator, show_large_fixture);
+    const expected = try expectedApplyOutput(git_show.apply, allocator, show_large_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, show_large_fixture);
@@ -1468,7 +1415,7 @@ test "pipe-mode: large JSON passes through byte-identically" {
 test "pipe-mode: SMLL_LOSSLESS bypasses filters byte-identically" {
     const allocator = std.testing.allocator;
     const input = "line with    spaces and \x1b[31mcolor\x1b[0m\n" ** 400;
-    var result = try runSmllWithEnv(allocator, input, "SMLL_LOSSLESS", "1");
+    var result = try runSmllWithEnv(allocator, input, &.{.{ "SMLL_LOSSLESS", "1" }});
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, input, result.stdout);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
@@ -1596,16 +1543,9 @@ test "wrapper: raw non-verbose curl with no output does not append hint" {
 // Unit 9: git_commit byte-equivalence tests (pipe-matching filter).
 // ---------------------------------------------------------------------------
 
-fn expectedCommitOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-    try git_commit.apply(allocator, input, &.{}, &out.writer);
-    return allocator.dupe(u8, out.written());
-}
-
 test "git_commit simple fixture: smll output == git_commit.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedCommitOutput(allocator, commit_simple_fixture);
+    const expected = try expectedApplyOutput(git_commit.apply, allocator, commit_simple_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, commit_simple_fixture);
@@ -1617,7 +1557,7 @@ test "git_commit simple fixture: smll output == git_commit.apply byte-for-byte" 
 
 test "git_commit multifile fixture: smll output == git_commit.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedCommitOutput(allocator, commit_multifile_fixture);
+    const expected = try expectedApplyOutput(git_commit.apply, allocator, commit_multifile_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, commit_multifile_fixture);
@@ -1629,7 +1569,7 @@ test "git_commit multifile fixture: smll output == git_commit.apply byte-for-byt
 
 test "git_commit large fixture: smll output == git_commit.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedCommitOutput(allocator, commit_large_fixture);
+    const expected = try expectedApplyOutput(git_commit.apply, allocator, commit_large_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, commit_large_fixture);
@@ -1643,16 +1583,9 @@ test "git_commit large fixture: smll output == git_commit.apply byte-for-byte" {
 // Unit 9: git_branch byte-equivalence tests (pipe-matching filter).
 // ---------------------------------------------------------------------------
 
-fn expectedBranchOutput(allocator: std.mem.Allocator, input: []const u8) ![]u8 {
-    var out = std.Io.Writer.Allocating.init(allocator);
-    defer out.deinit();
-    try git_branch.apply(allocator, input, &.{}, &out.writer);
-    return allocator.dupe(u8, out.written());
-}
-
 test "git_branch list fixture: smll output == git_branch.apply byte-for-byte" {
     const allocator = std.testing.allocator;
-    const expected = try expectedBranchOutput(allocator, branch_list_fixture);
+    const expected = try expectedApplyOutput(git_branch.apply, allocator, branch_list_fixture);
     defer allocator.free(expected);
 
     var result = try runSmll(allocator, branch_list_fixture);

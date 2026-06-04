@@ -270,6 +270,31 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
+    const stats_mod = b.createModule(.{
+        .root_source_file = b.path("src/stats.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const setup_mod = b.createModule(.{
+        .root_source_file = b.path("src/setup.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const setup_json_mod = b.createModule(.{
+        .root_source_file = b.path("src/setup_json.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const wrapper_io_mod = b.createModule(.{
+        .root_source_file = b.path("src/wrapper_io.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const wrapper_util_mod = b.createModule(.{
+        .root_source_file = b.path("src/wrapper_util.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
 
     // Pass 1: create every module described in `modules`, recording it
     // in a name → module map.
@@ -381,9 +406,11 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     test_step.dependOn(&run_exe_tests.step);
 
-    const util_tests = b.addTest(.{ .root_module = util_mod });
-    const run_util_tests = b.addRunArtifact(util_tests);
-    test_step.dependOn(&run_util_tests.step);
+    for ([_]*std.Build.Module{ util_mod, stats_mod, setup_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
+        const t = b.addTest(.{ .root_module = mod });
+        const run_t = b.addRunArtifact(t);
+        test_step.dependOn(&run_t.step);
+    }
 
     for (modules) |m| {
         const mod = registry.get(m.name) orelse unreachable;
