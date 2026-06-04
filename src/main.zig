@@ -50,6 +50,10 @@ const go_test = @import("go_test");
 const docker_logs = @import("docker_logs");
 const npm_install = @import("npm_install");
 const build_compact = @import("build_compact");
+const gradle_compact = @import("gradle_compact");
+const maven_compact = @import("maven_compact");
+const precommit_compact = @import("precommit_compact");
+const package_tree = @import("package_tree");
 const generic_compact = @import("generic_compact");
 const setup = @import("setup.zig");
 const cat_compact = @import("cat_compact");
@@ -817,6 +821,7 @@ fn runWrapperInner(
 
     const has_arg1 = argv.len >= 2;
     const arg1 = if (has_arg1) argv[1] else "";
+    const arg2 = if (argv.len >= 3) argv[2] else "";
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
     // via dirname RLE. `find -ls` goes through find_compact instead
@@ -860,9 +865,25 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    // Package dependency tree wrappers. `bun pm ls` emits a nested dependency
+    // tree; default output keeps direct deps + transitive count so agents get
+    // dependency signal without the full nested tree.
+    if (std.mem.eql(u8, cmd_basename, "bun") and
+        std.mem.eql(u8, arg1, "pm") and
+        std.mem.eql(u8, arg2, "ls") and
+        !lossless and
+        package_tree.matches(stdout_slice))
+    {
+        package_tree.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            return 1;
+        };
+        return exit_code;
+    }
+
     // tree wrapper: requires box-drawing chars in the first few lines.
-    // `bun` emits tree output for `bun pm ls` — routed through tree first,
-    // falls through to columnar opt-in below if tree doesn't match.
+    // `bun` can emit other tree-shaped output; route it through tree when the
+    // package-tree filter above did not match.
     if (std.mem.eql(u8, cmd_basename, "tree") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
@@ -1088,6 +1109,42 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "dotnet")) {
         if (!lossless and eqAny(arg1, &.{ "build", "test", "format", "restore" })) {
             dotnet_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "gradle", "gradlew" })) {
+        if (!lossless and (gradle_compact.matches(stdout_slice) or gradle_compact.matches(stderr_slice))) {
+            gradle_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "mvn", "mvnw" })) {
+        if (!lossless and (maven_compact.matches(stdout_slice) or maven_compact.matches(stderr_slice))) {
+            maven_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "pre-commit")) {
+        if (!lossless and (precommit_compact.matches(stdout_slice) or precommit_compact.matches(stderr_slice))) {
+            precommit_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;
             };

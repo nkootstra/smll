@@ -142,6 +142,10 @@ const modules = [_]ModuleEntry{
     .{ .name = "pip_compact", .needs_ansi = true },
     .{ .name = "prettier_compact" },
     .{ .name = "dotnet_compact", .needs_ansi = true },
+    .{ .name = "gradle_compact", .needs_ansi = true },
+    .{ .name = "maven_compact", .needs_ansi = true },
+    .{ .name = "precommit_compact", .needs_ansi = true },
+    .{ .name = "package_tree", .needs_ansi = true },
     .{ .name = "tool_compact", .needs_ansi = true },
     .{ .name = "curl_compact", .needs_ansi = true },
     .{ .name = "kubectl_compact", .needs_ansi = true, .fixtures = &.{
