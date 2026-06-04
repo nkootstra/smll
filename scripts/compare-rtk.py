@@ -232,7 +232,7 @@ def write_fake_tool(case: Case, bin_dir: pathlib.Path, root: pathlib.Path) -> No
             ]
         )
 
-    for idx, variant in enumerate(case.arg_fixtures):
+    for variant in case.arg_fixtures:
         variant_fixture = root / variant.fixture
         variant_stderr = shlex.quote(str(root / variant.stderr_fixture)) if variant.stderr_fixture else ""
         condition = shell_args_condition(variant.args)
@@ -247,8 +247,6 @@ def write_fake_tool(case: Case, bin_dir: pathlib.Path, root: pathlib.Path) -> No
                 "fi",
             ]
         )
-        if idx == 0:
-            script.append("")
 
     script.append("emit_fixture")
 
@@ -511,14 +509,10 @@ def parse_args() -> argparse.Namespace:
 def default_outputs_dir(args: argparse.Namespace, root: pathlib.Path) -> pathlib.Path:
     if args.outputs_dir:
         return pathlib.Path(args.outputs_dir)
-    if args.markdown:
-        return pathlib.Path(args.markdown).with_suffix("").with_name(
-            pathlib.Path(args.markdown).stem + "-outputs"
-        )
-    if args.json_path:
-        return pathlib.Path(args.json_path).with_suffix("").with_name(
-            pathlib.Path(args.json_path).stem + "-outputs"
-        )
+    for output_path in (args.markdown, args.json_path):
+        if output_path:
+            path = pathlib.Path(output_path)
+            return path.with_suffix("").with_name(path.stem + "-outputs")
     return root / "zig-out" / "benchmarks" / "smll-vs-rtk-outputs"
 
 

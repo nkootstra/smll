@@ -79,7 +79,6 @@ fn applyInstall(allocator: Allocator, stdout: []const u8, stderr: []const u8, wr
     var installing: SampleList = .{};
     defer installing.deinit(allocator);
     var downloads: usize = 0;
-    var progress: usize = 0;
 
     var important: std.ArrayList([]u8) = .empty;
     defer {
@@ -90,8 +89,8 @@ fn applyInstall(allocator: Allocator, stdout: []const u8, stderr: []const u8, wr
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
 
-    try scanInstallStream(allocator, stdout, &strip_buf, &collected, &satisfied, &installing, &downloads, &progress, &important);
-    try scanInstallStream(allocator, stderr, &strip_buf, &collected, &satisfied, &installing, &downloads, &progress, &important);
+    try scanInstallStream(allocator, stdout, &strip_buf, &collected, &satisfied, &installing, &downloads, &important);
+    try scanInstallStream(allocator, stderr, &strip_buf, &collected, &satisfied, &installing, &downloads, &important);
 
     try writeSample(writer, "Collecting", &collected);
     if (downloads > 0) {
@@ -115,7 +114,6 @@ fn scanInstallStream(
     satisfied: *SampleList,
     installing: *SampleList,
     downloads: *usize,
-    progress: *usize,
     important: *std.ArrayList([]u8),
 ) !void {
     if (input.len == 0) return;
@@ -133,9 +131,7 @@ fn scanInstallStream(
             try satisfied.addCountedSample(allocator, satisfiedName(line["Requirement already satisfied: ".len..]));
         } else if (std.mem.startsWith(u8, line, "Installing collected packages:")) {
             try scanInstallingPackages(allocator, line["Installing collected packages:".len..], installing);
-        } else if (isProgressLine(line)) {
-            progress.* += 1;
-        } else {
+        } else if (!isProgressLine(line)) {
             const copy = try allocator.dupe(u8, line);
             errdefer allocator.free(copy);
             try important.append(allocator, copy);
