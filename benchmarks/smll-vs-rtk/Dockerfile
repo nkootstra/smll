@@ -3,6 +3,7 @@ FROM ubuntu:24.04
 ARG RTK_REF=v0.42.1
 ARG ZIG_VERSION=0.16.0
 ARG TIKTOKEN_VERSION=0.13.0
+ARG RUST_VERSION=1.96.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/root/.cargo/bin:/opt/bench-venv/bin:/usr/local/bin:/usr/bin:/bin"
@@ -38,7 +39,7 @@ RUN set -eux; \
     zig version
 
 RUN curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh \
-    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable \
+    && sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain "${RUST_VERSION}" \
     && rm /tmp/rustup-init.sh \
     && rustc --version \
     && cargo --version

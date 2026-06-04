@@ -30,6 +30,8 @@ const ScanState = struct {
     in_failed_hook: bool = false,
 };
 
+const HookStatus = enum { passed, failed, skipped };
+
 fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state: *ScanState) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -41,8 +43,8 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
         const line = std.mem.trim(u8, clean, " \t\r");
         if (line.len == 0) continue;
 
-        if (isHookStatus(line)) {
-            state.in_failed_hook = std.mem.find(u8, line, "Failed") != null;
+        if (hookStatus(line)) |status| {
+            state.in_failed_hook = status == .failed;
             if (state.in_failed_hook) try appendLine(allocator, out, line);
             continue;
         }
@@ -53,10 +55,20 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
     }
 }
 
-fn isHookStatus(line: []const u8) bool {
-    return std.mem.find(u8, line, "Passed") != null or
-        std.mem.find(u8, line, "Failed") != null or
-        std.mem.find(u8, line, "Skipped") != null;
+fn hookStatus(line: []const u8) ?HookStatus {
+    if (lineEndsWithDotPaddedStatus(line, "Passed")) return .passed;
+    if (lineEndsWithDotPaddedStatus(line, "Failed")) return .failed;
+    if (lineEndsWithDotPaddedStatus(line, "Skipped")) return .skipped;
+    return null;
+}
+
+fn lineEndsWithDotPaddedStatus(line: []const u8, status: []const u8) bool {
+    if (!std.mem.endsWith(u8, line, status)) return false;
+    const status_start = line.len - status.len;
+    if (status_start == 0) return false;
+    var dot_start = status_start;
+    while (dot_start > 0 and line[dot_start - 1] == '.') : (dot_start -= 1) {}
+    return status_start - dot_start >= 3;
 }
 
 fn shouldKeepFailureLine(line: []const u8) bool {
@@ -100,4 +112,22 @@ test "pre-commit failure keeps failed hook only" {
     try std.testing.expect(std.mem.find(u8, got, "bad.yaml") != null);
     try std.testing.expect(std.mem.find(u8, got, "Installing environment") == null);
     try std.testing.expect(std.mem.find(u8, got, "Trim Trailing") == null);
+}
+
+test "pre-commit diagnostic containing status word does not end failure block" {
+    const input =
+        \\Custom Hook............................................................Failed
+        \\- hook id: custom-hook
+        \\- exit code: 1
+        \\checks.py: Pre-condition checks: Passed
+        \\checks.py: final validation failed
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "Custom Hook") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Pre-condition checks: Passed") != null);
+    try std.testing.expect(std.mem.find(u8, got, "final validation failed") != null);
 }
