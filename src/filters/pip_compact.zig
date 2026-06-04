@@ -101,11 +101,6 @@ fn applyInstall(allocator: Allocator, stdout: []const u8, stderr: []const u8, wr
     }
     try writeSample(writer, "Satisfied", &satisfied);
     try writeSample(writer, "Installing", &installing);
-    if (progress > 0) {
-        try writer.writeAll("Progress lines ");
-        try ansi.writeDecimal(writer, progress);
-        try writer.writeByte('\n');
-    }
     for (important.items) |line| {
         try writer.writeAll(line);
         try writer.writeByte('\n');

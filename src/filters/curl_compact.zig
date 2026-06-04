@@ -178,7 +178,7 @@ fn summarizeRequests(stderr: []const u8) ?CurlSummary {
         }
         if (startsWithHeader(line, "< content-type:")) {
             if (summary.content_type.len == 0) {
-                summary.content_type = std.mem.trim(u8, line["< content-type:".len..], " \t\r");
+                summary.content_type = compactContentType(line["< content-type:".len..]);
             }
             continue;
         }
@@ -218,6 +218,12 @@ fn parseRequestLine(line: []const u8) ?ParsedRequest {
 fn startsWithHeader(line: []const u8, prefix: []const u8) bool {
     if (line.len < prefix.len) return false;
     return std.ascii.eqlIgnoreCase(line[0..prefix.len], prefix);
+}
+
+fn compactContentType(value: []const u8) []const u8 {
+    const trimmed = std.mem.trim(u8, value, " \t\r");
+    const end = std.mem.indexOfAny(u8, trimmed, " ;\t\r") orelse trimmed.len;
+    return trimmed[0..end];
 }
 
 fn writeCurlSummary(writer: *Writer, summary: CurlSummary) !void {
@@ -439,7 +445,7 @@ test "apply: summarizes one request, keeps body, drops TLS chatter" {
         "> Host: example.com\n" ++
         "> User-Agent: curl/8.0\n" ++
         "< HTTP/2 200\n" ++
-        "< content-type: text/html\n" ++
+        "< content-type: text/html; charset=utf-8\n" ++
         "< content-length: 1256\n" ++
         "* Connection #0 to host example.com left intact\n";
     const stdout = "<html>body</html>\n";
@@ -450,6 +456,7 @@ test "apply: summarizes one request, keeps body, drops TLS chatter" {
     // Kept
     try std.testing.expect(std.mem.find(u8, got, "curl GET example.com/ -> HTTP/2 200 text/html len=1256") != null);
     try std.testing.expect(std.mem.find(u8, got, "<html>body</html>") != null);
+    try std.testing.expect(std.mem.find(u8, got, "charset=utf-8") == null);
     // Dropped
     try std.testing.expect(std.mem.find(u8, got, "* Connected to example.com") == null);
     try std.testing.expect(std.mem.find(u8, got, "> GET / HTTP/2") == null);
