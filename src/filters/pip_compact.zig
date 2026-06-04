@@ -31,9 +31,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
 const SampleList = struct {
     total: usize = 0,
-    items: std.ArrayList([]const u8) = .empty,
+    items: std.ArrayList([]u8) = .empty,
 
     fn deinit(self: *SampleList, allocator: Allocator) void {
+        for (self.items.items) |item| allocator.free(item);
         self.items.deinit(allocator);
     }
 
@@ -41,7 +42,7 @@ const SampleList = struct {
         if (item.len == 0) return;
         self.total += 1;
         if (self.items.items.len < 8) {
-            try self.items.append(allocator, item);
+            try self.appendCopy(allocator, item);
         }
     }
 
@@ -52,7 +53,13 @@ const SampleList = struct {
         for (self.items.items) |existing| {
             if (std.mem.eql(u8, existing, item)) return;
         }
-        try self.items.append(allocator, item);
+        try self.appendCopy(allocator, item);
+    }
+
+    fn appendCopy(self: *SampleList, allocator: Allocator, item: []const u8) !void {
+        const copy = try allocator.dupe(u8, item);
+        errdefer allocator.free(copy);
+        try self.items.append(allocator, copy);
     }
 };
 
@@ -74,8 +81,11 @@ fn applyInstall(allocator: Allocator, stdout: []const u8, stderr: []const u8, wr
     var downloads: usize = 0;
     var progress: usize = 0;
 
-    var important: std.ArrayList([]const u8) = .empty;
-    defer important.deinit(allocator);
+    var important: std.ArrayList([]u8) = .empty;
+    defer {
+        for (important.items) |line| allocator.free(line);
+        important.deinit(allocator);
+    }
 
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
@@ -111,7 +121,7 @@ fn scanInstallStream(
     installing: *SampleList,
     downloads: *usize,
     progress: *usize,
-    important: *std.ArrayList([]const u8),
+    important: *std.ArrayList([]u8),
 ) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -131,7 +141,9 @@ fn scanInstallStream(
         } else if (isProgressLine(line)) {
             progress.* += 1;
         } else {
-            try important.append(allocator, line);
+            const copy = try allocator.dupe(u8, line);
+            errdefer allocator.free(copy);
+            try important.append(allocator, copy);
         }
     }
 }
@@ -159,8 +171,29 @@ fn scanInstallingPackages(allocator: Allocator, input: []const u8, installing: *
 }
 
 fn isProgressLine(line: []const u8) bool {
-    return std.mem.find(u8, line, " eta ") != null or
-        std.mem.find(u8, line, "/s") != null;
+    if (std.mem.find(u8, line, " eta ") != null) return true;
+    var it = std.mem.tokenizeAny(u8, line, " \t\r");
+    while (it.next()) |token| {
+        if (isSpeedToken(token)) return true;
+    }
+    return false;
+}
+
+fn isSpeedToken(token: []const u8) bool {
+    const trimmed = std.mem.trim(u8, token, ".,;()[]");
+    const units = [_][]const u8{ "B/s", "kB/s", "KB/s", "MB/s", "GB/s", "KiB/s", "MiB/s", "GiB/s" };
+    for (units) |unit| {
+        if (std.mem.eql(u8, trimmed, unit)) return true;
+        if (std.mem.endsWith(u8, trimmed, unit) and containsDigit(trimmed[0 .. trimmed.len - unit.len])) return true;
+    }
+    return false;
+}
+
+fn containsDigit(input: []const u8) bool {
+    for (input) |c| {
+        if (std.ascii.isDigit(c)) return true;
+    }
+    return false;
 }
 
 fn writeSample(writer: *Writer, label: []const u8, list: *const SampleList) !void {
@@ -260,6 +293,31 @@ test "apply: pip install summarizes progress and keeps result" {
     try std.testing.expect(std.mem.find(u8, got, "Installing 2: requests, urllib3") != null);
     try std.testing.expect(std.mem.find(u8, got, "Successfully installed requests-2.31.0") != null);
     try std.testing.expect(std.mem.find(u8, got, "eta 0:00:00") == null);
+}
+
+test "apply: pip install keeps site-packages errors" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    const input =
+        "Collecting foo==1.0.0\n" ++
+        "ERROR: Could not install packages due to an OSError: [Errno 13] Permission denied: '/usr/local/lib/python3.11/site-packages/foo-1.0.dist-info/METADATA'\n";
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "site-packages/foo-1.0.dist-info/METADATA") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Permission denied") != null);
+}
+
+test "apply: pip install owns ANSI-stripped samples" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    const input =
+        "\x1b[32mCollecting first==1.0.0\x1b[0m\n" ++
+        "\x1b[32mCollecting second==2.0.0\x1b[0m\n" ++
+        "\x1b[31mSuccessfully installed first-1.0.0 second-2.0.0\x1b[0m\n";
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "Collecting 2: first==1.0.0, second==2.0.0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Successfully installed first-1.0.0 second-2.0.0") != null);
 }
 
 test "stderr is preserved" {

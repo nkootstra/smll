@@ -2,6 +2,7 @@ FROM ubuntu:24.04
 
 ARG RTK_REF=v0.42.1
 ARG ZIG_VERSION=0.16.0
+ARG TIKTOKEN_VERSION=0.13.0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/root/.cargo/bin:/opt/bench-venv/bin:/usr/local/bin:/usr/bin:/bin"
@@ -21,7 +22,7 @@ RUN apt-get update \
 
 RUN python3 -m venv /opt/bench-venv \
     && /opt/bench-venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/bench-venv/bin/pip install --no-cache-dir tiktoken
+    && /opt/bench-venv/bin/pip install --no-cache-dir "tiktoken==${TIKTOKEN_VERSION}"
 
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
