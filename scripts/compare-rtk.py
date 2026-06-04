@@ -187,6 +187,9 @@ def write_fake_tool(case: Case, bin_dir: pathlib.Path, root: pathlib.Path) -> No
         f"stderr_fixture={stderr_fixture}",
         f"stream={shlex.quote(case.stream)}",
         f"exit_code={case.exit_code}",
+        'if [ -n "${BENCH_INVOCATION_LOG:-}" ]; then',
+        '  { printf "%s" "$#"; for arg in "$@"; do printf "\\t%s" "$arg"; done; printf "\\n"; } >> "$BENCH_INVOCATION_LOG"',
+        "fi",
         "emit_fixture() {",
         '  if [ -n "$stderr_fixture" ]; then',
         '    cat "$fixture"',
@@ -260,6 +263,60 @@ def shell_args_condition(args: tuple[str, ...]) -> str:
     for idx, arg in enumerate(args, start=1):
         checks.append(f'[ "${{{idx}:-}}" = {shlex.quote(arg)} ]')
     return " && ".join(checks)
+
+
+def expected_arg_variants(case: Case) -> tuple[tuple[str, ...], ...]:
+    variants: list[tuple[str, ...]] = [case.command[1:]]
+    variants.extend(variant.args for variant in case.arg_fixtures)
+    return tuple(variants)
+
+
+def args_allowed(case: Case, args: tuple[str, ...]) -> bool:
+    if args in expected_arg_variants(case):
+        return True
+
+    # Some wrappers legitimately make extra fixture-backed probes to collect a
+    # more compact summary. Keep these explicit so command rewrites remain
+    # visible in the report.
+    if case.command[0] == "git" and args:
+        if case.git_porcelain is not None and args[0] == "status":
+            return any(arg == "--porcelain" or arg.startswith("--porcelain=") for arg in args)
+        if case.git_stat is not None and args[0] == "diff":
+            return any(arg == "--stat" for arg in args)
+
+    return False
+
+
+def read_invocations(path: pathlib.Path) -> list[tuple[str, ...]]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+
+    invocations: list[tuple[str, ...]] = []
+    for line in text.splitlines():
+        if not line:
+            continue
+        fields = line.split("\t")
+        try:
+            argc = int(fields[0])
+        except ValueError:
+            continue
+        args = tuple(fields[1:])
+        if len(args) == argc:
+            invocations.append(args)
+    return invocations
+
+
+def invocation_summary(case: Case, path: pathlib.Path) -> dict:
+    invocations = read_invocations(path)
+    unexpected = sorted({shell_array(args) for args in invocations if not args_allowed(case, args)})
+    return {
+        "invoked": bool(invocations),
+        "count": len(invocations),
+        "expected_arg_variants": [shell_array(args) for args in expected_arg_variants(case)],
+        "unexpected_args": unexpected,
+    }
 
 
 def timed_run(
@@ -407,7 +464,9 @@ def render_markdown(result: dict, markdown_path: pathlib.Path | None) -> str:
         f"- rtk tokens: {fmt_int(summary['rtk_tokens'])} ({summary['rtk_savings_pct']:.1f}% saved)",
         f"- Tokenizer: {result['tokenizer']['actual']} (requested: {result['tokenizer']['requested']})",
         "",
-        "Each row runs the same command three ways: the normal command, `smll <command>`, and `rtk <command>`. Full captured outputs are embedded below and written next to this report.",
+        "Each row invokes the same top-level command three ways: the normal command, `smll <command>`, and `rtk <command>`. Full captured outputs are embedded below and written next to this report.",
+        "",
+        "The fixture tool records whether each wrapper called the committed fixture command as declared. Warnings show missing signals, exit-code mismatches, fixture bypasses, or wrapper-side argument rewrites; those rows still measure observed wrapper behavior, but they are not pure identical-child-invocation rows.",
         "",
         "## Tool Stats Models",
         "",
@@ -479,6 +538,13 @@ def render_markdown(result: dict, markdown_path: pathlib.Path | None) -> str:
             missing = row[tool]["missing_signals"]
             if missing:
                 warnings.append(f"{tool} missing {', '.join(missing)}")
+            invocation = row[tool]["fixture_invocation"]
+            if not invocation["invoked"]:
+                warnings.append(f"{tool} did not invoke fixture tool")
+            elif invocation["unexpected_args"]:
+                shown_args = ", ".join(invocation["unexpected_args"][:3])
+                suffix = "" if len(invocation["unexpected_args"]) <= 3 else ", ..."
+                warnings.append(f"{tool} fixture args differed: {shown_args}{suffix}")
         outputs = " ".join(
             f"[{tool}]({rel_link(pathlib.Path(row[tool]['output_file']), markdown_dir)})"
             for tool in ("raw", "smll", "rtk")
@@ -680,15 +746,27 @@ def main() -> int:
 
             case_env = dict(env)
             case_env["PATH"] = str(fake_bin) + os.pathsep + case_env.get("PATH", "")
+            raw_env = dict(case_env)
+            smll_env = dict(case_env)
+            rtk_env = dict(case_env)
+            raw_invocation_log = fake_bin / "raw-invocations.tsv"
+            smll_invocation_log = fake_bin / "smll-invocations.tsv"
+            rtk_invocation_log = fake_bin / "rtk-invocations.tsv"
+            raw_env["BENCH_INVOCATION_LOG"] = str(raw_invocation_log)
+            smll_env["BENCH_INVOCATION_LOG"] = str(smll_invocation_log)
+            rtk_env["BENCH_INVOCATION_LOG"] = str(rtk_invocation_log)
 
             raw_argv = list(case.command)
             smll_argv = [str(smll_bin), *case.command]
             rtk_argv = [str(rtk_bin), *case.command]
             command_display = shell_array(case.command)
 
-            raw_run = timed_run(raw_argv, args.runs, args.warmup, root, case_env, args.timeout)
-            smll_run = timed_run(smll_argv, args.runs, args.warmup, root, case_env, args.timeout)
-            rtk_run = timed_run(rtk_argv, args.runs, args.warmup, root, case_env, args.timeout)
+            raw_run = timed_run(raw_argv, args.runs, args.warmup, root, raw_env, args.timeout)
+            smll_run = timed_run(smll_argv, args.runs, args.warmup, root, smll_env, args.timeout)
+            rtk_run = timed_run(rtk_argv, args.runs, args.warmup, root, rtk_env, args.timeout)
+            raw_invocation = invocation_summary(case, raw_invocation_log)
+            smll_invocation = invocation_summary(case, smll_invocation_log)
+            rtk_invocation = invocation_summary(case, rtk_invocation_log)
 
             raw_tokens = count_run_tokens(counter, raw_run)
             smll_tokens = count_run_tokens(counter, smll_run)
@@ -721,6 +799,7 @@ def main() -> int:
                 {
                     "name": case.name,
                     "category": case.category,
+                    "profiles": list(case.profiles),
                     "command": command_display,
                     "fixture": case.fixture,
                     "signals": {
@@ -737,6 +816,7 @@ def main() -> int:
                         "median_ms": raw_run.median_ms,
                         "exit_code": raw_run.exit_code,
                         "missing_signals": raw_missing,
+                        "fixture_invocation": raw_invocation,
                         "output_file": str(raw_file),
                     },
                     "smll": {
@@ -748,6 +828,7 @@ def main() -> int:
                         "median_ms": smll_run.median_ms,
                         "exit_code": smll_run.exit_code,
                         "missing_signals": smll_missing,
+                        "fixture_invocation": smll_invocation,
                         "output_file": str(smll_file),
                     },
                     "rtk": {
@@ -759,6 +840,7 @@ def main() -> int:
                         "median_ms": rtk_run.median_ms,
                         "exit_code": rtk_run.exit_code,
                         "missing_signals": rtk_missing,
+                        "fixture_invocation": rtk_invocation,
                         "output_file": str(rtk_file),
                     },
                 }

@@ -303,7 +303,11 @@
         "build"
       ],
       "fixture": "tests/fixtures/large/cargo_build.txt",
-      "stream": "stderr"
+      "stream": "stderr",
+      "signals": [
+        "warning: unused import",
+        "error[E0308]"
+      ]
     },
     {
       "name": "cargo-build-verbose-large",
