@@ -9,6 +9,8 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-06-04
+
 ### Added
 
 - `SECURITY.md` with a vulnerability-disclosure process and threat
@@ -17,6 +19,34 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   guidance, and PR discipline.
 - This changelog file, replacing scattered release notes as the
   single source of truth for what changed when.
+- MIT license.
+- Raw-output tee logs for failed wrapped commands, with opt-outs via
+  `SMLL_TEE=0` and `DO_NOT_TRACK=1`.
+- Containerized `smll`-vs-`rtk` benchmark tooling and expanded
+  agent-oriented fixtures.
+
+### Changed
+
+- Wrapper, setup, pipe-filter, and git wrapper code split into focused
+  modules.
+- Build configuration now uses a declarative module registry with a
+  compile-time duplicate-name check.
+- Several command compactors gained broader coverage for build, package
+  manager, and tool outputs.
+
+### Fixed
+
+- OpenCode unsetup now removes the `smll-proxy` plugin entry before
+  deleting plugin files.
+- Stats writes are atomic to avoid corrupting `~/.smll/stats.json` on
+  interrupted or racing writes.
+- Pipe-mode input buffering is capped to avoid unbounded heap growth.
+- Tee rotation order is deterministic when multiple logs share the same
+  mtime.
+
+### Documentation
+
+- Added a codebase audit with follow-up refactor and hardening notes.
 
 ## [1.3.1] — 2026-05-17
 
@@ -214,7 +244,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/nkootstra/smll/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/nkootstra/smll/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/nkootstra/smll/compare/v1.2.5...v1.3.0
 [1.2.5]: https://github.com/nkootstra/smll/compare/v1.2.4...v1.2.5
