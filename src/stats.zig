@@ -312,7 +312,7 @@ fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) !voi
     try stdout.writeAll(", ");
     try writeU64(stdout, pct);
     try stdout.writeAll("%)\n");
-    try stdout.writeAll("  Tokens saved:  ~");
+    try stdout.writeAll("  Est. tokens saved: ~");
     try writeHumanCount(stdout, tokens_saved);
     try stdout.writeAll(" (~");
     try writeU64(stdout, tokens_saved);

@@ -536,6 +536,36 @@ noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Writer, s
     stderr_writer.writeAll(stderr_slice) catch {};
 }
 
+const CountingWriter = struct {
+    out: *std.Io.Writer,
+    count: usize = 0,
+    writer: std.Io.Writer = .{
+        .buffer = &.{},
+        .vtable = &.{ .drain = drain },
+    },
+
+    fn init(out: *std.Io.Writer) CountingWriter {
+        return .{ .out = out };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *CountingWriter = @fieldParentPtr("writer", w);
+        var written: usize = 0;
+        for (data[0 .. data.len - 1]) |bytes| {
+            try self.out.writeAll(bytes);
+            written += bytes.len;
+        }
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            try self.out.writeAll(pattern);
+            written += pattern.len;
+        }
+        self.count += written;
+        w.end = 0;
+        return written;
+    }
+};
+
 /// Emit a hint to stdout when the wrapped child produced no stdout AND no
 /// stderr. Without a hint, agents commonly retry the command in a loop,
 /// mistaking the silence for a tool-side failure. The hint always includes
@@ -573,23 +603,28 @@ fn runWrapper(
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !WrapperResult {
-    // Capture filter output in a buffer to measure output bytes for stats.
+    // Capture compacted stdout separately; stderr is forwarded through a
+    // counting proxy so stats match the full agent-visible stream.
     var capture = std.Io.Writer.Allocating.init(allocator);
     defer capture.deinit();
+    var counted_stderr = CountingWriter.init(stderr_writer);
     last_output_inherited = false;
     last_raw_stdout = &.{};
     last_raw_stderr = &.{};
-    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, stderr_writer);
+    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, &counted_stderr.writer);
     const output = capture.written();
+
+    var final_stdout = std.Io.Writer.Allocating.init(allocator);
+    defer final_stdout.deinit();
 
     // When both captured stdout and stderr are empty, emit a contextual hint
     // so agents don't loop retrying the command. Streaming commands inherit
     // stdio directly, so their output bypasses this capture buffer and must
     // not get an extra hint appended.
     if (output.len == 0 and last_stderr_bytes == 0 and !last_output_inherited) {
-        try writeNoOutputHint(writer, argv, exit_code);
+        try writeNoOutputHint(&final_stdout.writer, argv, exit_code);
     } else {
-        try writer.writeAll(output);
+        try final_stdout.writer.writeAll(output);
     }
 
     // Tee recovery: on a failed wrapped command, persist the *raw* (pre-filter)
@@ -600,24 +635,24 @@ fn runWrapper(
     if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
         const home = environ.get("HOME") orelse "";
         if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
-            writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+            final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
         }
     }
 
-    // Input bytes = captured child stdout (before filtering). We approximate
-    // with the output bytes when the filter expands (rare) or report what we
-    // have. The actual input_bytes is stdout_slice.len inside runWrapperInner,
-    // but plumbing it out would require changing every return site. Instead,
-    // we track it via a module-level var that runWrapperInner sets.
+    const final_stdout_bytes = final_stdout.written().len;
+    try writer.writeAll(final_stdout.written());
+
+    // Input bytes are raw child stdout+stderr. Output bytes are compacted
+    // stdout plus any stderr smll forwarded, matching what an agent sees.
     return .{
         .exit_code = exit_code,
         .input_bytes = last_input_bytes,
-        .output_bytes = output.len,
+        .output_bytes = final_stdout_bytes + counted_stderr.count,
         .record_stats = !last_output_inherited,
     };
 }
 
-/// Set by runWrapperInner to communicate input bytes to runWrapper.
+/// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.
 var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
@@ -763,7 +798,7 @@ fn runWrapperInner(
     const stderr_slice = captured.stderr;
 
     // Record raw stream sizes for stats tracking and empty-output detection.
-    last_input_bytes = stdout_slice.len;
+    last_input_bytes = stdout_slice.len + stderr_slice.len;
     last_stderr_bytes = stderr_slice.len;
     last_raw_stdout = stdout_slice;
     last_raw_stderr = stderr_slice;

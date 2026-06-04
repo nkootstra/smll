@@ -786,6 +786,50 @@ test "wrapper: raw inherited output is not recorded as zero-byte stats" {
     try expectNoStatsFile(tmp.dir);
 }
 
+test "wrapper: stats record agent-visible stdout and stderr bytes" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "noisy",
+        \\#!/bin/sh
+        \\printf 'stdout\n'
+        \\printf 'stderr!\n' >&2
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "0");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "noisy" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("stdout\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("stderr!\n", wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+
+    const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(1024));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"input_bytes\":15") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"output_bytes\":15") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"noisy\":{\"n\":1,\"in\":15,\"out\":15}") != null);
+}
+
 test "wrapper: large stderr does not deadlock while stdout is still open" {
     const allocator = std.testing.allocator;
     const script =
