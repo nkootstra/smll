@@ -333,6 +333,57 @@ def count_run_tokens(counter: TokenCounter, run: ToolRun) -> int:
     return counter.count(run.stdout) + counter.count(run.stderr)
 
 
+def div_ceil(value: int, divisor: int) -> int:
+    return (value + divisor - 1) // divisor
+
+
+def build_stats_models(cases: list[dict], raw_tokens: int, smll_tokens: int, rtk_tokens: int) -> dict:
+    raw_stdout_bytes = sum(row["raw"]["stdout_bytes"] for row in cases)
+    raw_stderr_bytes = sum(row["raw"]["stderr_bytes"] for row in cases)
+    smll_stdout_bytes = sum(row["smll"]["stdout_bytes"] for row in cases)
+    smll_stderr_bytes = sum(row["smll"]["stderr_bytes"] for row in cases)
+    smll_saved_bytes = max(raw_stdout_bytes - smll_stdout_bytes, 0)
+
+    rtk_input_estimate = sum(div_ceil(row["raw"]["bytes"], 4) for row in cases)
+    rtk_output_estimate = sum(div_ceil(row["rtk"]["bytes"], 4) for row in cases)
+    rtk_saved_estimate = sum(
+        max(
+            div_ceil(row["raw"]["bytes"], 4) - div_ceil(row["rtk"]["bytes"], 4),
+            0,
+        )
+        for row in cases
+    )
+    rtk_expansion_cases = [row["name"] for row in cases if row["rtk"]["tokens"] > row["raw"]["tokens"]]
+
+    return {
+        "smll_stats": {
+            "basis": "stdout bytes recorded by smll wrapper stats; displayed token savings are floor(saved_bytes / 4)",
+            "input_bytes": raw_stdout_bytes,
+            "output_bytes": smll_stdout_bytes,
+            "saved_bytes": smll_saved_bytes,
+            "estimated_tokens_saved": smll_saved_bytes // 4,
+            "exact_benchmark_tokens_saved": raw_tokens - smll_tokens,
+            "estimated_vs_exact_delta": (smll_saved_bytes // 4) - (raw_tokens - smll_tokens),
+            "omitted_raw_stderr_bytes": raw_stderr_bytes,
+            "omitted_smll_stderr_bytes": smll_stderr_bytes,
+            "factuality": "Factual for smll's recorded stdout byte totals; not factual for tokenizer tokens or full agent-visible stdout+stderr.",
+        },
+        "rtk_gain": {
+            "basis": "ceil(combined stdout+stderr bytes / 4) token estimates, with per-command saved_tokens clamped at zero",
+            "estimated_input_tokens": rtk_input_estimate,
+            "estimated_output_tokens": rtk_output_estimate,
+            "estimated_tokens_saved": rtk_saved_estimate,
+            "exact_benchmark_tokens_saved": raw_tokens - rtk_tokens,
+            "estimated_vs_exact_delta": rtk_saved_estimate - (raw_tokens - rtk_tokens),
+            "exact_positive_tokens_saved": sum(max(row["raw"]["tokens"] - row["rtk"]["tokens"], 0) for row in cases),
+            "exact_expansion_tokens": sum(max(row["rtk"]["tokens"] - row["raw"]["tokens"], 0) for row in cases),
+            "expansion_case_count": len(rtk_expansion_cases),
+            "expansion_cases": rtk_expansion_cases,
+            "factuality": "Factual for rtk's stored heuristic estimates; not factual for tokenizer tokens, and expansion cases do not reduce saved_tokens.",
+        },
+    }
+
+
 def rel_link(path: pathlib.Path, base: pathlib.Path | None) -> str:
     if base is None:
         return str(path)
@@ -358,11 +409,43 @@ def render_markdown(result: dict, markdown_path: pathlib.Path | None) -> str:
         "",
         "Each row runs the same command three ways: the normal command, `smll <command>`, and `rtk <command>`. Full captured outputs are embedded below and written next to this report.",
         "",
-        "## Categories",
+        "## Tool Stats Models",
         "",
-        "| category | raw | smll | rtk | winner | smll saved | rtk saved |",
-        "|---|---:|---:|---:|---|---:|---:|",
+        "These rows model what each tool's own cumulative stats feature would report for this benchmark. They are diagnostics, not the benchmark score above.",
+        "",
+        "| stats source | basis | dashboard estimate | exact benchmark equivalent | gap | factuality |",
+        "|---|---|---:|---:|---:|---|",
     ]
+    stats_models = result["stats_models"]
+    smll_stats = stats_models["smll_stats"]
+    rtk_gain = stats_models["rtk_gain"]
+    lines.extend(
+        [
+            "| `smll --stats` | stdout bytes, then saved bytes / 4 | {estimate} saved tokens | {exact} saved tokens | {gap} | {note} |".format(
+                estimate=fmt_int(smll_stats["estimated_tokens_saved"]),
+                exact=fmt_int(smll_stats["exact_benchmark_tokens_saved"]),
+                gap=fmt_int(smll_stats["estimated_vs_exact_delta"]),
+                note=smll_stats["factuality"],
+            ),
+            "| `rtk gain` | combined bytes / 4, per-command saved tokens clamped at zero | {estimate} saved tokens | {exact} net saved tokens | {gap} | {note} |".format(
+                estimate=fmt_int(rtk_gain["estimated_tokens_saved"]),
+                exact=fmt_int(rtk_gain["exact_benchmark_tokens_saved"]),
+                gap=fmt_int(rtk_gain["estimated_vs_exact_delta"]),
+                note=rtk_gain["factuality"],
+            ),
+            "",
+            "`smll --stats` would omit {raw_stderr} raw stderr bytes from this benchmark's input accounting. `rtk gain` would hide {expansion_cases} expansion cases totaling {expansion_tokens} exact tokenizer tokens because its saved-token field saturates each command at zero.".format(
+                raw_stderr=fmt_int(smll_stats["omitted_raw_stderr_bytes"]),
+                expansion_cases=fmt_int(rtk_gain["expansion_case_count"]),
+                expansion_tokens=fmt_int(rtk_gain["exact_expansion_tokens"]),
+            ),
+            "",
+            "## Categories",
+            "",
+            "| category | raw | smll | rtk | winner | smll saved | rtk saved |",
+            "|---|---:|---:|---:|---|---:|---:|",
+        ]
+    )
     for row in result["categories"]:
         lines.append(
             "| {category} | {raw} | {smll} | {rtk} | {winner} | {smll_pct:.1f}% | {rtk_pct:.1f}% |".format(
@@ -457,6 +540,16 @@ def render_console_summary(result: dict) -> str:
         f"smll tokens: {fmt_int(summary['smll_tokens'])} ({summary['smll_savings_pct']:.1f}% saved)",
         f"rtk tokens: {fmt_int(summary['rtk_tokens'])} ({summary['rtk_savings_pct']:.1f}% saved)",
         f"Tokenizer: {result['tokenizer']['actual']} (requested: {result['tokenizer']['requested']})",
+        "",
+        "Tool stats models:",
+        "- smll --stats: ~{estimate} saved tokens; exact benchmark saved {exact}".format(
+            estimate=fmt_int(result["stats_models"]["smll_stats"]["estimated_tokens_saved"]),
+            exact=fmt_int(result["stats_models"]["smll_stats"]["exact_benchmark_tokens_saved"]),
+        ),
+        "- rtk gain: ~{estimate} saved tokens; exact benchmark net saved {exact}".format(
+            estimate=fmt_int(result["stats_models"]["rtk_gain"]["estimated_tokens_saved"]),
+            exact=fmt_int(result["stats_models"]["rtk_gain"]["exact_benchmark_tokens_saved"]),
+        ),
         "",
         "Categories:",
     ]
@@ -722,6 +815,7 @@ def main() -> int:
             "smll_vs_rtk_delta_tokens": smll_total - rtk_total,
         },
         "categories": categories,
+        "stats_models": build_stats_models(cases_out, raw_total, smll_total, rtk_total),
         "cases": cases_out,
     }
 
