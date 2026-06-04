@@ -66,7 +66,13 @@
       "signals": [
         "fix: third line",
         "feat: extend a.txt"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "fix: third line",
+          "[+10 lines omitted]"
+        ]
+      }
     },
     {
       "name": "git-log-large",
@@ -79,7 +85,13 @@
       "signals": [
         "BENCH-FINAL",
         "BENCH-30"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "feat(finale)",
+          "[+280 lines omitted]"
+        ]
+      }
     },
     {
       "name": "git-show-simple",
@@ -204,7 +216,12 @@
       "signals": [
         "feat(large)",
         "src/generated/"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "ok"
+        ]
+      }
     },
     {
       "name": "git-branch-list",
@@ -270,7 +287,13 @@
       "signals": [
         "unused variable",
         "Finished dev"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "unused variable",
+          "cargo build: 0 errors, 1 warnings"
+        ]
+      }
     },
     {
       "name": "cargo-build-large",
@@ -403,6 +426,16 @@
       ],
       "fixture": "tests/fixtures/go_test_v.txt",
       "exit_code": 1,
+      "arg_fixtures": [
+        {
+          "args": [
+            "test",
+            "-json"
+          ],
+          "fixture": "benchmarks/smll-vs-rtk/fixtures/go_test_json_failed.txt",
+          "exit_code": 1
+        }
+      ],
       "signals": [
         "TestDivide",
         "sqrt(-1)"
@@ -413,9 +446,11 @@
       "category": "tests",
       "command": [
         "tsc",
-        "--noEmit"
+        "--noEmit",
+        "--pretty",
+        "false"
       ],
-      "fixture": "tests/fixtures/tsc_errors.txt",
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/tsc_errors_concise.txt",
       "exit_code": 2,
       "signals": [
         "TS2322",
@@ -630,6 +665,16 @@
         "ps"
       ],
       "fixture": "tests/fixtures/docker_ps.txt",
+      "arg_fixtures": [
+        {
+          "args": [
+            "ps",
+            "--format",
+            "{{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}"
+          ],
+          "fixture": "benchmarks/smll-vs-rtk/fixtures/docker_ps_rtk_format.txt"
+        }
+      ],
       "signals": [
         "helios-assistant",
         "helios-mysql"
@@ -729,7 +774,12 @@
       "fixture": "tests/fixtures/find_ls.txt",
       "signals": [
         "./src/main.zig"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "src/ main.zig"
+        ]
+      }
     },
     {
       "name": "find-ls-large",
@@ -832,7 +882,12 @@
       "signals": [
         "Example Domain",
         "HTTP/2 200"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "Example Domain"
+        ]
+      }
     },
     {
       "name": "curl-verbose-large",
@@ -908,7 +963,13 @@
       "signals": [
         "react 18.2.0",
         "deprecated"
-      ]
+      ],
+      "tool_signals": {
+        "rtk": [
+          "react 18.2.0",
+          "react-dom 18.2.0"
+        ]
+      }
     },
     {
       "name": "bun-install",

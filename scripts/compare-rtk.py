@@ -20,6 +20,15 @@ from typing import Iterable
 
 
 @dataclasses.dataclass(frozen=True)
+class ArgFixture:
+    args: tuple[str, ...]
+    fixture: str
+    stderr_fixture: str | None = None
+    stream: str = "stdout"
+    exit_code: int | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class Case:
     name: str
     category: str
@@ -30,6 +39,8 @@ class Case:
     stream: str = "stdout"
     exit_code: int = 0
     signals: tuple[str, ...] = ()
+    tool_signals: dict[str, tuple[str, ...]] = dataclasses.field(default_factory=dict)
+    arg_fixtures: tuple[ArgFixture, ...] = ()
     git_porcelain: str | None = None
     git_stat: str | None = None
 
@@ -98,6 +109,20 @@ def load_cases(root: pathlib.Path, profile: str) -> tuple[Case, ...]:
                 stream=item.get("stream", "stdout"),
                 exit_code=item.get("exit_code", 0),
                 signals=tuple(item.get("signals", ())),
+                tool_signals={
+                    tool: tuple(signals)
+                    for tool, signals in item.get("tool_signals", {}).items()
+                },
+                arg_fixtures=tuple(
+                    ArgFixture(
+                        args=tuple(variant["args"]),
+                        fixture=variant["fixture"],
+                        stderr_fixture=variant.get("stderr_fixture"),
+                        stream=variant.get("stream", "stdout"),
+                        exit_code=variant.get("exit_code"),
+                    )
+                    for variant in item.get("arg_fixtures", ())
+                ),
                 git_porcelain=item.get("git_porcelain"),
                 git_stat=item.get("git_stat"),
             )
@@ -160,22 +185,20 @@ def write_fake_tool(case: Case, bin_dir: pathlib.Path, root: pathlib.Path) -> No
         "set -euo pipefail",
         f"fixture={shlex.quote(str(fixture_path))}",
         f"stderr_fixture={stderr_fixture}",
+        f"stream={shlex.quote(case.stream)}",
         f"exit_code={case.exit_code}",
         "emit_fixture() {",
+        '  if [ -n "$stderr_fixture" ]; then',
+        '    cat "$fixture"',
+        '    cat "$stderr_fixture" >&2',
+        '  elif [ "$stream" = "stderr" ]; then',
+        '    cat "$fixture" >&2',
+        "  else",
+        '    cat "$fixture"',
+        "  fi",
+        '  exit "$exit_code"',
+        "}",
     ]
-    if case.stderr_fixture is not None:
-        script.append('  cat "$fixture"')
-        script.append('  cat "$stderr_fixture" >&2')
-    elif case.stream == "stderr":
-        script.append('  cat "$fixture" >&2')
-    else:
-        script.append('  cat "$fixture"')
-    script.extend(
-        [
-            '  exit "$exit_code"',
-            "}",
-        ]
-    )
 
     if tool == "git" and case.command[1] == "status" and case.git_porcelain is not None:
         porcelain_path = bin_dir / "git-status-porcelain.txt"
@@ -209,11 +232,36 @@ def write_fake_tool(case: Case, bin_dir: pathlib.Path, root: pathlib.Path) -> No
             ]
         )
 
+    for idx, variant in enumerate(case.arg_fixtures):
+        variant_fixture = root / variant.fixture
+        variant_stderr = shlex.quote(str(root / variant.stderr_fixture)) if variant.stderr_fixture else ""
+        condition = shell_args_condition(variant.args)
+        script.extend(
+            [
+                f"if {condition}; then",
+                f"  fixture={shlex.quote(str(variant_fixture))}",
+                f"  stderr_fixture={variant_stderr}",
+                f"  stream={shlex.quote(variant.stream)}",
+                f"  exit_code={case.exit_code if variant.exit_code is None else variant.exit_code}",
+                "  emit_fixture",
+                "fi",
+            ]
+        )
+        if idx == 0:
+            script.append("")
+
     script.append("emit_fixture")
 
     path = bin_dir / tool
     path.write_text("\n".join(script) + "\n", encoding="utf-8")
     path.chmod(0o755)
+
+
+def shell_args_condition(args: tuple[str, ...]) -> str:
+    checks = [f'[ "$#" -eq {len(args)} ]']
+    for idx, arg in enumerate(args, start=1):
+        checks.append(f'[ "${{{idx}:-}}" = {shlex.quote(arg)} ]')
+    return " && ".join(checks)
 
 
 def timed_run(
@@ -259,6 +307,10 @@ def timed_run(
 def missing_signals(data: bytes, signals: Iterable[str]) -> list[str]:
     text = data.decode("utf-8", errors="replace")
     return [signal for signal in signals if signal not in text]
+
+
+def signals_for(case: Case, tool: str) -> tuple[str, ...]:
+    return case.tool_signals.get(tool, case.signals)
 
 
 def pct(saved_from: int, output: int) -> float:
@@ -554,9 +606,9 @@ def main() -> int:
             raw_tokens = count_run_tokens(counter, raw_run)
             smll_tokens = count_run_tokens(counter, smll_run)
             rtk_tokens = count_run_tokens(counter, rtk_run)
-            raw_missing = missing_signals(raw_run.combined, case.signals)
-            smll_missing = missing_signals(smll_run.combined, case.signals)
-            rtk_missing = missing_signals(rtk_run.combined, case.signals)
+            raw_missing = missing_signals(raw_run.combined, signals_for(case, "raw"))
+            smll_missing = missing_signals(smll_run.combined, signals_for(case, "smll"))
+            rtk_missing = missing_signals(rtk_run.combined, signals_for(case, "rtk"))
 
             for tool, missing in (("raw", raw_missing), ("smll", smll_missing), ("rtk", rtk_missing)):
                 if missing:
@@ -584,6 +636,11 @@ def main() -> int:
                     "category": case.category,
                     "command": command_display,
                     "fixture": case.fixture,
+                    "signals": {
+                        "raw": list(signals_for(case, "raw")),
+                        "smll": list(signals_for(case, "smll")),
+                        "rtk": list(signals_for(case, "rtk")),
+                    },
                     "winner": winner(smll_tokens, rtk_tokens),
                     "raw": {
                         "bytes": len(raw_run.combined),

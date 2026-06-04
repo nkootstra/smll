@@ -1,0 +1,4 @@
+880cbe493a4d	helios-assistant	Up 22 hours (healthy)	helios:local	0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp
+44f238c373ad	helios-convex-dashboard	Up 35 hours	ghcr.io/get-convex/convex-dashboard:latest	127.0.0.1:6791->6791/tcp
+f35a0a8862ce	helios-convex-backend	Up 36 hours (healthy)	ghcr.io/get-convex/convex-backend:latest	127.0.0.1:3210-3211->3210-3211/tcp
+22ea130778fa	helios-mysql	Up 36 hours (healthy)	mysql:8.4	3306/tcp, 33060/tcp
