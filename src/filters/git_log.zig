@@ -47,9 +47,44 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 }
 
 /// v0.6 default for wrapper mode: emit `<sha7> <subject>` one line per commit.
-/// Drops date, author, body, merge parents. The hash remains actionable
-/// (git show <sha7>, git cherry-pick <sha7>). Target ~2× reduction vs default.
+/// Drops date, author, merge parents, and prose body lines. The hash remains
+/// actionable (`git show <sha7>`), while important trailers such as `Refs:` and
+/// `Fixes:` are kept inline because agents often use them to connect commits to
+/// issues/tasks.
 pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = allocator;
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    var current: CompactCommit = .{};
+    var first_out = true;
+
+    while (lines.next()) |line| {
+        if (isCommitLine(line)) {
+            try flushCompactCommit(writer, &current, &first_out);
+            current = .{};
+            current.sha7 = util.sha7(line["commit ".len..][0..40]);
+            current.has_sha = true;
+            continue;
+        }
+
+        if (!current.has_sha or !std.mem.startsWith(u8, line, "    ")) continue;
+        const body_line = std.mem.trim(u8, line[4..], " \t\r");
+        if (body_line.len == 0) continue;
+        if (current.subject_len == 0) {
+            current.copySubject(body_line);
+        } else if (isImportantCompactBodyLine(body_line)) {
+            current.appendImportant(body_line);
+        }
+    }
+    try flushCompactCommit(writer, &current, &first_out);
+    if (!first_out) try writer.writeByte('\n');
+}
+
+/// Compact header format for commands such as `git show`, where commit body
+/// text is adjacent to a diff and can be important review context.
+pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
     if (stdout.len == 0) return;
@@ -70,30 +105,19 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
             continue;
         }
         if (!sha7_valid) continue;
-        // Skip header lines (Author:, Date:, Merge:)
         if (!subject_emitted) {
             if (!std.mem.startsWith(u8, line, "    ")) continue;
             const subject = std.mem.trim(u8, line[4..], " \t\r");
             if (subject.len == 0) continue;
-            // Emit sha7 + subject
-            var hdr: [9]u8 = undefined;
-            if (!first_out) {
-                hdr[0] = '\n';
-                @memcpy(hdr[1..8], &sha7);
-                hdr[8] = ' ';
-                try writer.writeAll(&hdr);
-            } else {
-                @memcpy(hdr[0..7], &sha7);
-                hdr[7] = ' ';
-                try writer.writeAll(hdr[0..8]);
-            }
+            if (!first_out) try writer.writeByte('\n');
+            try writer.writeAll(&sha7);
+            try writer.writeByte(' ');
             try writer.writeAll(subject);
             first_out = false;
             subject_emitted = true;
             in_body = true;
             continue;
         }
-        // Body lines: 4-space-indented text after subject
         if (in_body and std.mem.startsWith(u8, line, "    ")) {
             const body_line = std.mem.trim(u8, line[4..], " \t\r");
             if (body_line.len > 0) {
@@ -102,12 +126,71 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
                 try writer.writeAll(body_line);
             }
         } else if (line.len == 0 and in_body) {
-            // Blank line between subject and body — skip
+            // Blank line between subject and body — skip.
         } else {
             in_body = false;
         }
     }
     if (!first_out) try writer.writeByte('\n');
+}
+
+const CompactCommit = struct {
+    has_sha: bool = false,
+    sha7: [7]u8 = undefined,
+    subject: [512]u8 = undefined,
+    subject_len: usize = 0,
+    important: [768]u8 = undefined,
+    important_len: usize = 0,
+
+    fn copySubject(self: *CompactCommit, subject: []const u8) void {
+        self.subject_len = @min(subject.len, self.subject.len);
+        @memcpy(self.subject[0..self.subject_len], subject[0..self.subject_len]);
+    }
+
+    fn appendImportant(self: *CompactCommit, line: []const u8) void {
+        const sep = if (self.important_len == 0) "" else "; ";
+        if (self.important_len + sep.len >= self.important.len) return;
+        @memcpy(self.important[self.important_len .. self.important_len + sep.len], sep);
+        self.important_len += sep.len;
+
+        const room = self.important.len - self.important_len;
+        const n = @min(line.len, room);
+        @memcpy(self.important[self.important_len .. self.important_len + n], line[0..n]);
+        self.important_len += n;
+    }
+};
+
+fn flushCompactCommit(writer: *Writer, commit: *const CompactCommit, first_out: *bool) !void {
+    if (!commit.has_sha or commit.subject_len == 0) return;
+    if (!first_out.*) try writer.writeByte('\n');
+    try writer.writeAll(&commit.sha7);
+    try writer.writeByte(' ');
+    try writer.writeAll(commit.subject[0..commit.subject_len]);
+    if (commit.important_len > 0) {
+        try writer.writeAll(" [");
+        try writer.writeAll(commit.important[0..commit.important_len]);
+        try writer.writeByte(']');
+    }
+    first_out.* = false;
+}
+
+fn isImportantCompactBodyLine(line: []const u8) bool {
+    const prefixes = [_][]const u8{
+        "Refs:",
+        "Ref:",
+        "Fixes:",
+        "Closes:",
+        "Resolves:",
+        "Related:",
+        "Issue:",
+        "BREAKING CHANGE",
+        "Co-authored-by:",
+        "Signed-off-by:",
+    };
+    for (prefixes) |prefix| {
+        if (std.mem.startsWith(u8, line, prefix)) return true;
+    }
+    return false;
 }
 
 fn applyInner(input: []const u8, writer: *Writer) !void {
@@ -479,7 +562,7 @@ test "apply: preserves trailing newline when input has one" {
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
 }
 
-test "applyCompact: emits sha7 + subject + body, drops date/author" {
+test "applyCompact: emits sha7 + subject, drops date/author/prose body" {
     const allocator = std.testing.allocator;
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -492,12 +575,33 @@ test "applyCompact: emits sha7 + subject + body, drops date/author" {
     // Date + author stripped
     try std.testing.expect(std.mem.find(u8, got, "2026-04-18") == null);
     try std.testing.expect(std.mem.find(u8, got, "Alice Anderson") == null);
-    // Body preserved (agents need context)
-    try std.testing.expect(std.mem.find(u8, got, "This body explains") != null);
+    // Prose body is intentionally dropped in wrapper mode; the hash is the
+    // actionable handle for detail (`git show <sha7>`).
+    try std.testing.expect(std.mem.find(u8, got, "This body explains") == null);
     // Strictly smaller than default apply
     const lossless = try applyToString(allocator, linear_fixture);
     defer allocator.free(lossless);
     try std.testing.expect(got.len < lossless.len);
+}
+
+test "applyCompact: preserves important commit trailers inline" {
+    const allocator = std.testing.allocator;
+    const input =
+        "commit abcdef0123456789abcdef0123456789abcdef01\n" ++
+        "Author: Alice <a@example.com>\n" ++
+        "Date:   Sat Apr 18 09:00:00 2026 +0000\n" ++
+        "\n" ++
+        "    feat: group status output\n" ++
+        "\n" ++
+        "    This paragraph is useful in a release note but noisy in an agent trace.\n" ++
+        "    Refs: BENCH-42\n" ++
+        "    Fixes: #123\n";
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyCompact(allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "abcdef0 feat: group status output [Refs: BENCH-42; Fixes: #123]\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "release note") == null);
 }
 
 test "pipe-mode idempotence: v0.4 log output piped again is unchanged" {

@@ -621,6 +621,13 @@ fn runWrapper(
 var last_input_bytes: usize = 0;
 var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
+/// Coarse dispatch label for `--explain` / `SMLL_DEBUG=1`. Each top-level
+/// command-family arm in runWrapperInner sets this before its filter runs;
+/// the default "passthrough" stands for head/tail, lossless mode, and any
+/// command that no bespoke arm claims. Granularity is intentionally
+/// command-family level for v1 — the in/out byte counts in the `--explain`
+/// footer already reveal whether compaction actually happened.
+var last_filter_name: []const u8 = "passthrough";
 /// Raw child streams stashed for the tee-recovery hook in `runWrapper`. The
 /// slices remain valid for the wrapper's lifetime (arena-owned) but only the
 /// outermost `runWrapper` call reads them, so module-level state is safe.
@@ -689,18 +696,16 @@ fn runWrapperInner(
     else
         outer_cmd;
 
-    var ls_env_old_lc_all: ?[]const u8 = null;
-    var ls_env_modified = false;
-    defer if (ls_env_modified) {
-        // Restore original LC_ALL (best-effort, single-threaded so safe).
-        @constCast(environ).put("LC_ALL", ls_env_old_lc_all orelse "") catch {};
-    };
+    var ls_env_map = std.process.Environ.Map.init(allocator);
+    var ls_env_map_active = false;
+    defer if (ls_env_map_active) ls_env_map.deinit();
     const spawn_env: ?*const std.process.Environ.Map = blk: {
         if (std.mem.eql(u8, cmd_basename, "ls")) {
-            ls_env_old_lc_all = environ.get("LC_ALL");
-            @constCast(environ).put("LC_ALL", "C") catch break :blk null;
-            ls_env_modified = true;
-            break :blk environ;
+            ls_env_map = environ.clone(allocator) catch break :blk null;
+            ls_env_map_active = true;
+            ls_env_map.put("LC_ALL", "C") catch break :blk null;
+            ls_env_map.put("LANG", "C") catch break :blk null;
+            break :blk &ls_env_map;
         }
         break :blk null;
     };
@@ -1070,7 +1075,9 @@ fn runWrapperInner(
     }
 
     if (eqAny(cmd_basename, &.{ "pip", "pip3" })) {
-        if (!lossless and eqAny(arg1, &.{ "list", "outdated" })) {
+        const is_pip_table = eqAny(arg1, &.{ "list", "outdated" });
+        const is_pip_install = eqAny(arg1, &.{ "install", "download", "wheel" });
+        if (!lossless and (is_pip_table or (is_pip_install and (pip_compact.matches(stdout_slice) or pip_compact.matches(stderr_slice))))) {
             pip_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
                 return 1;

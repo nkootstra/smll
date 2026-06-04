@@ -95,6 +95,30 @@ pub fn matches(input: []const u8) bool {
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
+    if (looksLikePnpm(stdout) or looksLikePnpm(stderr)) {
+        var summary = PnpmSummary.init();
+        defer summary.deinit(allocator);
+        try scanPnpm(allocator, stdout, &summary);
+        try scanPnpm(allocator, stderr, &summary);
+        if (try summary.write(writer)) return;
+    }
+
+    if (looksLikeNpm(stdout) or looksLikeNpm(stderr)) {
+        var summary = NpmSummary.init();
+        defer summary.deinit(allocator);
+        try scanNpm(allocator, stdout, &summary);
+        try scanNpm(allocator, stderr, &summary);
+        if (try summary.write(writer)) return;
+    }
+
+    if (looksLikeBunYarn(stdout) or looksLikeBunYarn(stderr)) {
+        var summary = JsInstallSummary.init();
+        defer summary.deinit(allocator);
+        try scanBunYarn(allocator, stdout, &summary);
+        try scanBunYarn(allocator, stderr, &summary);
+        if (try summary.write(writer)) return;
+    }
+
     var scratch = std.ArrayList(u8).empty;
     defer scratch.deinit(allocator);
 
@@ -107,6 +131,338 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         return;
     }
     try writer.writeAll(scratch.items);
+}
+
+const NameList = struct {
+    count: usize = 0,
+    items: std.ArrayList(u8) = .empty,
+
+    fn deinit(self: *NameList, allocator: Allocator) void {
+        self.items.deinit(allocator);
+    }
+
+    fn add(self: *NameList, allocator: Allocator, name: []const u8) !void {
+        self.count += 1;
+        if (self.count > 8) return;
+        if (self.items.items.len > 0) try self.items.appendSlice(allocator, ", ");
+        try self.items.appendSlice(allocator, name);
+    }
+
+    fn writeSummary(self: *const NameList, writer: *Writer, label: []const u8) !bool {
+        if (self.count == 0) return false;
+        try writer.writeAll(label);
+        try writer.writeAll(" x");
+        try ansi.writeDecimal(writer, self.count);
+        if (self.items.items.len > 0) {
+            try writer.writeAll(": ");
+            try writer.writeAll(self.items.items);
+            if (self.count > 8) try writer.writeAll(", ...");
+        }
+        try writer.writeByte('\n');
+        return true;
+    }
+
+    fn writeAddedSummary(self: *const NameList, writer: *Writer, label: []const u8) !bool {
+        if (self.count == 0) return false;
+        try writer.writeAll(label);
+        try writer.writeAll(" +");
+        try ansi.writeDecimal(writer, self.count);
+        if (self.items.items.len > 0) {
+            try writer.writeAll(": ");
+            try writer.writeAll(self.items.items);
+            if (self.count > 8) try writer.writeAll(", ...");
+        }
+        try writer.writeByte('\n');
+        return true;
+    }
+};
+
+const NpmSummary = struct {
+    deprecations: NameList = .{},
+    lines: std.ArrayList(u8) = .empty,
+
+    fn init() NpmSummary {
+        return .{};
+    }
+
+    fn deinit(self: *NpmSummary, allocator: Allocator) void {
+        self.deprecations.deinit(allocator);
+        self.lines.deinit(allocator);
+    }
+
+    fn write(self: *const NpmSummary, writer: *Writer) !bool {
+        var wrote = false;
+        if (try self.deprecations.writeSummary(writer, "deprecated")) wrote = true;
+        if (self.lines.items.len > 0) {
+            try writer.writeAll(self.lines.items);
+            wrote = true;
+        }
+        return wrote;
+    }
+};
+
+const PnpmSummary = struct {
+    head: std.ArrayList(u8) = .empty,
+    deprecations: NameList = .{},
+    deps: NameList = .{},
+    dev_deps: NameList = .{},
+    tail: std.ArrayList(u8) = .empty,
+
+    fn init() PnpmSummary {
+        return .{};
+    }
+
+    fn deinit(self: *PnpmSummary, allocator: Allocator) void {
+        self.head.deinit(allocator);
+        self.deprecations.deinit(allocator);
+        self.deps.deinit(allocator);
+        self.dev_deps.deinit(allocator);
+        self.tail.deinit(allocator);
+    }
+
+    fn write(self: *const PnpmSummary, writer: *Writer) !bool {
+        var wrote = false;
+        if (self.head.items.len > 0) {
+            try writer.writeAll(self.head.items);
+            wrote = true;
+        }
+        if (try self.deprecations.writeSummary(writer, "deprecated")) wrote = true;
+        if (try self.deps.writeAddedSummary(writer, "deps")) wrote = true;
+        if (try self.dev_deps.writeAddedSummary(writer, "dev")) wrote = true;
+        if (self.tail.items.len > 0) {
+            try writer.writeAll(self.tail.items);
+            wrote = true;
+        }
+        return wrote;
+    }
+};
+
+const JsInstallSummary = struct {
+    head: std.ArrayList(u8) = .empty,
+    deps: NameList = .{},
+    tail: std.ArrayList(u8) = .empty,
+
+    fn init() JsInstallSummary {
+        return .{};
+    }
+
+    fn deinit(self: *JsInstallSummary, allocator: Allocator) void {
+        self.head.deinit(allocator);
+        self.deps.deinit(allocator);
+        self.tail.deinit(allocator);
+    }
+
+    fn write(self: *const JsInstallSummary, writer: *Writer) !bool {
+        var wrote = false;
+        if (self.head.items.len > 0) {
+            try writer.writeAll(self.head.items);
+            wrote = true;
+        }
+        if (try self.deps.writeAddedSummary(writer, "deps")) wrote = true;
+        if (self.tail.items.len > 0) {
+            try writer.writeAll(self.tail.items);
+            wrote = true;
+        }
+        return wrote;
+    }
+};
+
+fn looksLikeNpm(input: []const u8) bool {
+    return std.mem.find(u8, input, "npm WARN") != null or
+        std.mem.find(u8, input, "npm notice") != null or
+        std.mem.find(u8, input, "audited ") != null or
+        std.mem.find(u8, input, "run `npm audit`") != null;
+}
+
+fn looksLikePnpm(input: []const u8) bool {
+    return std.mem.find(u8, input, "Packages: +") != null or
+        std.mem.find(u8, input, "Packages: -") != null or
+        std.mem.find(u8, input, "Progress: ") != null or
+        std.mem.find(u8, input, "Lockfile is up to date") != null or
+        std.mem.find(u8, input, "\ndependencies:\n") != null or
+        std.mem.find(u8, input, "\ndevDependencies:\n") != null;
+}
+
+fn looksLikeBunYarn(input: []const u8) bool {
+    return std.mem.find(u8, input, "bun add v") != null or
+        std.mem.find(u8, input, "bun install v") != null or
+        std.mem.find(u8, input, " packages installed [") != null or
+        std.mem.find(u8, input, "yarn add v") != null or
+        std.mem.find(u8, input, "success Saved ") != null or
+        std.mem.find(u8, input, "info Direct dependencies") != null;
+}
+
+fn scanNpm(allocator: Allocator, input: []const u8, summary: *NpmSummary) !void {
+    if (input.len == 0) return;
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+    while (lines.next()) |raw| {
+        const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.startsWith(u8, trimmed, "npm WARN deprecated ")) {
+            const rest = trimmed["npm WARN deprecated ".len..];
+            try summary.deprecations.add(allocator, deprecatedPackageName(rest));
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "npm WARN") or
+            std.mem.startsWith(u8, trimmed, "npm ERR!") or
+            std.mem.startsWith(u8, trimmed, "npm error") or
+            std.mem.startsWith(u8, trimmed, "npm err!"))
+        {
+            try appendLine(allocator, &summary.lines, trimmed);
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "added ") or
+            std.mem.startsWith(u8, trimmed, "removed ") or
+            std.mem.startsWith(u8, trimmed, "changed ") or
+            std.mem.startsWith(u8, trimmed, "up to date") or
+            std.mem.startsWith(u8, trimmed, "up-to-date") or
+            std.mem.startsWith(u8, trimmed, "audited ") or
+            std.mem.startsWith(u8, trimmed, "found "))
+        {
+            try appendLine(allocator, &summary.lines, trimmed);
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "run `npm audit`")) {
+            try appendLine(allocator, &summary.lines, trimmed);
+        }
+    }
+}
+
+fn scanPnpm(allocator: Allocator, input: []const u8, summary: *PnpmSummary) !void {
+    if (input.len == 0) return;
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+    var section: enum { none, deps, dev_deps } = .none;
+    while (lines.next()) |raw| {
+        const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.eql(u8, trimmed, "dependencies:")) {
+            section = .deps;
+            continue;
+        }
+        if (std.mem.eql(u8, trimmed, "devDependencies:")) {
+            section = .dev_deps;
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "+ ")) {
+            switch (section) {
+                .deps => try summary.deps.add(allocator, trimmed[2..]),
+                .dev_deps => try summary.dev_deps.add(allocator, trimmed[2..]),
+                .none => {},
+            }
+            continue;
+        }
+        section = .none;
+
+        if (std.mem.find(u8, trimmed, "deprecated ") != null and
+            std.mem.startsWith(u8, trimmed, "WARN"))
+        {
+            const idx = std.mem.indexOf(u8, trimmed, "deprecated ") orelse unreachable;
+            try summary.deprecations.add(allocator, deprecatedPackageName(trimmed[idx + "deprecated ".len ..]));
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "Already up to date")) {
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "WARN ") or
+            std.mem.startsWith(u8, trimmed, "ERROR "))
+        {
+            try appendLine(allocator, &summary.head, trimmed);
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "Packages: ") or
+            std.mem.startsWith(u8, trimmed, "Done in "))
+        {
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "added ") or
+            std.mem.startsWith(u8, trimmed, "removed ") or
+            std.mem.startsWith(u8, trimmed, "changed ") or
+            std.mem.startsWith(u8, trimmed, "audited ") or
+            std.mem.startsWith(u8, trimmed, "found "))
+        {
+            try appendLine(allocator, &summary.tail, trimmed);
+            continue;
+        }
+    }
+}
+
+fn scanBunYarn(allocator: Allocator, input: []const u8, summary: *JsInstallSummary) !void {
+    if (input.len == 0) return;
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+    var in_yarn_direct_deps = false;
+    while (lines.next()) |raw| {
+        const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.startsWith(u8, trimmed, "warn:") or
+            std.mem.startsWith(u8, trimmed, "error:") or
+            std.mem.startsWith(u8, trimmed, "warning ") or
+            std.mem.startsWith(u8, trimmed, "error "))
+        {
+            try appendLine(allocator, &summary.head, trimmed);
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "installed ")) {
+            const pkg = firstToken(trimmed["installed ".len..]);
+            if (pkg.len > 0) try summary.deps.add(allocator, pkg);
+            continue;
+        }
+
+        if (std.mem.eql(u8, trimmed, "info Direct dependencies")) {
+            in_yarn_direct_deps = true;
+            continue;
+        }
+        if (std.mem.eql(u8, trimmed, "info All dependencies")) {
+            in_yarn_direct_deps = false;
+            continue;
+        }
+        if (in_yarn_direct_deps) {
+            if (yarnTreePackage(trimmed)) |pkg| {
+                try summary.deps.add(allocator, pkg);
+            }
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, trimmed, "success Saved ") and
+            std.mem.find(u8, trimmed, "lockfile") == null)
+        {
+            try appendLine(allocator, &summary.tail, trimmed);
+            continue;
+        }
+        if (std.mem.startsWith(u8, trimmed, "Done in ") or
+            std.mem.find(u8, trimmed, " packages installed [") != null)
+        {
+            try appendLine(allocator, &summary.tail, trimmed);
+            continue;
+        }
+    }
+}
+
+fn appendLine(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8) !void {
+    try out.appendSlice(allocator, line);
+    try out.append(allocator, '\n');
+}
+
+fn deprecatedPackageName(rest: []const u8) []const u8 {
+    var token_end: usize = 0;
+    while (token_end < rest.len and rest[token_end] != ':' and rest[token_end] != ' ' and rest[token_end] != '\t') : (token_end += 1) {}
+    const token = rest[0..token_end];
+    if (std.mem.lastIndexOfScalar(u8, token, '@')) |at| {
+        if (at > 0) return token[0..at];
+    }
+    return token;
 }
 
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
@@ -146,6 +502,19 @@ fn firstToken(s: []const u8) []const u8 {
     var i: usize = 0;
     while (i < t.len and t[i] != ' ' and t[i] != '\t') : (i += 1) {}
     return t[0..i];
+}
+
+fn yarnTreePackage(line: []const u8) ?[]const u8 {
+    var start: usize = 0;
+    while (start < line.len and !isPackageStart(line[start])) : (start += 1) {}
+    if (start >= line.len) return null;
+    var end = start;
+    while (end < line.len and line[end] != ' ' and line[end] != '\t') : (end += 1) {}
+    return line[start..end];
+}
+
+fn isPackageStart(c: u8) bool {
+    return std.ascii.isAlphanumeric(c) or c == '@';
 }
 
 fn shouldKeep(line: []const u8) bool {
@@ -220,10 +589,12 @@ test "apply: fixture keeps WARN + summary, drops notice + funding noise" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < input.len);
-    try std.testing.expect(std.mem.find(u8, got, "npm WARN deprecated lodash.isequal@4.5.0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "deprecated x5: lodash.isequal, rimraf, inflight, glob, querystring") != null);
     try std.testing.expect(std.mem.find(u8, got, "added 847 packages") != null);
     try std.testing.expect(std.mem.find(u8, got, "found 2 vulnerabilities") != null);
+    try std.testing.expect(std.mem.find(u8, got, "run `npm audit` for details") != null);
     // Dropped noise.
+    try std.testing.expect(std.mem.find(u8, got, "npm WARN deprecated") == null);
     try std.testing.expect(std.mem.find(u8, got, "npm notice") == null);
     try std.testing.expect(std.mem.find(u8, got, "packages are looking for funding") == null);
     try std.testing.expect(std.mem.find(u8, got, "run `npm fund`") == null);
@@ -259,24 +630,26 @@ test "matches: yarn success Saved" {
     try std.testing.expect(matches("success Saved 5 new dependencies.\nDone in 5.32s.\n"));
 }
 
-test "apply: pnpm fixture keeps WARN + Packages + Done, drops progress + dep list" {
+test "apply: pnpm fixture summarizes WARN + deps, drops duplicate progress/count lines" {
     const input = @embedFile("fixture_pnpm_install");
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < input.len);
-    try std.testing.expect(std.mem.find(u8, got, "WARN  deprecated lodash.isequal") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Packages: +3") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Done in 1.2s") != null);
+    try std.testing.expect(std.mem.find(u8, got, "deprecated x2: lodash.isequal, rimraf") != null);
+    try std.testing.expect(std.mem.find(u8, got, "deps +2: react 18.2.0, react-dom 18.2.0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "dev +1: vite 5.0.0") != null);
     // Dropped chatter.
     try std.testing.expect(std.mem.find(u8, got, "Progress: ") == null);
     try std.testing.expect(std.mem.find(u8, got, "Lockfile is up to date") == null);
-    // Per-package add lines (`+ react 18.2.0`) are not kept — count summary covers them.
-    try std.testing.expect(std.mem.find(u8, got, "+ react ") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Already up to date") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Packages: +3") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Done in 1.2s") == null);
+    try std.testing.expect(std.mem.find(u8, got, "WARN  deprecated") == null);
 }
 
-test "apply: bun fixture keeps warn + packages installed, drops banner + per-pkg" {
+test "apply: bun fixture keeps warn + dependency summary, drops banner + raw per-pkg" {
     const input = @embedFile("fixture_bun_install");
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -284,6 +657,7 @@ test "apply: bun fixture keeps warn + packages installed, drops banner + per-pkg
     const got = out.written();
     try std.testing.expect(got.len < input.len);
     try std.testing.expect(std.mem.find(u8, got, "warn: deprecated lodash.isequal") != null);
+    try std.testing.expect(std.mem.find(u8, got, "deps +3: react@18.2.0, react-dom@18.2.0, vite@5.0.0") != null);
     try std.testing.expect(std.mem.find(u8, got, "3 packages installed [1.23s]") != null);
     // Dropped banner + per-package adds.
     try std.testing.expect(std.mem.find(u8, got, "bun add v") == null);
@@ -322,7 +696,7 @@ test "apply: composer require fixture keeps summary + advisory, drops scaffoldin
     try std.testing.expect(std.mem.find(u8, got, "- Installing guzzlehttp") == null);
 }
 
-test "apply: yarn fixture keeps warning + success + Done, drops banner + dep tree" {
+test "apply: yarn fixture keeps warning + direct dependency summary, drops banner + transitive tree" {
     const input = @embedFile("fixture_yarn_install");
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -330,10 +704,12 @@ test "apply: yarn fixture keeps warning + success + Done, drops banner + dep tre
     const got = out.written();
     try std.testing.expect(got.len < input.len);
     try std.testing.expect(std.mem.find(u8, got, "warning ") != null);
+    try std.testing.expect(std.mem.find(u8, got, "deps +3: react@18.2.0, react-dom@18.2.0, vite@5.0.0") != null);
     try std.testing.expect(std.mem.find(u8, got, "success Saved 3 new dependencies") != null);
     try std.testing.expect(std.mem.find(u8, got, "Done in 5.32s") != null);
     // Dropped banner + progress + dep tree.
     try std.testing.expect(std.mem.find(u8, got, "yarn add v") == null);
     try std.testing.expect(std.mem.find(u8, got, "[1/4]") == null);
     try std.testing.expect(std.mem.find(u8, got, "info Direct") == null);
+    try std.testing.expect(std.mem.find(u8, got, "scheduler@0.23.0") == null);
 }

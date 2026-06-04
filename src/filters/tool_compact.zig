@@ -113,12 +113,20 @@ fn looksLikeDate(field: []const u8) bool {
 
 fn shouldKeepPackage(line: []const u8) bool {
     const t = std.mem.trim(u8, line, " \t");
+    if (std.mem.startsWith(u8, t, "Preparing packages")) return false;
+    if (isPackageChangeLine(t)) return true;
     return contains(t, "ERR!") or contains(t, "WARN") or containsIgnore(t, "error") or
         containsIgnore(t, "failed") or containsIgnore(t, "deprecated") or
         containsIgnore(t, "vulnerab") or containsIgnore(t, "added ") or
         containsIgnore(t, "removed ") or containsIgnore(t, "changed ") or
         containsIgnore(t, "packages") or containsIgnore(t, "done in") or
         std.mem.startsWith(u8, t, "✓") or std.mem.startsWith(u8, t, "✕");
+}
+
+fn isPackageChangeLine(line: []const u8) bool {
+    if (!(std.mem.startsWith(u8, line, "+ ") or std.mem.startsWith(u8, line, "- "))) return false;
+    const rest = std.mem.trim(u8, line[2..], " \t");
+    return rest.len > 0 and std.mem.indexOf(u8, rest, "==") != null;
 }
 
 fn shouldKeepAppleBuild(line: []const u8) bool {
@@ -194,6 +202,23 @@ test "package keeps stderr errors" {
     defer out.deinit();
     try applyPackage(std.testing.allocator, "", "ERR! failed to resolve dependency\n", &out.writer);
     try std.testing.expectEqualStrings("ERR! failed to resolve dependency\n", out.written());
+}
+
+test "package keeps uv install package result lines" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    const input =
+        "  Preparing packages...\n" ++
+        "Installed 5 packages in 23ms\n" ++
+        " + certifi==2023.11.17\n" ++
+        " + requests==2.31.0\n";
+    try applyPackage(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expectEqualStrings(
+        "Installed 5 packages in 23ms\n" ++
+            " + certifi==2023.11.17\n" ++
+            " + requests==2.31.0\n",
+        out.written(),
+    );
 }
 
 test "apple build keeps errors and summary" {

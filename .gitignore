@@ -1,7 +1,10 @@
 .zig-cache/
 zig-out/
+__pycache__/
 docs/plans/
 docs/brainstorms/
 docs/solutions/
-benchmarks/
+benchmarks/*
+!benchmarks/smll-vs-rtk/
+!benchmarks/smll-vs-rtk/**
 autoresearch.*

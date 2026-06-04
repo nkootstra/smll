@@ -37,11 +37,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     _ = stderr;
     const input = stdout;
     const diff_start = findDiffStart(input) orelse {
-        return git_log.applyCompact(allocator, input, &.{}, writer);
+        return git_log.applyCompactWithBody(allocator, input, &.{}, writer);
     };
 
     const header_end = stripTrailingBlankLines(input[0..diff_start]);
-    try git_log.applyCompact(allocator, input[0..header_end], &.{}, writer);
+    try git_log.applyCompactWithBody(allocator, input[0..header_end], &.{}, writer);
     try writer.writeAll("\n");
     try git_diff.apply(allocator, input[diff_start..], &.{}, writer);
 }

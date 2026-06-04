@@ -1,0 +1,8 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+src/Program.cs(10,5): error CS1002: ; expected [/home/user/MyApp/MyApp.csproj]
+
+Build FAILED.
+    0 Warning(s)
+    1 Error(s)
+

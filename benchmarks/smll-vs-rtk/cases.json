@@ -1,0 +1,988 @@
+{
+  "cases": [
+    {
+      "name": "git-status-dirty",
+      "category": "git",
+      "command": [
+        "git",
+        "status"
+      ],
+      "fixture": "tests/fixtures/git_status_dirty.txt",
+      "signals": [
+        "src/main.zig",
+        "src/pipeline.zig"
+      ],
+      "git_porcelain": "## main...origin/main\n M src/main.zig\n M src/pipeline.zig\n?? src/filters/git_status.zig\n?? tests/fixtures/git_status_dirty.txt\n"
+    },
+    {
+      "name": "git-status-large",
+      "category": "git",
+      "command": [
+        "git",
+        "status"
+      ],
+      "fixture": "tests/fixtures/large/git_status.txt",
+      "signals": [
+        "src/components/comp_01.rs"
+      ],
+      "git_porcelain": "## main...origin/main\nA  src/components/comp_01.rs\nA  src/components/comp_02.rs\nA  src/components/comp_03.rs\n M src/mod_01.rs\n M src/mod_02.rs\n?? docs/benchmark-notes.md\n"
+    },
+    {
+      "name": "git-diff-simple",
+      "category": "git",
+      "command": [
+        "git",
+        "diff"
+      ],
+      "fixture": "tests/fixtures/git_diff_simple.txt",
+      "signals": [
+        "line two",
+        "line three"
+      ],
+      "git_stat": " simple.txt | 2 ++\n 1 file changed, 2 insertions(+)\n"
+    },
+    {
+      "name": "git-diff-large",
+      "category": "git",
+      "command": [
+        "git",
+        "diff"
+      ],
+      "fixture": "tests/fixtures/large/git_diff.txt",
+      "signals": [
+        "dirty_tuning_01",
+        "dirty_tuning_05"
+      ],
+      "git_stat": " src/mod_01.rs | 5 +++++\n src/mod_02.rs | 5 +++++\n src/mod_03.rs | 5 +++++\n src/mod_04.rs | 5 +++++\n src/mod_05.rs | 5 +++++\n 12 files changed, 60 insertions(+)\n"
+    },
+    {
+      "name": "git-log-linear",
+      "category": "git",
+      "command": [
+        "git",
+        "log"
+      ],
+      "fixture": "tests/fixtures/git_log_linear.txt",
+      "signals": [
+        "fix: third line",
+        "feat: extend a.txt"
+      ]
+    },
+    {
+      "name": "git-log-large",
+      "category": "git",
+      "command": [
+        "git",
+        "log"
+      ],
+      "fixture": "tests/fixtures/large/git_log.txt",
+      "signals": [
+        "BENCH-FINAL",
+        "BENCH-30"
+      ]
+    },
+    {
+      "name": "git-show-simple",
+      "category": "git",
+      "command": [
+        "git",
+        "show"
+      ],
+      "fixture": "tests/fixtures/git_show_body.txt",
+      "signals": [
+        "feat: extend a.txt",
+        "line2"
+      ]
+    },
+    {
+      "name": "git-show-large",
+      "category": "git",
+      "command": [
+        "git",
+        "show"
+      ],
+      "fixture": "tests/fixtures/large/git_show.txt",
+      "signals": [
+        "BENCH-FINAL",
+        "MOD_01_FINALE_VERSION"
+      ]
+    },
+    {
+      "name": "git-blame-simple",
+      "category": "git",
+      "command": [
+        "git",
+        "blame",
+        "src/main.zig"
+      ],
+      "fixture": "tests/fixtures/git_blame_simple.txt",
+      "signals": [
+        "configure_logging"
+      ]
+    },
+    {
+      "name": "git-blame-large",
+      "category": "git",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "git",
+        "blame",
+        "src/blamed_module.rs"
+      ],
+      "fixture": "tests/fixtures/large/git_blame.txt",
+      "signals": [
+        "blamed_fn_001",
+        "blamed_fn_191"
+      ]
+    },
+    {
+      "name": "git-merge-conflict",
+      "category": "git",
+      "command": [
+        "git",
+        "merge",
+        "feature"
+      ],
+      "fixture": "tests/fixtures/git_merge_conflict.stdout.txt",
+      "exit_code": 1,
+      "signals": [
+        "conflict.txt"
+      ]
+    },
+    {
+      "name": "git-merge-large",
+      "category": "git",
+      "command": [
+        "git",
+        "merge",
+        "feature/large"
+      ],
+      "fixture": "tests/fixtures/large/git_merge.txt",
+      "signals": [
+        "src/"
+      ]
+    },
+    {
+      "name": "git-rebase-large",
+      "category": "git",
+      "command": [
+        "git",
+        "rebase",
+        "main"
+      ],
+      "fixture": "tests/fixtures/large/git_rebase.txt",
+      "signals": [
+        "large-rebase-branch"
+      ]
+    },
+    {
+      "name": "git-push-large",
+      "category": "git",
+      "command": [
+        "git",
+        "push",
+        "--all"
+      ],
+      "fixture": "tests/fixtures/large/git_push.stdout.txt",
+      "stderr_fixture": "tests/fixtures/large/git_push.stderr.txt",
+      "exit_code": 1,
+      "signals": [
+        "fix-3",
+        "non-fast-forward"
+      ]
+    },
+    {
+      "name": "git-commit-large",
+      "category": "git",
+      "command": [
+        "git",
+        "commit"
+      ],
+      "fixture": "tests/fixtures/large/git_commit.txt",
+      "signals": [
+        "feat(large)",
+        "src/generated/"
+      ]
+    },
+    {
+      "name": "git-branch-list",
+      "category": "git",
+      "command": [
+        "git",
+        "branch"
+      ],
+      "fixture": "tests/fixtures/git_branch_list.txt",
+      "signals": [
+        "* main",
+        "feature-x"
+      ]
+    },
+    {
+      "name": "git-stash-list",
+      "category": "git",
+      "command": [
+        "git",
+        "stash",
+        "list"
+      ],
+      "fixture": "tests/fixtures/git_stash_list.txt",
+      "signals": [
+        "fixture stash entry 2"
+      ]
+    },
+    {
+      "name": "git-reflog",
+      "category": "git",
+      "command": [
+        "git",
+        "reflog"
+      ],
+      "fixture": "tests/fixtures/git_reflog.txt",
+      "signals": [
+        "chore: release v1.2.5"
+      ]
+    },
+    {
+      "name": "cargo-test-failing",
+      "category": "tests",
+      "command": [
+        "cargo",
+        "test"
+      ],
+      "fixture": "tests/fixtures/cargo_test_failing.txt",
+      "exit_code": 101,
+      "signals": [
+        "tests::div_by_zero",
+        "tests::edge_overflow"
+      ]
+    },
+    {
+      "name": "cargo-build-warning",
+      "category": "build output",
+      "command": [
+        "cargo",
+        "build"
+      ],
+      "fixture": "tests/fixtures/cargo_build.txt",
+      "stream": "stderr",
+      "signals": [
+        "unused variable",
+        "Finished dev"
+      ]
+    },
+    {
+      "name": "cargo-build-large",
+      "category": "build output",
+      "command": [
+        "cargo",
+        "build"
+      ],
+      "fixture": "tests/fixtures/large/cargo_build.txt",
+      "stream": "stderr"
+    },
+    {
+      "name": "cargo-build-verbose-large",
+      "category": "build output",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "cargo",
+        "build",
+        "-vv"
+      ],
+      "fixture": "tests/fixtures/large/generic_cargo_build_verbose.txt",
+      "stream": "stderr",
+      "signals": [
+        "warning: unused import"
+      ]
+    },
+    {
+      "name": "make-build-warning",
+      "category": "build output",
+      "command": [
+        "make"
+      ],
+      "fixture": "tests/fixtures/make_build.txt",
+      "signals": [
+        "unused variable"
+      ]
+    },
+    {
+      "name": "make-build-large",
+      "category": "build output",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "make"
+      ],
+      "fixture": "tests/fixtures/large/make_build.txt"
+    },
+    {
+      "name": "vite-build",
+      "category": "build output",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "fixture": "tests/fixtures/vite_build.txt",
+      "signals": [
+        "vendor-react",
+        "Some chunks are larger",
+        "built in 12.34s"
+      ]
+    },
+    {
+      "name": "next-build",
+      "category": "build output",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "fixture": "tests/fixtures/next_build.txt",
+      "signals": [
+        "/dashboard",
+        "no-unused-vars",
+        "First Load JS"
+      ]
+    },
+    {
+      "name": "nuxt-build",
+      "category": "build output",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "fixture": "tests/fixtures/nuxt_build.txt",
+      "signals": [
+        "Client built",
+        "Server built",
+        "Total size"
+      ]
+    },
+    {
+      "name": "jest-failing",
+      "category": "tests",
+      "command": [
+        "jest"
+      ],
+      "fixture": "tests/fixtures/jest_failing.txt",
+      "exit_code": 1,
+      "signals": [
+        "Button component",
+        "Network timeout"
+      ]
+    },
+    {
+      "name": "pytest-failing",
+      "category": "tests",
+      "command": [
+        "pytest",
+        "-v"
+      ],
+      "fixture": "tests/fixtures/pytest_failing.txt",
+      "exit_code": 1,
+      "signals": [
+        "tests/test_api.py::test_login_flow",
+        "401"
+      ]
+    },
+    {
+      "name": "go-test-failing",
+      "category": "tests",
+      "command": [
+        "go",
+        "test",
+        "-v"
+      ],
+      "fixture": "tests/fixtures/go_test_v.txt",
+      "exit_code": 1,
+      "signals": [
+        "TestDivide",
+        "sqrt(-1)"
+      ]
+    },
+    {
+      "name": "tsc-errors",
+      "category": "tests",
+      "command": [
+        "tsc",
+        "--noEmit"
+      ],
+      "fixture": "tests/fixtures/tsc_errors.txt",
+      "exit_code": 2,
+      "signals": [
+        "TS2322",
+        "src/api/client.ts"
+      ]
+    },
+    {
+      "name": "go-build-large",
+      "category": "build output",
+      "command": [
+        "go",
+        "build",
+        "./..."
+      ],
+      "fixture": "tests/fixtures/large/go_build.txt",
+      "stream": "stderr",
+      "exit_code": 1,
+      "signals": [
+        "internal/auth/token.go",
+        "declared and not used"
+      ]
+    },
+    {
+      "name": "dotnet-build-failed",
+      "category": "build output",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "dotnet",
+        "build"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/dotnet_build_failed.txt",
+      "exit_code": 1,
+      "signals": [
+        "CS1002",
+        "Build FAILED"
+      ]
+    },
+    {
+      "name": "dotnet-test-failed",
+      "category": "tests",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "dotnet",
+        "test"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/dotnet_test_failed.txt",
+      "exit_code": 1,
+      "signals": [
+        "CalculatorTests.Subtract",
+        "Assert.Equal"
+      ]
+    },
+    {
+      "name": "gradle-build-failed",
+      "category": "build output",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "gradle",
+        "build"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/gradle_build_failed.txt",
+      "exit_code": 1,
+      "signals": [
+        "compileDebugKotlin",
+        "Unresolved reference"
+      ]
+    },
+    {
+      "name": "gradle-test-failed",
+      "category": "tests",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "gradle",
+        "test"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/gradle_test_failed.txt",
+      "exit_code": 1,
+      "signals": [
+        "testSubtraction",
+        "2 failed"
+      ]
+    },
+    {
+      "name": "gcc-error",
+      "category": "build output",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "gcc",
+        "-c",
+        "main.c"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/gcc_error.txt",
+      "exit_code": 1,
+      "signals": [
+        "undeclared identifier",
+        "unused variable"
+      ]
+    },
+    {
+      "name": "terraform-plan",
+      "category": "infra",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "terraform",
+        "plan"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/terraform_plan.txt",
+      "signals": [
+        "aws_instance.web",
+        "Plan: 1"
+      ]
+    },
+    {
+      "name": "mvn-build-failed",
+      "category": "build output",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "mvn",
+        "package"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/mvn_build_failed.txt",
+      "exit_code": 1,
+      "signals": [
+        "cannot find symbol",
+        "BUILD FAILURE"
+      ]
+    },
+    {
+      "name": "turbo-error",
+      "category": "build output",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "turbo",
+        "run",
+        "lint"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/turbo_error.txt",
+      "exit_code": 1,
+      "signals": [
+        "myapp:lint",
+        "TS2304"
+      ]
+    },
+    {
+      "name": "pre-commit-failed",
+      "category": "tests",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "pre-commit",
+        "run",
+        "--all-files"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/pre_commit_failed.txt",
+      "exit_code": 1,
+      "signals": [
+        "Check Yaml",
+        "exit code: 1"
+      ]
+    },
+    {
+      "name": "uv-pip-install",
+      "category": "package managers",
+      "profiles": [
+        "agent",
+        "rtk"
+      ],
+      "command": [
+        "uv",
+        "pip",
+        "install",
+        "-r",
+        "requirements.txt"
+      ],
+      "fixture": "benchmarks/smll-vs-rtk/fixtures/uv_pip_install.txt",
+      "signals": [
+        "Installed 5 packages",
+        "requests==2.31.0"
+      ]
+    },
+    {
+      "name": "docker-ps",
+      "category": "process/cluster",
+      "command": [
+        "docker",
+        "ps"
+      ],
+      "fixture": "tests/fixtures/docker_ps.txt",
+      "signals": [
+        "helios-assistant",
+        "helios-mysql"
+      ]
+    },
+    {
+      "name": "kubectl-get-pods",
+      "category": "process/cluster",
+      "command": [
+        "kubectl",
+        "get",
+        "pods"
+      ],
+      "fixture": "tests/fixtures/kubectl_pods.txt",
+      "signals": [
+        "redis-master-0",
+        "cert-manager"
+      ]
+    },
+    {
+      "name": "ps-aux",
+      "category": "process/cluster",
+      "command": [
+        "ps",
+        "aux"
+      ],
+      "fixture": "tests/fixtures/ps_aux.txt",
+      "signals": [
+        "Safari",
+        "tail -f"
+      ]
+    },
+    {
+      "name": "ps-auxww-large",
+      "category": "process/cluster",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "ps",
+        "auxww"
+      ],
+      "fixture": "tests/fixtures/large/generic_ps_auxww.txt",
+      "signals": [
+        "gunicorn"
+      ]
+    },
+    {
+      "name": "gh-pr-list",
+      "category": "process/cluster",
+      "command": [
+        "gh",
+        "pr",
+        "list"
+      ],
+      "fixture": "tests/fixtures/gh_pr_list.txt",
+      "signals": [
+        "#142",
+        "feat/auth"
+      ]
+    },
+    {
+      "name": "gh-run-list",
+      "category": "process/cluster",
+      "command": [
+        "gh",
+        "run",
+        "list"
+      ],
+      "fixture": "tests/fixtures/gh_run_list.txt",
+      "signals": [
+        "release size gate",
+        "failure"
+      ]
+    },
+    {
+      "name": "rg-files",
+      "category": "search/listing",
+      "command": [
+        "rg",
+        "--files"
+      ],
+      "fixture": "tests/fixtures/rg_files.txt",
+      "signals": [
+        "src/pipeline.zig",
+        "git_status.zig"
+      ]
+    },
+    {
+      "name": "find-ls",
+      "category": "search/listing",
+      "command": [
+        "find",
+        ".",
+        "-ls"
+      ],
+      "fixture": "tests/fixtures/find_ls.txt",
+      "signals": [
+        "./src/main.zig"
+      ]
+    },
+    {
+      "name": "find-ls-large",
+      "category": "search/listing",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "find",
+        ".",
+        "-ls"
+      ],
+      "fixture": "tests/fixtures/large/find_ls.txt",
+      "signals": [
+        "./src/filters/",
+        "./benchmarks/"
+      ]
+    },
+    {
+      "name": "du-sh",
+      "category": "search/listing",
+      "command": [
+        "du",
+        "-sh",
+        "."
+      ],
+      "fixture": "tests/fixtures/du_sh.txt",
+      "signals": [
+        "./node_modules",
+        "5G"
+      ]
+    },
+    {
+      "name": "du-sh-large",
+      "category": "search/listing",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "du",
+        "-sh",
+        "."
+      ],
+      "fixture": "tests/fixtures/large/du_sh.txt",
+      "signals": [
+        "pkg15",
+        "19G"
+      ]
+    },
+    {
+      "name": "ls-la",
+      "category": "search/listing",
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "fixture": "tests/fixtures/ls_la.txt",
+      "signals": [
+        "main.zig",
+        "pipeline.zig"
+      ]
+    },
+    {
+      "name": "ls-recursive",
+      "category": "search/listing",
+      "command": [
+        "ls",
+        "-R",
+        "src"
+      ],
+      "fixture": "tests/fixtures/ls_R.txt",
+      "signals": [
+        "src/filters:",
+        "git_status.zig"
+      ]
+    },
+    {
+      "name": "tree-src",
+      "category": "search/listing",
+      "command": [
+        "tree",
+        "src"
+      ],
+      "fixture": "tests/fixtures/tree_src.txt",
+      "signals": [
+        "filters",
+        "git_status.zig"
+      ]
+    },
+    {
+      "name": "curl-verbose",
+      "category": "network/cloud",
+      "command": [
+        "curl",
+        "-v",
+        "https://example.com"
+      ],
+      "fixture": "tests/fixtures/curl_v_example.stdout.txt",
+      "stderr_fixture": "tests/fixtures/curl_v_example.stderr.txt",
+      "signals": [
+        "Example Domain",
+        "HTTP/2 200"
+      ]
+    },
+    {
+      "name": "curl-verbose-large",
+      "category": "network/cloud",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "curl",
+        "-vvv",
+        "https://api.example.com/v1/resources"
+      ],
+      "fixture": "tests/fixtures/large/curl_vvv_example.stdout.txt",
+      "stderr_fixture": "tests/fixtures/large/curl_vvv_example.stderr.txt",
+      "signals": [
+        "resource_30",
+        "HTTP/2 200"
+      ]
+    },
+    {
+      "name": "docker-logs",
+      "category": "logs",
+      "command": [
+        "docker",
+        "logs",
+        "app"
+      ],
+      "fixture": "tests/fixtures/docker_logs.txt",
+      "signals": [
+        "redis",
+        "slow query"
+      ]
+    },
+    {
+      "name": "journalctl-large",
+      "category": "logs",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "journalctl",
+        "-u",
+        "app",
+        "-n",
+        "500"
+      ],
+      "fixture": "tests/fixtures/large/generic_journalctl.txt",
+      "signals": [
+        "UFW BLOCK"
+      ]
+    },
+    {
+      "name": "npm-install",
+      "category": "package managers",
+      "command": [
+        "npm",
+        "install"
+      ],
+      "fixture": "tests/fixtures/npm_install.txt",
+      "signals": [
+        "found 2 vulnerabilities",
+        "npm audit"
+      ]
+    },
+    {
+      "name": "pnpm-install",
+      "category": "package managers",
+      "command": [
+        "pnpm",
+        "install"
+      ],
+      "fixture": "tests/fixtures/pnpm_install.txt",
+      "signals": [
+        "react 18.2.0",
+        "deprecated"
+      ]
+    },
+    {
+      "name": "bun-install",
+      "category": "package managers",
+      "command": [
+        "bun",
+        "add",
+        "react"
+      ],
+      "fixture": "tests/fixtures/bun_install.txt",
+      "signals": [
+        "react@18.2.0",
+        "deprecated"
+      ]
+    },
+    {
+      "name": "bun-pm-ls",
+      "category": "package managers",
+      "command": [
+        "bun",
+        "pm",
+        "ls"
+      ],
+      "fixture": "tests/fixtures/bun_pm_ls.txt",
+      "signals": [
+        "discord.js@14.15.3",
+        "react@18.3.1"
+      ]
+    },
+    {
+      "name": "yarn-install",
+      "category": "package managers",
+      "command": [
+        "yarn",
+        "add",
+        "react"
+      ],
+      "fixture": "tests/fixtures/yarn_install.txt",
+      "signals": [
+        "react@18.2.0",
+        "unmet peer dependency"
+      ]
+    },
+    {
+      "name": "pip-install-large",
+      "category": "package managers",
+      "profiles": [
+        "stress"
+      ],
+      "command": [
+        "pip",
+        "install",
+        "-r",
+        "requirements.txt"
+      ],
+      "fixture": "tests/fixtures/large/generic_pip_install.txt",
+      "signals": [
+        "lib-pkg-001",
+        "Successfully installed 400 packages"
+      ]
+    },
+    {
+      "name": "composer-require",
+      "category": "package managers",
+      "command": [
+        "composer",
+        "require",
+        "guzzlehttp/guzzle"
+      ],
+      "fixture": "tests/fixtures/composer_require.txt",
+      "signals": [
+        "guzzlehttp/guzzle",
+        "No security vulnerability"
+      ]
+    }
+  ]
+}
