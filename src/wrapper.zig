@@ -1,0 +1,782 @@
+const std = @import("std");
+
+const tee = @import("tee.zig");
+const wrapper_git = @import("wrapper_git.zig");
+const wrapper_io = @import("wrapper_io.zig");
+const wrapper_util = @import("wrapper_util.zig");
+const rg = @import("rg");
+const tree = @import("tree");
+const columnar = @import("columnar");
+const docker_compact = @import("docker_compact");
+const ls_compact = @import("ls_compact");
+const find_compact = @import("find_compact");
+const du_compact = @import("du_compact");
+const wc_compact = @import("wc_compact");
+const env_compact = @import("env_compact");
+const mypy_compact = @import("mypy_compact");
+const ruff_compact = @import("ruff_compact");
+const pip_compact = @import("pip_compact");
+const prettier_compact = @import("prettier_compact");
+const dotnet_compact = @import("dotnet_compact");
+const tool_compact = @import("tool_compact");
+const curl_compact = @import("curl_compact");
+const kubectl_compact = @import("kubectl_compact");
+const cargo_test = @import("cargo_test");
+const pytest = @import("pytest");
+const jest = @import("jest");
+const tsc = @import("tsc");
+const go_test = @import("go_test");
+const docker_logs = @import("docker_logs");
+const npm_install = @import("npm_install");
+const build_output = @import("build_output");
+const build_compact = @import("build_compact");
+const gradle_compact = @import("gradle_compact");
+const maven_compact = @import("maven_compact");
+const precommit_compact = @import("precommit_compact");
+const package_tree = @import("package_tree");
+const generic_compact = @import("generic_compact");
+const cat_compact = @import("cat_compact");
+
+const CountingWriter = wrapper_io.CountingWriter;
+const applyFilter = wrapper_io.applyFilter;
+const drainChildOutput = wrapper_io.drainChildOutput;
+const passthrough = wrapper_io.passthrough;
+const envFlagOn = wrapper_util.envFlagOn;
+const teeEnabled = wrapper_util.teeEnabled;
+const hasArg = wrapper_util.hasArg;
+const isEnvListingInvocation = wrapper_util.isEnvListingInvocation;
+const curlBodyLooksBinary = wrapper_util.curlBodyLooksBinary;
+const eqAny = wrapper_util.eqAny;
+const isStreamingCommand = wrapper_util.isStreamingCommand;
+
+// Maximum bytes captured per child stream before failing closed. Large unknown
+// text output is still eligible for generic compaction, so keep this high
+// enough for real-world tool dumps while bounding memory use. Verbose curl gets
+// a larger cap because stdout is the response body and may be sizeable JSON.
+const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+const MAX_CURL_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_OUTPUT_LABEL = "16M+\n";
+const MAX_CURL_OUTPUT_LABEL = "64M+\n";
+
+pub const Result = struct {
+    exit_code: u8,
+    input_bytes: usize,
+    output_bytes: usize,
+    record_stats: bool,
+};
+
+/// Emit a hint to stdout when the wrapped child produced no stdout AND no
+/// stderr. Without a hint, agents commonly retry the command in a loop,
+/// mistaking the silence for a tool-side failure. The hint always includes
+/// the exit code so the agent can distinguish a successful no-op (e.g.
+/// `git status --short` on a clean tree) from a failure that just happened
+/// to print nothing.
+fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code: u8) !void {
+    const cmd_path = if (argv.len > 0) argv[0] else "command";
+    const cmd = if (std.mem.findScalarLast(u8, cmd_path, '/')) |idx|
+        cmd_path[idx + 1 ..]
+    else
+        cmd_path;
+
+    // For `git status` and `git diff` on a clean tree, raw git emits nothing
+    // and exits 0 — a git-native success signal that means "no changes".
+    // Use that phrasing alongside the exit code so agents recognize it.
+    if (exit_code == 0 and std.mem.eql(u8, cmd, "git") and argv.len >= 2) {
+        const sub = argv[1];
+        if (std.mem.eql(u8, sub, "status") or std.mem.eql(u8, sub, "diff")) {
+            try writer.writeAll("(smll: no changes; git ");
+            try writer.writeAll(sub);
+            try writer.writeAll(" exited 0 with no output)\n");
+            return;
+        }
+    }
+
+    try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
+}
+
+pub fn run(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) !Result {
+    // Capture compacted stdout separately; stderr is forwarded through a
+    // counting proxy so stats match the full agent-visible stream.
+    var capture = std.Io.Writer.Allocating.init(allocator);
+    defer capture.deinit();
+    var counted_stderr = CountingWriter.init(stderr_writer);
+    last_output_inherited = false;
+    last_raw_stdout = &.{};
+    last_raw_stderr = &.{};
+    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, &counted_stderr.writer);
+    const output = capture.written();
+
+    var final_stdout = std.Io.Writer.Allocating.init(allocator);
+    defer final_stdout.deinit();
+
+    // When both captured stdout and stderr are empty, emit a contextual hint
+    // so agents don't loop retrying the command. Streaming commands inherit
+    // stdio directly, so their output bypasses this capture buffer and must
+    // not get an extra hint appended.
+    if (output.len == 0 and last_stderr_bytes == 0 and !last_output_inherited) {
+        try writeNoOutputHint(&final_stdout.writer, argv, exit_code);
+    } else {
+        try final_stdout.writer.writeAll(output);
+    }
+
+    // Tee recovery: on a failed wrapped command, persist the *raw* (pre-filter)
+    // stdout+stderr under `~/.smll/tee/` and append a breadcrumb to stdout so
+    // the agent can fetch the unredacted output when the compact summary isn't
+    // enough. Streaming/lossless modes inherit stdio directly so there's
+    // nothing to record. Best-effort: failures never surface to the user.
+    if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
+        const home = environ.get("HOME") orelse "";
+        if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
+            final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+        }
+    }
+
+    const final_stdout_bytes = final_stdout.written().len;
+    try writer.writeAll(final_stdout.written());
+
+    // Input bytes are raw child stdout+stderr. Output bytes are compacted
+    // stdout plus any stderr smll forwarded, matching what an agent sees.
+    return .{
+        .exit_code = exit_code,
+        .input_bytes = last_input_bytes,
+        .output_bytes = final_stdout_bytes + counted_stderr.count,
+        .record_stats = !last_output_inherited,
+    };
+}
+
+/// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.
+var last_input_bytes: usize = 0;
+var last_stderr_bytes: usize = 0;
+var last_output_inherited: bool = false;
+/// Coarse dispatch label for `--explain` / `SMLL_DEBUG=1`. Each top-level
+/// command-family arm in runWrapperInner sets this before its filter runs;
+/// the default "passthrough" stands for head/tail, lossless mode, and any
+/// command that no bespoke arm claims. Granularity is intentionally
+/// command-family level for v1 — the in/out byte counts in the `--explain`
+/// footer already reveal whether compaction actually happened.
+var last_filter_name: []const u8 = "passthrough";
+/// Raw child streams stashed for the tee-recovery hook in `runWrapper`. The
+/// slices remain valid for the wrapper's lifetime (arena-owned) but only the
+/// outermost `runWrapper` call reads them, so module-level state is safe.
+var last_raw_stdout: []const u8 = &.{};
+var last_raw_stderr: []const u8 = &.{};
+
+/// Write stdout through safe generic fallbacks: high-confidence table/list
+/// compaction first, then size-gated generic text compaction, then raw output.
+fn writeWithFallback(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !void {
+    try writeWithFallbackImpl(allocator, stdout_slice, writer, false);
+}
+
+/// Fallback path for commands we already know are text-only (rg, find,
+/// tree, kubectl/docker columnar miss, etc.). The lower threshold lets
+/// small outputs participate in RLE/whitespace compaction without the
+/// binary-detection conservatism inherited from arbitrary stdin.
+fn writeWithFallbackText(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !void {
+    try writeWithFallbackImpl(allocator, stdout_slice, writer, true);
+}
+
+fn writeWithFallbackImpl(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer, known_text: bool) !void {
+    if (try writeGenericTableIfUseful(allocator, stdout_slice, writer)) return;
+    const should_compact = if (known_text) generic_compact.matchesText(stdout_slice) else generic_compact.matches(stdout_slice);
+    if (should_compact) {
+        generic_compact.apply(allocator, stdout_slice, writer) catch {
+            try writer.writeAll(stdout_slice);
+            return;
+        };
+    } else {
+        try writer.writeAll(stdout_slice);
+    }
+}
+
+fn writeGenericTableIfUseful(allocator: std.mem.Allocator, stdout_slice: []const u8, writer: *std.Io.Writer) !bool {
+    if (!columnar.matchesGeneric(stdout_slice)) return false;
+
+    var compact = std.Io.Writer.Allocating.init(allocator);
+    defer compact.deinit();
+    columnar.applyGeneric(allocator, stdout_slice, &.{}, &compact.writer) catch return false;
+    const compacted = compact.written();
+    if (compacted.len >= stdout_slice.len) return false;
+
+    try writer.writeAll(compacted);
+    return true;
+}
+
+fn runWrapperInner(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) !u8 {
+    // Spawn the child and drain stdout + stderr concurrently. Many tools write
+    // substantial diagnostics/progress to stderr before closing stdout; draining
+    // stdout first can block forever once the stderr pipe fills.
+    //
+    // For `ls`: force LC_ALL=C + LANG=C so date fields always use the C-locale
+    // shape ("Apr 22") regardless of the user's system locale. Without this,
+    // non-English locales produce different date formats that shift the field
+    // count and cause extractName() to return null for every line.
+    const outer_cmd = argv[0];
+    const cmd_basename = if (std.mem.findScalarLast(u8, outer_cmd, '/')) |idx|
+        outer_cmd[idx + 1 ..]
+    else
+        outer_cmd;
+
+    var ls_env_map = std.process.Environ.Map.init(allocator);
+    var ls_env_map_active = false;
+    defer if (ls_env_map_active) ls_env_map.deinit();
+    const spawn_env: ?*const std.process.Environ.Map = blk: {
+        if (std.mem.eql(u8, cmd_basename, "ls")) {
+            ls_env_map = environ.clone(allocator) catch break :blk null;
+            ls_env_map_active = true;
+            ls_env_map.put("LC_ALL", "C") catch break :blk null;
+            ls_env_map.put("LANG", "C") catch break :blk null;
+            break :blk &ls_env_map;
+        }
+        break :blk null;
+    };
+
+    // Detect commands that must not be buffered. These get stdout+stderr
+    // inherited directly — no capture, no filtering, no size cap. This includes
+    // explicit lossless mode, streaming/interactive commands, and non-verbose
+    // curl where stdout may be an API body, archive, or install script.
+    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
+    const is_raw_curl = std.mem.eql(u8, cmd_basename, "curl") and !curl_compact.hasVerboseFlag(argv);
+    const is_streaming = lossless or isStreamingCommand(cmd_basename, argv) or is_raw_curl;
+    if (is_streaming) {
+        last_output_inherited = true;
+        last_input_bytes = 0;
+        last_stderr_bytes = 0;
+        var child = std.process.spawn(io, .{
+            .argv = argv,
+            .stdin = .inherit,
+            .stdout = .inherit,
+            .stderr = .inherit,
+            .environ_map = spawn_env,
+        }) catch |err| return err;
+        defer child.kill(io);
+        const term = try child.wait(io);
+        return switch (term) {
+            .exited => |c| c,
+            .signal, .stopped, .unknown => 1,
+        };
+    }
+
+    var child = std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .inherit,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .environ_map = spawn_env,
+    }) catch |err| return err;
+    defer child.kill(io);
+
+    const max_output_bytes: usize = if (std.mem.eql(u8, cmd_basename, "curl") and curl_compact.hasVerboseFlag(argv))
+        MAX_CURL_OUTPUT_BYTES
+    else
+        MAX_OUTPUT_BYTES;
+    const max_output_label = if (max_output_bytes == MAX_CURL_OUTPUT_BYTES) MAX_CURL_OUTPUT_LABEL else MAX_OUTPUT_LABEL;
+    const captured = drainChildOutput(allocator, io, &child, max_output_bytes) catch |err| switch (err) {
+        error.StreamTooLong => {
+            last_input_bytes = 0;
+            last_stderr_bytes = max_output_label.len;
+            stderr_writer.writeAll(max_output_label) catch {};
+            return 1;
+        },
+        else => return err,
+    };
+    const stdout_slice = captured.stdout;
+    const stderr_slice = captured.stderr;
+
+    // Record raw stream sizes for stats tracking and empty-output detection.
+    last_input_bytes = stdout_slice.len + stderr_slice.len;
+    last_stderr_bytes = stderr_slice.len;
+    last_raw_stdout = stdout_slice;
+    last_raw_stderr = stderr_slice;
+
+    const term = try child.wait(io);
+    const exit_code: u8 = switch (term) {
+        .exited => |c| c,
+        .signal, .stopped, .unknown => 1,
+    };
+
+    // Argv guard: only dispatch through the formatter switch when the outer
+    // command is literally "git".  Any other outer command (e.g. "cargo")
+    // goes straight to passthrough even if the subcommand string matches a
+    // KnownSubcommand.
+    // Strip any directory prefix: "git", "/usr/bin/git", etc. all match.
+
+    const has_arg1 = argv.len >= 2;
+    const arg1 = if (has_arg1) argv[1] else "";
+    const arg2 = if (argv.len >= 3) argv[2] else "";
+
+    // Path-list wrappers (rg --files, find): path-per-line output, compresses
+    // via dirname RLE. `find -ls` goes through find_compact instead
+    // (columnar inode/mode/size/path → path-only). SMLL_LOSSLESS=1 bypasses
+    // both.
+    const is_rg_cmd = std.mem.eql(u8, cmd_basename, "rg");
+    const is_find_cmd = std.mem.eql(u8, cmd_basename, "find");
+    if (is_rg_cmd or is_find_cmd) {
+        const is_find_ls = is_find_cmd and hasArg(argv, "-ls");
+        // For rg: only apply --files dirname RLE when the output is confirmed file-list
+        // mode. Guards against rg -N (no line numbers) output which is path:content —
+        // matchesPattern correctly rejects it, but rg.matches() could accept it and
+        // apply wrong dirname compression. --files/-l/--files-with-matches confirm
+        // file-list mode; find output (no colons in paths) is also safe.
+        const is_rg_files_mode = is_rg_cmd and
+            (hasArg(argv, "--files") or
+                hasArg(argv, "-l") or
+                hasArg(argv, "--files-with-matches"));
+        const is_find_plain = is_find_cmd and !is_find_ls;
+        if (lossless) {
+            try writer.writeAll(stdout_slice);
+        } else if (is_find_ls and find_compact.matches(stdout_slice)) {
+            if (!applyFilter(find_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (rg.matchesPattern(stdout_slice)) {
+            if (!applyFilter(rg.applyPattern, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
+            if (!applyFilter(rg.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+        }
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // Package dependency tree wrappers. `bun pm ls` emits a nested dependency
+    // tree; default output keeps direct deps + transitive count so agents get
+    // dependency signal without the full nested tree.
+    if (std.mem.eql(u8, cmd_basename, "bun") and
+        std.mem.eql(u8, arg1, "pm") and
+        std.mem.eql(u8, arg2, "ls") and
+        !lossless and
+        package_tree.matches(stdout_slice))
+    {
+        if (!applyFilter(package_tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        return exit_code;
+    }
+
+    // tree wrapper: requires box-drawing chars in the first few lines.
+    // `bun` can emit other tree-shaped output; route it through tree when the
+    // package-tree filter above did not match.
+    if (std.mem.eql(u8, cmd_basename, "tree") or
+        std.mem.eql(u8, cmd_basename, "bun"))
+    {
+        if (tree.matches(stdout_slice)) {
+            if (!applyFilter(tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+            return exit_code;
+        }
+        if (std.mem.eql(u8, cmd_basename, "tree")) {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
+            return exit_code;
+        }
+        // bun: fall through to columnar opt-in check below.
+    }
+
+    // Test runners + type-checker — LOSSY compaction by default (v0.6).
+    // Emits failures + summary only; "all tests passed\n" / "no type errors\n"
+    // on clean runs. Set SMLL_LOSSLESS=1 for raw passthrough.
+    const is_pytest = std.mem.eql(u8, cmd_basename, "pytest");
+    const is_test_subcmd = std.mem.eql(u8, arg1, "test");
+    const is_cargo_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
+    // jest/vitest: direct invocation OR script runners (npm/pnpm/yarn/bun test)
+    // that produce jest-shaped output. Output-shape detection in jest.matches()
+    // guards against false positives when other test runners are used.
+    const is_jest = switch (cmd_basename[0]) {
+        'j' => std.mem.eql(u8, cmd_basename, "jest"),
+        'v' => std.mem.eql(u8, cmd_basename, "vitest"),
+        'n' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "npm"),
+        'p' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "pnpm"),
+        'y' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "yarn"),
+        'b' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "bun"),
+        else => false,
+    };
+    const is_tsc = std.mem.eql(u8, cmd_basename, "tsc");
+    const is_go_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "go");
+    if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
+        if (!lossless) {
+            if (is_pytest and (pytest.matches(stdout_slice) or pytest.matches(stderr_slice))) {
+                if (!applyFilter(pytest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                return exit_code;
+            }
+            if (is_cargo_test and (cargo_test.matches(stdout_slice) or cargo_test.matches(stderr_slice))) {
+                if (!applyFilter(cargo_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                return exit_code;
+            }
+            if (is_jest and (jest.matches(stdout_slice) or jest.matches(stderr_slice))) {
+                if (!applyFilter(jest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                return exit_code;
+            }
+            if (is_tsc and (tsc.matches(stdout_slice) or tsc.matches(stderr_slice))) {
+                if (!applyFilter(tsc.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                return exit_code;
+            }
+            if (is_go_test and (go_test.matches(stdout_slice) or go_test.matches(stderr_slice))) {
+                if (!applyFilter(go_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                return exit_code;
+            }
+        }
+        try writeWithFallback(allocator, stdout_slice, writer);
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // Python tooling wrappers — preserve diagnostics while dropping progress
+    // chatter/table padding.
+    if (std.mem.eql(u8, cmd_basename, "mypy")) {
+        if (!lossless) {
+            if (!applyFilter(mypy_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "ruff")) {
+        if (!lossless) {
+            if (!applyFilter(ruff_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "head", "tail" })) {
+        passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "gh")) {
+        if (exit_code != 0 and stderr_slice.len > 0) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless) {
+            if (!try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
+                if (!applyFilter(tool_compact.applyGh, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            }
+            try stderr_writer.writeAll(stderr_slice);
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "pnpm", "yarn", "bun", "uv", "uvx" })) {
+        const is_js_pkg_manager = eqAny(cmd_basename, &.{ "pnpm", "yarn", "bun" });
+        // For JS-pkg-manager install subcommands, the bespoke npm_install
+        // filter drops manager-specific chatter (Progress:, banner, dep trees)
+        // that tool_compact.applyPackage's substring keep would let survive.
+        const is_js_install_subcmd = is_js_pkg_manager and
+            eqAny(arg1, &.{ "install", "i", "add", "remove", "rm" });
+        // `<manager> build` or `<manager> run build` — content signature
+        // (Vite banner, Next.js banner, "modules transformed") confirms it
+        // is a real build pipeline before we compact.
+        const is_build_subcmd = is_js_pkg_manager and
+            (std.mem.eql(u8, arg1, "build") or
+                (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
+        if (!lossless and is_build_subcmd and build_output.matches(stdout_slice)) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            return exit_code;
+        } else if (!lossless and is_build_subcmd and build_output.matches(stderr_slice)) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            return exit_code;
+        }
+        if (exit_code != 0 and stderr_slice.len > 0) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless and is_js_install_subcmd and npm_install.matches(stdout_slice)) {
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_js_install_subcmd and npm_install.matches(stderr_slice)) {
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless) {
+            if (!applyFilter(tool_compact.applyPackage, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // composer (PHP) install/require/update/remove — same lossy contract as
+    // the JS managers: keep summary + warnings/errors, drop scaffolding.
+    if (std.mem.eql(u8, cmd_basename, "composer")) {
+        const is_composer_install_subcmd =
+            std.mem.eql(u8, arg1, "install") or
+            std.mem.eql(u8, arg1, "require") or
+            std.mem.eql(u8, arg1, "update") or
+            std.mem.eql(u8, arg1, "upgrade") or
+            std.mem.eql(u8, arg1, "remove") or
+            std.mem.eql(u8, arg1, "create-project");
+        if (exit_code != 0 and stderr_slice.len > 0 and !npm_install.matches(stderr_slice)) {
+            // Genuine failure with no recognized error markers — let the user see it raw.
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless and is_composer_install_subcmd and npm_install.matches(stdout_slice)) {
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_composer_install_subcmd and npm_install.matches(stderr_slice)) {
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "swift", "xcodebuild" })) {
+        if (exit_code != 0 and stderr_slice.len > 0) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (!lossless) {
+            if (!applyFilter(tool_compact.applyAppleBuild, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "dotnet")) {
+        if (!lossless and eqAny(arg1, &.{ "build", "test", "format", "restore" })) {
+            if (!applyFilter(dotnet_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "gradle", "gradlew" })) {
+        if (!lossless and (gradle_compact.matches(stdout_slice) or gradle_compact.matches(stderr_slice))) {
+            if (!applyFilter(gradle_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "mvn", "mvnw" })) {
+        if (!lossless and (maven_compact.matches(stdout_slice) or maven_compact.matches(stderr_slice))) {
+            if (!applyFilter(maven_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "pre-commit")) {
+        if (!lossless and (precommit_compact.matches(stdout_slice) or precommit_compact.matches(stderr_slice))) {
+            if (!applyFilter(precommit_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "prettier")) {
+        if (!lossless) {
+            if (!applyFilter(prettier_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "pip", "pip3" })) {
+        const is_pip_table = eqAny(arg1, &.{ "list", "outdated" });
+        const is_pip_install = eqAny(arg1, &.{ "install", "download", "wheel" });
+        if (!lossless and (is_pip_table or (is_pip_install and (pip_compact.matches(stdout_slice) or pip_compact.matches(stderr_slice))))) {
+            if (!applyFilter(pip_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // env wrapper — mask sensitive variables for environment-listing forms.
+    // Do not filter `env FOO=bar command`: that form executes an arbitrary
+    // child command and its stdout should keep the command's semantics.
+    if (std.mem.eql(u8, cmd_basename, "env") and isEnvListingInvocation(argv)) {
+        if (!lossless) {
+            if (!applyFilter(env_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // wc wrapper — collapse padding while preserving counts, filenames, and stderr.
+    if (std.mem.eql(u8, cmd_basename, "wc")) {
+        if (!lossless) {
+            if (!applyFilter(wc_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // curl -v / -vv / -vvv wrapper — LOSSY compaction by default (v0.6).
+    // Drops TLS handshake chatter and cert dumps from stderr; preserves
+    // status line, request/response headers, and body. Non-verbose curl is
+    // always passthrough: stdout is often machine-readable JSON, shell scripts,
+    // or other data consumed by downstream tools.
+    if (std.mem.eql(u8, cmd_basename, "curl")) {
+        if (curl_compact.hasVerboseFlag(argv) and !lossless and curl_compact.matches(stderr_slice) and !curlBodyLooksBinary(stdout_slice, stderr_slice)) {
+            if (!applyFilter(curl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // du wrapper — LOSSY compaction (2-sig-fig size rounding) by default (v0.6).
+    // When `-s` / `--summarize` is present, sort entries descending by byte size
+    // so the largest offenders come first. Set SMLL_LOSSLESS=1 for raw passthrough.
+    if (std.mem.eql(u8, cmd_basename, "du")) {
+        if (!lossless and du_compact.matches(stdout_slice)) {
+            const sort_desc = du_compact.hasSummarizeFlag(argv);
+            du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            try writeWithFallback(allocator, stdout_slice, writer);
+        }
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // ls wrapper — LOSSY compaction (filenames only) by default (v0.6).
+    // Set SMLL_LOSSLESS=1 for raw passthrough.
+    if (std.mem.eql(u8, cmd_basename, "ls")) {
+        if (!lossless and ls_compact.matches(stdout_slice)) {
+            ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
+                if (err == error.ParsedNothing) {
+                    try writeWithFallback(allocator, stdout_slice, writer);
+                } else {
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                    return 1;
+                }
+            };
+        } else {
+            try writeWithFallback(allocator, stdout_slice, writer);
+        }
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // Columnar wrappers (docker, kubectl, gh, …) — LOSSY compaction by default (v0.6).
+    // docker routes through docker_compact (name-only summary); the rest fall
+    // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
+    // passthrough.
+    if (eqAny(cmd_basename, &.{ "docker", "kubectl", "gh", "ps", "systemctl", "lsof", "npm", "pnpm", "yarn", "brew", "bun" })) {
+        const is_logs_subcmd = std.mem.eql(u8, arg1, "logs");
+        // docker logs <container> — line dedup (before docker ps table dispatch).
+        const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
+        // kubectl logs <pod> — same grammar, same filter.
+        const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
+        // JS package manager installs — npm/pnpm/yarn/bun {install,i,ci,add,remove,rm}.
+        // Keep summary + warnings, drop banners/progress/dep trees.
+        const is_install_subcmd = eqAny(arg1, &.{ "install", "i", "ci", "add", "remove", "rm" });
+        const is_js_pkg_manager = eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun" });
+        const is_js_install = is_js_pkg_manager and is_install_subcmd;
+        // JS package manager build — npm/pnpm/yarn/bun build (or run build).
+        // Content signature (vite/next/nuxt banner) confirms we have a real
+        // bundler pipeline before routing through build_output.
+        const is_js_build = is_js_pkg_manager and
+            (std.mem.eql(u8, arg1, "build") or
+                (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
+        if (!lossless and (is_docker_logs or is_kubectl_logs)) {
+            if (!applyFilter(docker_logs.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_js_build and build_output.matches(stdout_slice)) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_js_build and build_output.matches(stderr_slice)) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_js_install and npm_install.matches(stdout_slice)) {
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_js_install and npm_install.matches(stderr_slice)) {
+            // Several managers write progress + warnings to stderr (npm classic, yarn,
+            // pnpm). Dispatch off stderr when stdout doesn't match but stderr does.
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            return exit_code;
+        } else if (!lossless and std.mem.eql(u8, cmd_basename, "docker") and docker_compact.matches(stdout_slice)) {
+            if (!applyFilter(docker_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
+            if (!applyFilter(kubectl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and columnar.matches(stdout_slice)) {
+            if (!applyFilter(columnar.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            // No bespoke filter matched within the columnar block.
+            // Known-text command class (docker/kubectl/etc.) — use the lower gate.
+            if (!lossless and generic_compact.matchesText(stdout_slice)) {
+                generic_compact.apply(allocator, stdout_slice, writer) catch {
+                    try writer.writeAll(stdout_slice);
+                };
+            } else {
+                try writer.writeAll(stdout_slice);
+            }
+        }
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    // Build-chatter wrapper: `make`, `cargo build`, `go build` — LOSSY
+    // compaction by default (v0.6). Collapses `Compiling X` / `cc -c X.o`
+    // / `go build: X` progress lines into a summary count; warnings and
+    // errors pass through verbatim. Stream-placement: cargo/go emit
+    // progress on stderr, make splits; the filter inspects both. Gate by
+    // `!SMLL_LOSSLESS`. `bun` is explicitly excluded.
+    const is_make = std.mem.eql(u8, cmd_basename, "make");
+    const is_build_subcmd = std.mem.eql(u8, arg1, "build");
+    const is_cargo_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
+    const is_go_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "go");
+    const is_zig_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "zig");
+    if (is_make or is_cargo_build or is_go_build or is_zig_build) {
+        if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
+            if (!applyFilter(build_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallback(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
+    // cat wrapper: compress code output, pass through data files.
+    if (std.mem.eql(u8, cmd_basename, "cat")) {
+        if (!lossless and cat_compact.matches(stdout_slice)) {
+            cat_compact.apply(allocator, stdout_slice, stderr_slice, writer, argv) catch {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                return 1;
+            };
+        } else {
+            try writeWithFallback(allocator, stdout_slice, writer);
+        }
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "git") and argv.len >= 2) {
+        return wrapper_git.dispatch(
+            allocator,
+            argv,
+            stdout_slice,
+            stderr_slice,
+            lossless,
+            exit_code,
+            writer,
+            stderr_writer,
+        );
+    }
+
+    // Non-git outer command: size-gated generic compactor on stdout
+    // when no bespoke arm claimed it AND output exceeds threshold.
+    // SMLL_LOSSLESS=1 bypasses. stderr always passes through verbatim.
+    if (!lossless) {
+        try writeWithFallback(allocator, stdout_slice, writer);
+    } else {
+        try writer.writeAll(stdout_slice);
+    }
+    try stderr_writer.writeAll(stderr_slice);
+    return exit_code;
+}
