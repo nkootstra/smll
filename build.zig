@@ -145,6 +145,9 @@ const modules = [_]ModuleEntry{
     .{ .name = "gradle_compact", .needs_ansi = true },
     .{ .name = "maven_compact", .needs_ansi = true },
     .{ .name = "precommit_compact", .needs_ansi = true },
+    .{ .name = "lint_compact", .needs_ansi = true },
+    .{ .name = "plan_compact", .needs_ansi = true },
+    .{ .name = "json_compact" },
     .{ .name = "package_tree", .needs_ansi = true },
     .{ .name = "tool_compact", .needs_ansi = true },
     .{ .name = "curl_compact", .needs_ansi = true },
@@ -275,8 +278,23 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
+    const filter_catalog_mod = b.createModule(.{
+        .root_source_file = b.path("src/filter_catalog.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
     const setup_mod = b.createModule(.{
         .root_source_file = b.path("src/setup.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const setup_hooks_mod = b.createModule(.{
+        .root_source_file = b.path("src/setup_hooks.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const setup_io_mod = b.createModule(.{
+        .root_source_file = b.path("src/setup_io.zig"),
         .target = target,
         .optimize = .ReleaseSmall,
     });
@@ -295,7 +313,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
-
     // Pass 1: create every module described in `modules`, recording it
     // in a name → module map.
     var registry = std.StringHashMap(*std.Build.Module).init(b.allocator);
@@ -406,7 +423,7 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     test_step.dependOn(&run_exe_tests.step);
 
-    for ([_]*std.Build.Module{ util_mod, stats_mod, setup_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
+    for ([_]*std.Build.Module{ util_mod, stats_mod, filter_catalog_mod, setup_mod, setup_hooks_mod, setup_io_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);

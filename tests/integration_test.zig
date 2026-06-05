@@ -553,6 +553,26 @@ test "meta: --version prints package version" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "meta: --filters lists visible filter surface" {
+    const allocator = std.testing.allocator;
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--filters" },
+        .stdout_limit = .limited(8192),
+        .stderr_limit = .limited(1024),
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+    try std.testing.expectEqualStrings("", wrapped.stderr);
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "next build") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "eslint") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "terraform plan") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "aws") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "gradle") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "pre-commit") != null);
+}
+
 test "wrapper: child exit code propagates (exit 42)" {
     const allocator = std.testing.allocator;
     var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", "exit 42" });
@@ -775,6 +795,70 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     try std.testing.expect(std.mem.find(u8, stats_json, "\"input_bytes\":15") != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"output_bytes\":15") != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"noisy\":{\"n\":1,\"in\":15,\"out\":15}") != null);
+
+    const history = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(2048));
+    defer allocator.free(history);
+    try std.testing.expect(std.mem.find(u8, history, "\"cmd\":\"noisy\"") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"filter\":\"noisy\"") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"exit\":0") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"raw\":15") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"compact\":15") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"duration_ms\":") != null);
+}
+
+test "wrapper: explain preserves output and emits stderr footer" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "talker",
+        \\#!/bin/sh
+        \\printf 'stdout\n'
+        \\printf 'stderr\n' >&2
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "0");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--explain", "talker" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(2048),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("stdout\n", wrapped.stdout);
+    try std.testing.expect(std.mem.find(u8, wrapped.stderr, "stderr\n") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stderr, "smll explain: filter=talker") != null);
+    try std.testing.expect(std.mem.find(u8, wrapped.stderr, "history=recorded") != null);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+}
+
+test "rewrite prefixes eligible command and shell-escapes args" {
+    const allocator = std.testing.allocator;
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--rewrite", "git", "status", "--short", "path with spaces", "it's" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("smll git status --short 'path with spaces' 'it'\\''s'\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("", wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
 }
 
 test "wrapper: large stderr does not deadlock while stdout is still open" {
@@ -3051,6 +3135,107 @@ test "smoke: xcodebuild keeps build diagnostics" {
 
     try std.testing.expect(std.mem.find(u8, result.stdout, "error: bad") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "BUILD FAILED") != null);
+}
+
+test "smoke: direct next build uses JS build filter" {
+    const allocator = std.testing.allocator;
+    const fixture =
+        "\xe2\x96\xb2 Next.js 15.0.0\n" ++
+        "Creating an optimized production build ...\n" ++
+        "Compiled successfully\n" ++
+        "Linting and checking validity of types ...\n" ++
+        "src/app/page.tsx\n" ++
+        "12:8  Warning: 'useEffect' is defined but never used.  @typescript-eslint/no-unused-vars\n" ++
+        "Route (app)                              Size     First Load JS\n" ++
+        "\xe2\x94\x9c \xce\xbb /api/auth/[...nextauth]              0 B                0 B\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "next", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "next", "build" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled successfully") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@typescript-eslint/no-unused-vars") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Creating an optimized production build") == null);
+}
+
+test "smoke: eslint compact keeps diagnostics and summary" {
+    const allocator = std.testing.allocator;
+    const fixture =
+        "ESLint is running in this project\n" ++
+        "\n" ++
+        "/repo/src/app.ts\n" ++
+        "  1:7   error    'unused' is assigned a value but never used  no-unused-vars\n" ++
+        "  2:10  warning  Unexpected console statement                no-console\n" ++
+        "\n" ++
+        "\xe2\x9c\x96 2 problems (1 error, 1 warning)\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "eslint", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "eslint", "src" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "/repo/src/app.ts") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "no-unused-vars") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "2 problems") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "ESLint is running") == null);
+}
+
+test "smoke: terraform plan compact keeps resource headers and summary" {
+    const allocator = std.testing.allocator;
+    const fixture =
+        "random_pet.name: Refreshing state... [id=calm-raven]\n" ++
+        "\n" ++
+        "Terraform will perform the following actions:\n" ++
+        "\n" ++
+        "  # aws_s3_bucket.example will be created\n" ++
+        "  + resource \"aws_s3_bucket\" \"example\" {\n" ++
+        "      + bucket = \"example-smll\"\n" ++
+        "    }\n" ++
+        "\n" ++
+        "Plan: 1 to add, 0 to change, 0 to destroy.\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "terraform", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "terraform", "plan" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "# aws_s3_bucket.example will be created") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Plan: 1 to add") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Refreshing state") == null);
+}
+
+test "smoke: aws json output is minified" {
+    const allocator = std.testing.allocator;
+    const fixture =
+        "{\n" ++
+        "  \"UserId\": \"AIDACKCEVSQ6C2EXAMPLE\",\n" ++
+        "  \"Account\": \"123456789012\",\n" ++
+        "  \"Arn\": \"arn:aws:iam::123456789012:user/dev\"\n" ++
+        "}\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "aws", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "aws", "sts", "get-caller-identity" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("{\"UserId\":\"AIDACKCEVSQ6C2EXAMPLE\",\"Account\":\"123456789012\",\"Arn\":\"arn:aws:iam::123456789012:user/dev\"}\n", result.stdout);
 }
 
 test "smoke: finite head and tail pass through exactly" {
