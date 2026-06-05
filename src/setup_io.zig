@@ -133,7 +133,12 @@ pub fn checkConflictingIntegration(data: ?[]const u8, target: []const u8, file: 
 
 fn containsConflictingIntegration(s: []const u8) bool {
     return containsIgnoreCase(s, "run-toolkit") or
-        containsIgnoreCase(s, "run toolkit");
+        containsIgnoreCase(s, "run toolkit") or
+        containsIgnoreCase(s, "\"rtk\"") or
+        containsIgnoreCase(s, " rtk") or
+        containsIgnoreCase(s, "/rtk") or
+        containsIgnoreCase(s, "rtk-") or
+        containsIgnoreCase(s, "-rtk");
 }
 
 fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
@@ -142,17 +147,24 @@ fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
 
     var i: usize = 0;
     while (i + needle.len <= haystack.len) : (i += 1) {
-        var j: usize = 0;
-        while (j < needle.len) : (j += 1) {
-            if (std.ascii.toLower(haystack[i + j]) != std.ascii.toLower(needle[j])) break;
+        var ok = true;
+        for (needle, 0..) |c, j| {
+            if (std.ascii.toLower(haystack[i + j]) != std.ascii.toLower(c)) {
+                ok = false;
+                break;
+            }
         }
-        if (j == needle.len) return true;
+        if (ok) return true;
     }
     return false;
 }
 
-test "containsConflictingIntegration detects common wrapper markers" {
+test "conflicting integration detection covers legacy markers" {
     try std.testing.expect(containsConflictingIntegration("plugin: run-toolkit"));
-    try std.testing.expect(containsConflictingIntegration("plugin: run toolkit"));
+    try std.testing.expect(containsConflictingIntegration("Run Toolkit"));
+    try std.testing.expect(containsConflictingIntegration("{\"name\":\"rtk\"}"));
+    try std.testing.expect(containsConflictingIntegration("/opt/tools/rtk/plugin"));
+    try std.testing.expect(containsConflictingIntegration("rtk-pretooluse.sh"));
+    try std.testing.expect(containsConflictingIntegration("agent-rtk-hook"));
     try std.testing.expect(!containsConflictingIntegration("plugin: smll-proxy"));
 }

@@ -14,29 +14,26 @@ pub fn matches(input: []const u8) bool {
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     var state: ScanState = .{};
-    defer state.deinit(allocator);
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    try scan(allocator, stdout, &out, &state);
-    try scan(allocator, stderr, &out, &state);
-    if (out.items.len == 0 and (stdout.len > 0 or stderr.len > 0)) {
+    try scan(allocator, stdout, writer, &state);
+    try scan(allocator, stderr, writer, &state);
+    if (!state.emitted_any and (stdout.len > 0 or stderr.len > 0)) {
         try writer.writeAll("lint ok\n");
-        return;
     }
-    try writer.writeAll(out.items);
 }
 
 const ScanState = struct {
-    pending_file: std.ArrayList(u8) = .empty,
+    pending_file: [1024]u8 = [_]u8{0} ** 1024,
+    pending_file_len: usize = 0,
     has_pending_file: bool = false,
     emitted_pending: bool = false,
+    emitted_any: bool = false,
 
-    fn deinit(self: *ScanState, allocator: Allocator) void {
-        self.pending_file.deinit(allocator);
+    fn pendingFile(self: *const ScanState) []const u8 {
+        return self.pending_file[0..self.pending_file_len];
     }
 };
 
-fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state: *ScanState) !void {
+fn scan(allocator: Allocator, input: []const u8, writer: *Writer, state: *ScanState) !void {
     if (input.len == 0) return;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
@@ -48,8 +45,8 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
         if (trimmed.len == 0) continue;
 
         if (looksLikeFileHeader(trimmed)) {
-            state.pending_file.clearRetainingCapacity();
-            try state.pending_file.appendSlice(allocator, trimmed);
+            state.pending_file_len = @min(trimmed.len, state.pending_file.len);
+            @memcpy(state.pending_file[0..state.pending_file_len], trimmed[0..state.pending_file_len]);
             state.has_pending_file = true;
             state.emitted_pending = false;
             continue;
@@ -57,15 +54,17 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
 
         if (looksLikeDiagnostic(trimmed)) {
             if (state.has_pending_file and !state.emitted_pending) {
-                try appendLine(allocator, out, state.pending_file.items);
+                try appendLine(writer, state.pendingFile());
                 state.emitted_pending = true;
             }
-            try appendLine(allocator, out, trimmed);
+            try appendLine(writer, trimmed);
+            state.emitted_any = true;
             continue;
         }
 
         if (looksLikeSummary(trimmed)) {
-            try appendLine(allocator, out, trimmed);
+            try appendLine(writer, trimmed);
+            state.emitted_any = true;
         }
     }
 }
@@ -122,9 +121,9 @@ fn looksLikeSummary(line: []const u8) bool {
         std.mem.startsWith(u8, line, "No lint errors");
 }
 
-fn appendLine(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8) !void {
-    try out.appendSlice(allocator, line);
-    try out.append(allocator, '\n');
+fn appendLine(writer: *Writer, line: []const u8) !void {
+    try writer.writeAll(line);
+    try writer.writeByte('\n');
 }
 
 test "eslint stylish diagnostics keep file, diagnostics, and summary" {

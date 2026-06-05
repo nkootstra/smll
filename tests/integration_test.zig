@@ -846,6 +846,57 @@ test "wrapper: explain preserves output and emits stderr footer" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
 }
 
+test "wrapper: err and test modes tag history without changing output" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "talker",
+        \\#!/bin/sh
+        \\printf 'stdout\n'
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "0");
+
+    const err_result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--err", "talker" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var err_wrapped: RunResult = .{ .stdout = err_result.stdout, .stderr = err_result.stderr, .term = err_result.term };
+    defer err_wrapped.deinit(allocator);
+    try std.testing.expectEqualStrings("stdout\n", err_wrapped.stdout);
+    try std.testing.expectEqualStrings("", err_wrapped.stderr);
+
+    const test_result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--test", "talker" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var test_wrapped: RunResult = .{ .stdout = test_result.stdout, .stderr = test_result.stderr, .term = test_result.term };
+    defer test_wrapped.deinit(allocator);
+    try std.testing.expectEqualStrings("stdout\n", test_wrapped.stdout);
+    try std.testing.expectEqualStrings("", test_wrapped.stderr);
+
+    const history = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(4096));
+    defer allocator.free(history);
+    try std.testing.expect(std.mem.find(u8, history, "\"filter\":\"err:talker\"") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"filter\":\"test:talker\"") != null);
+}
+
 test "rewrite prefixes eligible command and shell-escapes args" {
     const allocator = std.testing.allocator;
     const result = try std.process.run(allocator, std.testing.io, .{

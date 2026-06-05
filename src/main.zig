@@ -112,7 +112,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "--version")) {
-        try stdout_writer.interface.print("smll {s}\n", .{build_options.smll_version});
+        try stdout_writer.interface.writeAll("smll ");
+        try stdout_writer.interface.writeAll(build_options.smll_version);
+        try stdout_writer.interface.writeByte('\n');
         try stdout_writer.interface.flush();
         return;
     }
@@ -127,7 +129,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     if (try maybeRunRewrite(args, &stdout_writer.interface)) |code| {
         try stdout_writer.interface.flush();
-        if (code != 0) std.c._exit(code);
+        exitIfNonzero(code);
         return;
     }
 
@@ -135,7 +137,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         if (args.len < 3) {
             try stderr_writer.interface.writeAll("usage: smll --explain <cmd...>\n");
             try stderr_writer.interface.flush();
-            std.c._exit(2);
+            std.process.exit(2);
         }
         const code = try runWrappedAndRecord(
             io,
@@ -144,19 +146,20 @@ pub fn main(init: std.process.Init.Minimal) !void {
             args[2..],
             &stdout_writer.interface,
             &stderr_writer.interface,
-            true,
+            .explain,
         );
         try stdout_writer.interface.flush();
         try stderr_writer.interface.flush();
-        if (code != 0) std.c._exit(code);
+        exitIfNonzero(code);
         return;
     }
 
     if (std.mem.eql(u8, args[1], "--err") or std.mem.eql(u8, args[1], "--test")) {
+        const mode: RunMode = if (std.mem.eql(u8, args[1], "--err")) .err else .test_cmd;
         if (args.len < 3) {
             try stderr_writer.interface.writeAll("usage: smll --err <cmd...>\n       smll --test <cmd...>\n");
             try stderr_writer.interface.flush();
-            std.c._exit(2);
+            std.process.exit(2);
         }
         const code = try runWrappedAndRecord(
             io,
@@ -165,18 +168,18 @@ pub fn main(init: std.process.Init.Minimal) !void {
             args[2..],
             &stdout_writer.interface,
             &stderr_writer.interface,
-            false,
+            mode,
         );
         try stdout_writer.interface.flush();
         try stderr_writer.interface.flush();
-        if (code != 0) std.c._exit(code);
+        exitIfNonzero(code);
         return;
     }
 
     // Stats display: --stats, --stats --reset
     if (try stats.maybeRun(arena_allocator, io, home, args, &stdout_writer.interface)) |code| {
         try stdout_writer.interface.flush();
-        if (code != 0) std.c._exit(code);
+        exitIfNonzero(code);
         return;
     }
 
@@ -184,7 +187,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     if (try setup.maybeRun(arena_allocator, io, environ, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
         try stderr_writer.interface.flush();
-        if (code != 0) std.c._exit(code);
+        exitIfNonzero(code);
         return;
     }
 
@@ -200,11 +203,11 @@ pub fn main(init: std.process.Init.Minimal) !void {
         child_argv,
         &stdout_writer.interface,
         &stderr_writer.interface,
-        false,
+        .normal,
     );
     try stdout_writer.interface.flush();
     try stderr_writer.interface.flush();
-    if (code != 0) std.c._exit(code);
+    exitIfNonzero(code);
 }
 
 fn maybeRunRewrite(args: []const []const u8, stdout: *std.Io.Writer) !?u8 {
@@ -269,6 +272,13 @@ fn isShellSafe(arg: []const u8) bool {
     return true;
 }
 
+const RunMode = enum {
+    normal,
+    explain,
+    err,
+    test_cmd,
+};
+
 fn runWrappedAndRecord(
     io: std.Io,
     environ: *const std.process.Environ.Map,
@@ -276,7 +286,7 @@ fn runWrappedAndRecord(
     child_argv: []const []const u8,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
-    explain: bool,
+    mode: RunMode,
 ) !u8 {
     // Arena over the wrapper lifetime — filter loops allocate per-line and
     // free at scope exit. page_allocator is a syscall per alloc; arena bumps
@@ -298,14 +308,15 @@ fn runWrappedAndRecord(
 
     const recorded = result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK");
     if (recorded) {
+        const history_filter_name = try historyFilterName(allocator, mode, result.filter_name);
         stats.record(allocator, io, home, child_argv, result.input_bytes, result.output_bytes, .{
             .exit_code = result.exit_code,
-            .filter_name = result.filter_name,
+            .filter_name = history_filter_name,
             .duration_ms = duration_ms,
         });
     }
 
-    if (explain) {
+    if (mode == .explain) {
         const saved = if (result.input_bytes > result.output_bytes) result.input_bytes - result.output_bytes else 0;
         const pct = if (result.input_bytes > 0) (saved * 100) / result.input_bytes else 0;
         try stderr.print(
@@ -324,9 +335,28 @@ fn runWrappedAndRecord(
     return result.exit_code;
 }
 
+fn historyFilterName(allocator: std.mem.Allocator, mode: RunMode, filter_name: []const u8) ![]const u8 {
+    return switch (mode) {
+        .normal, .explain => filter_name,
+        .err => try prefixedFilterName(allocator, "err:", filter_name),
+        .test_cmd => try prefixedFilterName(allocator, "test:", filter_name),
+    };
+}
+
+fn prefixedFilterName(allocator: std.mem.Allocator, prefix: []const u8, filter_name: []const u8) ![]const u8 {
+    const out = try allocator.alloc(u8, prefix.len + filter_name.len);
+    @memcpy(out[0..prefix.len], prefix);
+    @memcpy(out[prefix.len..], filter_name);
+    return out;
+}
+
+fn exitIfNonzero(code: u8) void {
+    if (code != 0) std.process.exit(code);
+}
+
 fn elapsedMs(start: std.Io.Clock.Timestamp, io: std.Io) u64 {
     const elapsed = start.untilNow(io);
-    const ns: i128 = elapsed.raw.nanoseconds;
+    const ns: i64 = @intCast(elapsed.raw.nanoseconds);
     if (ns <= 0) return 0;
     return @intCast(@divTrunc(ns, std.time.ns_per_ms));
 }

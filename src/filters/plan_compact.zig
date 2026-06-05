@@ -13,19 +13,16 @@ pub fn matches(input: []const u8) bool {
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    try scan(allocator, stdout, &out);
-    try scan(allocator, stderr, &out);
-    if (out.items.len == 0 and (stdout.len > 0 or stderr.len > 0)) {
+    var emitted = try scan(allocator, stdout, writer);
+    emitted = try scan(allocator, stderr, writer) or emitted;
+    if (!emitted and (stdout.len > 0 or stderr.len > 0)) {
         try writer.writeAll("plan ok\n");
-        return;
     }
-    try writer.writeAll(out.items);
 }
 
-fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8)) !void {
-    if (input.len == 0) return;
+fn scan(allocator: Allocator, input: []const u8, writer: *Writer) !bool {
+    if (input.len == 0) return false;
+    var emitted = false;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     var lines = std.mem.splitScalar(u8, input, '\n');
@@ -33,8 +30,13 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8)) !void 
         const clean = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const line = std.mem.trim(u8, clean, " \t\r");
         if (line.len == 0) continue;
-        if (shouldKeep(line)) try appendLine(allocator, out, line);
+        if (shouldKeep(line)) {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            emitted = true;
+        }
     }
+    return emitted;
 }
 
 fn shouldKeep(line: []const u8) bool {
@@ -50,11 +52,6 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "~ resource ")) return true;
     if (std.mem.startsWith(u8, line, "-/+ resource ")) return true;
     return false;
-}
-
-fn appendLine(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8) !void {
-    try out.appendSlice(allocator, line);
-    try out.append(allocator, '\n');
 }
 
 test "terraform plan drops refresh chatter and keeps summary" {

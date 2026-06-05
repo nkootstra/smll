@@ -12,28 +12,31 @@ pub fn matches(input: []const u8) bool {
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = allocator;
     if (stdout.len > 0 and matches(stdout)) {
-        try minify(allocator, stdout, writer);
+        try minify(stdout, writer);
         return;
     }
     if (stderr.len > 0 and matches(stderr)) {
-        try minify(allocator, stderr, writer);
+        try minify(stderr, writer);
         return;
     }
     try writer.writeAll(stdout);
     try writer.writeAll(stderr);
 }
 
-fn minify(allocator: Allocator, input: []const u8, writer: *Writer) !void {
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-
+fn minify(input: []const u8, writer: *Writer) !void {
     const s = trimBomAndSpace(input);
+    if (hasUnterminatedString(s)) {
+        try writer.writeAll(input);
+        return;
+    }
+
     var in_string = false;
     var escaped = false;
     for (s) |c| {
         if (in_string) {
-            try out.append(allocator, c);
+            try writer.writeByte(c);
             if (escaped) {
                 escaped = false;
             } else if (c == '\\') {
@@ -46,18 +49,32 @@ fn minify(allocator: Allocator, input: []const u8, writer: *Writer) !void {
 
         if (c == '"') {
             in_string = true;
-            try out.append(allocator, c);
+            try writer.writeByte(c);
         } else if (!std.ascii.isWhitespace(c)) {
-            try out.append(allocator, c);
+            try writer.writeByte(c);
         }
     }
 
-    if (in_string) {
-        try writer.writeAll(input);
-        return;
-    }
-    try writer.writeAll(out.items);
     try writer.writeByte('\n');
+}
+
+fn hasUnterminatedString(s: []const u8) bool {
+    var in_string = false;
+    var escaped = false;
+    for (s) |c| {
+        if (!in_string) {
+            if (c == '"') in_string = true;
+            continue;
+        }
+        if (escaped) {
+            escaped = false;
+        } else if (c == '\\') {
+            escaped = true;
+        } else if (c == '"') {
+            in_string = false;
+        }
+    }
+    return in_string;
 }
 
 fn trimBomAndSpace(input: []const u8) []const u8 {

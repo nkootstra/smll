@@ -58,8 +58,8 @@ fn recordInner(
 
     // Millisecond precision: keeps filenames readable while ensuring two
     // failures in the same second don't collide.
-    const epoch_ns: i128 = Io.Clock.real.now(io).toNanoseconds();
-    const epoch_ms: i64 = @intCast(@divTrunc(epoch_ns, std.time.ns_per_ms));
+    const epoch_ns: i64 = @intCast(Io.Clock.real.now(io).toNanoseconds());
+    const epoch_ms = @divTrunc(epoch_ns, std.time.ns_per_ms);
     const file_name = try std.fmt.allocPrint(allocator, "{d}_{s}.log", .{ epoch_ms, label });
     defer allocator.free(file_name);
 
@@ -153,7 +153,7 @@ fn rotate(allocator: Allocator, io: Io, dir_path: []const u8) !void {
 
     const Entry = struct {
         name: []u8,
-        mtime_ns: i128,
+        mtime_ns: i64,
     };
 
     var entries: std.ArrayList(Entry) = .empty;
@@ -175,7 +175,7 @@ fn rotate(allocator: Allocator, io: Io, dir_path: []const u8) !void {
         // and the doc on File.Stat.mtime ("relative to UTC 1970-01-01").
         try entries.append(allocator, .{
             .name = name_dup,
-            .mtime_ns = @as(i128, st.mtime.nanoseconds),
+            .mtime_ns = @intCast(st.mtime.nanoseconds),
         });
     }
 

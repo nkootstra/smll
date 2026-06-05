@@ -106,8 +106,8 @@ What setup does:
 
 Safety behavior:
 - Existing files are backed up as `*.bak.smll` before changes.
-- If an existing command-wrapper integration is detected, setup aborts and asks
-  you to remove it first (to avoid conflicting double-proxy behavior).
+- Setup only writes smll-owned hook entries/scripts and leaves unrelated config
+  fields intact.
 
 ## Local analytics
 
@@ -218,7 +218,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 288 KB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 300 KiB (Linux x86_64
 release). No network calls, no telemetry. The only local state smll writes is
 under `~/.smll/`: cumulative stats, append-only command history, and optional
 tee logs for failed commands.

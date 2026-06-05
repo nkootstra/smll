@@ -156,7 +156,6 @@ fn setupOpencode(
     const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
     defer allocator.free(config_path);
 
-    // Check for conflicting command-wrapper integrations.
     const existing_config = try setup_io.readFileOptional(allocator, io, config_path);
     defer if (existing_config) |buf| allocator.free(buf);
     if (try setup_io.checkConflictingIntegration(existing_config, "opencode", "opencode.json", stderr)) return 1;
