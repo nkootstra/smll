@@ -127,8 +127,9 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
     const home = environ.get("HOME") orelse "";
 
-    if (try maybeRunRewrite(args, &stdout_writer.interface)) |code| {
+    if (try maybeRunRewrite(args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
+        try stderr_writer.interface.flush();
         exitIfNonzero(code);
         return;
     }
@@ -210,10 +211,10 @@ pub fn main(init: std.process.Init.Minimal) !void {
     exitIfNonzero(code);
 }
 
-fn maybeRunRewrite(args: []const []const u8, stdout: *std.Io.Writer) !?u8 {
+fn maybeRunRewrite(args: []const []const u8, stdout: *std.Io.Writer, stderr: *std.Io.Writer) !?u8 {
     if (args.len < 2 or !std.mem.eql(u8, args[1], "--rewrite")) return null;
     if (args.len < 3) {
-        try stdout.writeAll("usage: smll --rewrite <cmd...>\n");
+        try stderr.writeAll("usage: smll --rewrite <cmd...>\n");
         return 2;
     }
     const child_argv = args[2..];
@@ -233,6 +234,7 @@ fn shouldWrapForRewrite(argv: []const []const u8) bool {
     if (argv.len == 0) return false;
     const base = pathBasename(argv[0]);
     if (std.mem.eql(u8, base, "smll")) return false;
+    if (!filter_catalog.shouldAutoWrap(base)) return false;
     if (wrapper_util.isStreamingCommand(base, argv)) return false;
     return true;
 }

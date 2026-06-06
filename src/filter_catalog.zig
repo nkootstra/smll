@@ -13,6 +13,14 @@ pub const auto_wrap_js_array =
     "\"gradle\",\"gradlew\",\"mvn\",\"mvnw\",\"pre-commit\",\"terraform\",\"tofu\",\"aws\"," ++
     "\"jq\",\"psql\",\"systemctl\",\"lsof\",\"brew\"";
 
+pub fn shouldAutoWrap(command: []const u8) bool {
+    var commands = std.mem.splitScalar(u8, auto_wrap_shell_case, '|');
+    while (commands.next()) |candidate| {
+        if (std.mem.eql(u8, command, candidate)) return true;
+    }
+    return false;
+}
+
 pub const text =
     \\smll filters
     \\
@@ -44,4 +52,10 @@ test "catalog names high-value filters" {
     try std.testing.expect(std.mem.find(u8, text, "terraform plan") != null);
     try std.testing.expect(std.mem.find(u8, text, "eslint") != null);
     try std.testing.expect(std.mem.find(u8, text, "aws JSON") != null);
+}
+
+test "auto-wrap lookup uses the hook command catalog" {
+    try std.testing.expect(shouldAutoWrap("git"));
+    try std.testing.expect(shouldAutoWrap("pre-commit"));
+    try std.testing.expect(!shouldAutoWrap("python"));
 }

@@ -912,6 +912,36 @@ test "rewrite prefixes eligible command and shell-escapes args" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
 }
 
+test "rewrite usage error writes to stderr" {
+    const allocator = std.testing.allocator;
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--rewrite" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("", wrapped.stdout);
+    try std.testing.expectEqualStrings("usage: smll --rewrite <cmd...>\n", wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, wrapped.term);
+}
+
+test "rewrite only prefixes commands from the hook catalog" {
+    const allocator = std.testing.allocator;
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--rewrite", "python", "script.py" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings("python script.py\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("", wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+}
+
 test "wrapper: large stderr does not deadlock while stdout is still open" {
     const allocator = std.testing.allocator;
     const script =
