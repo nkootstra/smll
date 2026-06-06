@@ -57,48 +57,28 @@ const GitLogCompact = pipe_filters.GitLogCompact;
 const envFlagOn = wrapper_util.envFlagOn;
 
 const help_text =
-    \\smll - compact noisy command output before it lands in agent context
+    \\smll - compact noisy command output for coding agents
     \\
     \\Usage:
-    \\  smll                                  show help in an interactive terminal
-    \\  smll <cmd...>                         run a command through smll
-    \\  <cmd> | smll                          compact stdin in pipe mode
-    \\  smll --explain <cmd...>               run and print compaction stats to stderr
-    \\  smll --err <cmd...>                   run and tag history as an error command
-    \\  smll --test <cmd...>                  run and tag history as a test command
-    \\  smll --rewrite <cmd...>               print the hook rewrite for a command
+    \\  smll                                  help if stdin is a terminal
+    \\  smll <cmd...>                         run command with compact output
+    \\  <cmd> | smll                          compact stdin
+    \\  smll --explain <cmd...>               print filter/byte stats
+    \\  smll --err <cmd...>                   history=error
+    \\  smll --test <cmd...>                  history=test
+    \\  smll --rewrite <cmd...>               hook rewrite
     \\
-    \\Options:
-    \\  -h, --help                            show this help
-    \\  --version                             print the smll version
-    \\  --filters                             list supported filters and auto-wrap commands
-    \\  --stats [options]                     show local savings history
-    \\  --discover [options]                  find low-savings and high-output commands
-    \\  --setup <target> [--dry-run]          install agent integration
-    \\  --setup=<target> [--dry-run]          install agent integration
-    \\  --unsetup <target> [--dry-run]        remove agent integration
-    \\  --unsetup=<target> [--dry-run]        remove agent integration
+    \\Commands:
+    \\  -h, --help
+    \\  --version
+    \\  --filters
+    \\  --stats [--reset|--verbose|--by-command] [--since <24h|7d|30d>] [--project]
+    \\  --discover [--since <24h|7d|30d>] [--project]
+    \\  --setup[=]<target> [--dry-run]
+    \\  --unsetup[=]<target> [--dry-run]
     \\
-    \\Stats options:
-    \\  --reset                               reset stats; only valid with --stats
-    \\  --verbose                             show exact byte counts; only valid with --stats
-    \\  --by-command                          show command labels; only valid with --stats
-    \\  --since <24h|7d|30d>                  filter history by age
-    \\  --since=<24h|7d|30d>                  filter history by age
-    \\  --project                             limit history to the current git project
-    \\
-    \\Agent targets:
-    \\  claude, opencode, cursor, codex
-    \\
-    \\Environment:
-    \\  SMLL_LOSSLESS=1                       bypass filters and pass output through raw
-    \\  SMLL_TEE=0                            disable raw failed-command logs
-    \\  DO_NOT_TRACK=1                        disable stats, history, and tee logs
-    \\
-    \\Examples:
-    \\  smll git status
-    \\  smll --explain npm test
-    \\  smll --stats --since 7d --by-command
+    \\Targets: claude opencode cursor codex
+    \\Env: SMLL_LOSSLESS=1 raw; SMLL_TEE=0 no tee; DO_NOT_TRACK=1 no records
     \\
 ;
 
