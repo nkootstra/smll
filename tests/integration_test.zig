@@ -2634,11 +2634,11 @@ test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < find_ls_fixture.len);
-    // 3 entries in "." (./src, ./README.md, ./tests) collapse to a count;
-    // 2 entries in "./src" (./src/main.zig, ./src/filter.zig) survive individually.
+    // 3 entries in "." (./src, ./README.md, ./tests) collapse to a count
+    // with examples; 2 entries in "./src" survive individually.
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/filter.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries: ./README.md, ./src/, ./tests/)") != null);
     // Metadata gone.
     try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);
@@ -3573,10 +3573,10 @@ test "smoke: curl -v with SMLL_LOSSLESS=1 passes both streams through byte-ident
 }
 
 // ---------------------------------------------------------------------------
-// v0.6 build_compact — shared filter for `cargo build`, `make`, `go build`.
-// cargo/go emit progress on stderr by convention; make splits across both.
-// setupFakeBuild supports routing a fixture to either stream so each tool's
-// real shape is preserved.
+// v0.6 build_compact — shared filter for `cargo build`, `make`, `go build`,
+// and successful `zig build --summary all` output. cargo/go emit progress on
+// stderr by convention; make splits across both. setupFakeBuild supports
+// routing a fixture to either stream so each tool's real shape is preserved.
 // ---------------------------------------------------------------------------
 
 const cargo_build_fixture = @embedFile("fixture_cargo_build");
@@ -3724,6 +3724,60 @@ test "smoke: go build large fixture reduces by ≥ 60%" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 (go)") != null);
     // Errors survived.
     try std.testing.expect(std.mem.find(u8, result.stdout, "error: declared and not used") != null);
+}
+
+test "smoke: zig build test success collapses summary tree" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        \\Build Summary: 140/140 steps succeeded; 871/871 tests passed
+        \\test success
+        \\+- run test 194 pass (194 total) 42s MaxRSS:71M
+        \\|  +- compile test ReleaseSmall native success 2s MaxRSS:226M
+        \\+- compile exe smll Debug native cached 70ms MaxRSS:36M
+        \\
+    ;
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "zig", fixture, false);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "zig", "build", "test", "--summary", "all" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(
+        "Build Summary: 140/140 steps succeeded; 871/871 tests passed\n",
+        result.stdout,
+    );
+    try std.testing.expect(std.mem.find(u8, result.stdout, "+- run test") == null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "smoke: failed zig build preserves exit code and failure evidence" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const script =
+        \\#!/bin/sh
+        \\printf 'test\n'
+        \\printf '+- run test 191 pass, 3 fail (194 total)\n'
+        \\printf "error: 'integration_test.test.wrapper: stats record agent-visible stdout and stderr bytes' failed without output\n"
+        \\printf 'Build Summary: 138/140 steps succeeded (1 failed); 868/871 tests passed (3 failed)\n'
+        \\exit 1
+        \\
+    ;
+    try writeFakeScript(tmp.dir, "zig", script);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "zig", "build", "test", "--summary", "all" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "run test 191 pass, 3 fail") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "stats record agent-visible") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Build Summary: 138/140") != null);
+    try std.testing.expectEqualStrings("", result.stderr);
 }
 
 test "smoke: cargo build with SMLL_LOSSLESS=1 passes through byte-identical" {

@@ -3,8 +3,9 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// LOSSY compact filter for `cargo build` / `make` / `go build` — on by
-// default (v0.6). Set SMLL_LOSSLESS=1 to bypass.
+// LOSSY compact filter for `cargo build` / `make` / `go build` /
+// successful `zig build --summary all` output — on by default (v0.6).
+// Set SMLL_LOSSLESS=1 to bypass.
 //
 // Collapses per-unit compile progress lines into one summary line per tool.
 // Warnings and errors are preserved verbatim. Empty lines are preserved so
@@ -16,7 +17,9 @@ const Writer = std.Io.Writer;
 //
 // Shape of summary line (emitted once per tool that fired at least one
 // progress line): `Compiled N (cargo)` / `Compiled N (make)` /
-// `Compiled N (go)`.
+// `Compiled N (go)`. For successful `zig build --summary all`, the
+// original `Build Summary: …` line is forwarded verbatim; no synthesized
+// count line is emitted.
 
 // Source-line prefixes that count as "compiler progress" and collapse into
 // a count. Two space-prefixed entries cover cargo's leading 3-space indent
@@ -24,7 +27,6 @@ const Writer = std.Io.Writer;
 // invocations at column 0. Go progress covers `go build:` leader lines.
 const CARGO_PROGRESS_PREFIX = "   Compiling ";
 const GO_PROGRESS_PREFIX = "go build:";
-
 pub fn matches(stdout: []const u8, stderr: []const u8) bool {
     return scanForAny(stdout) or scanForAny(stderr);
 }
@@ -33,6 +35,7 @@ fn scanForAny(input: []const u8) bool {
     if (input.len == 0) return false;
     var it = std.mem.splitScalar(u8, input, '\n');
     while (it.next()) |line| {
+        if (std.mem.startsWith(u8, line, "Build Summary: ")) return true;
         if (classify(line) != .other) return true;
     }
     return false;
@@ -72,6 +75,12 @@ fn classify(line: []const u8) LineKind {
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
+
+    if (findZigSuccessSummary(stdout) orelse findZigSuccessSummary(stderr)) |summary| {
+        try writer.writeAll(summary);
+        try writer.writeByte('\n');
+        return;
+    }
 
     var cargo_count: usize = 0;
     var cargo_verbose_count: usize = 0;
@@ -138,6 +147,15 @@ fn processStream(
     }
 }
 
+fn findZigSuccessSummary(input: []const u8) ?[]const u8 {
+    const start = std.mem.find(u8, input, "Build Summary: ") orelse return null;
+    const rest = input[start..];
+    const end = std.mem.findScalar(u8, rest, '\n') orelse rest.len;
+    const line = rest[0..end];
+    if (std.mem.find(u8, line, "failed") == null) return line;
+    return null;
+}
+
 test "matches: cargo progress" {
     try std.testing.expect(matches("   Compiling foo v0.1.0\n", ""));
     try std.testing.expect(matches("", "   Compiling foo v0.1.0\n"));
@@ -150,6 +168,13 @@ test "matches: make progress" {
 
 test "matches: go progress" {
     try std.testing.expect(matches("go build: compiling foo\n", ""));
+}
+
+test "matches: zig successful build summary" {
+    try std.testing.expect(matches(
+        "Build Summary: 140/140 steps succeeded; 871/871 tests passed\n",
+        "",
+    ));
 }
 
 test "matches: warning alone" {
@@ -244,6 +269,42 @@ test "apply: go build progress collapses" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (go)") != null);
     try std.testing.expect(std.mem.find(u8, got, "go build:") == null);
+}
+
+test "apply: zig successful build summary drops step tree" {
+    const input =
+        \\Build Summary: 140/140 steps succeeded; 871/871 tests passed
+        \\test success
+        \\+- run test 194 pass (194 total) 42s MaxRSS:71M
+        \\|  +- compile test ReleaseSmall native success 2s MaxRSS:226M
+        \\warning: cache directory is not writable
+        \\+- compile exe smll Debug native cached 70ms MaxRSS:36M
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expectEqualStrings(
+        "Build Summary: 140/140 steps succeeded; 871/871 tests passed\n",
+        out.written(),
+    );
+}
+
+test "apply: failed zig build summary preserves evidence" {
+    const input =
+        \\test
+        \\+- run test 191 pass, 3 fail (194 total)
+        \\error: 'integration_test.test.wrapper: stats record agent-visible stdout and stderr bytes' failed without output
+        \\Build Summary: 138/140 steps succeeded (1 failed); 868/871 tests passed (3 failed)
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "run test 191 pass, 3 fail") != null);
+    try std.testing.expect(std.mem.find(u8, got, "stats record agent-visible") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Build Summary: 138/140") != null);
 }
 
 test "apply: empty input yields empty output" {

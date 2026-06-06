@@ -9,13 +9,14 @@ const Writer = std.Io.Writer;
 // `find -ls` emits columns: inode, blocks, mode, nlink, user, group,
 // size, month, day, time/year, path. All but the path are dropped.
 // Paths sharing a parent directory collapse to a single
-// "<dir>/ (N entries)" line when ≥3 share it; lone files (1-2 per
-// dir) are emitted individually. Directory-typed entries (mode starts
-// with 'd') get the trailing slash even when emitted standalone.
+// "<dir>/ (N entries: ./dir/a, ./dir/b)" line when ≥3 share it;
+// lone files (1-2 per dir) are emitted individually. Directory-typed
+// entries (mode starts with 'd') get the trailing slash in both forms.
 //
 // Contract:
 //   • Lossy — inode, mode bits, ownership, size, timestamps gone.
-//     Paths under a parent dir collapse to a count when ≥3 share it.
+//     Paths under a parent dir collapse to a count plus examples when
+//     ≥3 share it.
 //   • Lone paths (≤2 per parent) preserved verbatim.
 //   • Typical reduction ~95% on GNU/BSD `find -ls` output of a
 //     populated directory tree.
@@ -109,7 +110,13 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             try writer.writeAll(parent);
             try writer.writeAll("/ (");
             try ansi.writeDecimal(writer, count);
-            try writer.writeAll(" entries)");
+            try writer.writeAll(" entries: ");
+            for (entries.items[i .. i + 3], 0..) |entry, idx| {
+                if (idx > 0) try writer.writeAll(", ");
+                try writer.writeAll(entry.path);
+                if (entry.is_dir) try writer.writeByte('/');
+            }
+            try writer.writeByte(')');
         } else {
             for (entries.items[i..j]) |e| {
                 if (!first) try writer.writeByte('\n');
@@ -239,7 +246,7 @@ test "apply: ≥3 entries in same parent collapse to count" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expectEqualStrings("./ (4 entries)\n", out.written());
+    try std.testing.expectEqualStrings("./ (4 entries: ./a.txt, ./b.txt, ./c.txt)\n", out.written());
 }
 
 test "apply: small fixture reduces output and keeps paths" {
@@ -249,11 +256,12 @@ test "apply: small fixture reduces output and keeps paths" {
     try apply(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(got.len < fixture.len);
-    // Fixture has 5 entries: 3 in "." (./src, ./README.md, ./tests) → collapse;
-    // 2 in "./src" (./src/main.zig, ./src/filter.zig) → emit individually.
+    // Fixture has 5 entries: 3 in "." (./src, ./README.md, ./tests) → collapse
+    // with examples; 2 in "./src" (./src/main.zig, ./src/filter.zig) → emit
+    // individually.
     try std.testing.expect(std.mem.find(u8, got, "./src/main.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "./src/filter.zig") != null);
-    try std.testing.expect(std.mem.find(u8, got, "./ (3 entries)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "./ (3 entries: ./README.md, ./src/, ./tests/)") != null);
     try std.testing.expect(std.mem.find(u8, got, "user") == null);
 }
 
@@ -274,7 +282,9 @@ test "apply: large same-parent fixture collapses (≥95% reduction)" {
     defer out.deinit();
     try apply(alloc, buf.items, &.{}, &out.writer);
     const got = out.written();
-    try std.testing.expectEqualStrings("./src/ (50 entries)\n", got);
+    try std.testing.expect(std.mem.find(u8, got, "./src/ (50 entries: ") != null);
+    try std.testing.expect(std.mem.find(u8, got, "file_0.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "file_1.zig") != null);
     const reduction = (buf.items.len - got.len) * 100 / buf.items.len;
     try std.testing.expect(reduction >= 95);
 }
