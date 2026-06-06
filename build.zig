@@ -145,6 +145,9 @@ const modules = [_]ModuleEntry{
     .{ .name = "gradle_compact", .needs_ansi = true },
     .{ .name = "maven_compact", .needs_ansi = true },
     .{ .name = "precommit_compact", .needs_ansi = true },
+    .{ .name = "lint_compact", .needs_ansi = true },
+    .{ .name = "plan_compact", .needs_ansi = true },
+    .{ .name = "json_compact" },
     .{ .name = "package_tree", .needs_ansi = true },
     .{ .name = "tool_compact", .needs_ansi = true },
     .{ .name = "curl_compact", .needs_ansi = true },
@@ -275,8 +278,31 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
+    const history_mod = b.createModule(.{
+        .root_source_file = b.path("src/history.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    exe_mod.addImport("util", util_mod);
+    stats_mod.addImport("util", util_mod);
+    history_mod.addImport("util", util_mod);
+    const filter_catalog_mod = b.createModule(.{
+        .root_source_file = b.path("src/filter_catalog.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
     const setup_mod = b.createModule(.{
         .root_source_file = b.path("src/setup.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const setup_hooks_mod = b.createModule(.{
+        .root_source_file = b.path("src/setup_hooks.zig"),
+        .target = target,
+        .optimize = .ReleaseSmall,
+    });
+    const setup_io_mod = b.createModule(.{
+        .root_source_file = b.path("src/setup_io.zig"),
         .target = target,
         .optimize = .ReleaseSmall,
     });
@@ -295,7 +321,6 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
-
     // Pass 1: create every module described in `modules`, recording it
     // in a name → module map.
     var registry = std.StringHashMap(*std.Build.Module).init(b.allocator);
@@ -359,10 +384,10 @@ pub fn build(b: *std.Build) void {
         .unwind_tables = .none,
         .single_threaded = true,
         .omit_frame_pointer = true,
-        .no_builtin = true,
-        .link_libc = true,
+        .link_libc = false,
     });
     release_mod.addOptions("build_options", app_opts);
+    release_mod.addImport("util", util_mod);
     for (modules) |m| {
         if (!m.in_release) continue;
         const mod = registry.get(m.name) orelse unreachable;
@@ -392,6 +417,10 @@ pub fn build(b: *std.Build) void {
             break :blk stripped_bin;
         } else {
             const rel_exe = b.addExecutable(.{ .name = "smll", .root_module = release_mod });
+            rel_exe.link_function_sections = true;
+            rel_exe.link_data_sections = true;
+            rel_exe.link_gc_sections = true;
+            rel_exe.pie = false;
             break :blk rel_exe.getEmittedBin();
         }
     };
@@ -406,7 +435,7 @@ pub fn build(b: *std.Build) void {
     const run_exe_tests = b.addRunArtifact(exe_tests);
     test_step.dependOn(&run_exe_tests.step);
 
-    for ([_]*std.Build.Module{ util_mod, stats_mod, setup_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
+    for ([_]*std.Build.Module{ util_mod, stats_mod, history_mod, filter_catalog_mod, setup_mod, setup_hooks_mod, setup_io_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
         const t = b.addTest(.{ .root_module = mod });
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);

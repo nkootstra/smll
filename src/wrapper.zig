@@ -33,6 +33,9 @@ const build_compact = @import("build_compact");
 const gradle_compact = @import("gradle_compact");
 const maven_compact = @import("maven_compact");
 const precommit_compact = @import("precommit_compact");
+const lint_compact = @import("lint_compact");
+const plan_compact = @import("plan_compact");
+const json_compact = @import("json_compact");
 const package_tree = @import("package_tree");
 const generic_compact = @import("generic_compact");
 const cat_compact = @import("cat_compact");
@@ -62,6 +65,7 @@ pub const Result = struct {
     exit_code: u8,
     input_bytes: usize,
     output_bytes: usize,
+    filter_name: []const u8,
     record_stats: bool,
 };
 
@@ -108,6 +112,7 @@ pub fn run(
     defer capture.deinit();
     var counted_stderr = CountingWriter.init(stderr_writer);
     last_output_inherited = false;
+    last_filter_name = "passthrough";
     last_raw_stdout = &.{};
     last_raw_stderr = &.{};
     const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, &counted_stderr.writer);
@@ -147,6 +152,7 @@ pub fn run(
         .exit_code = exit_code,
         .input_bytes = last_input_bytes,
         .output_bytes = final_stdout_bytes + counted_stderr.count,
+        .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
     };
 }
@@ -229,6 +235,7 @@ fn runWrapperInner(
         outer_cmd[idx + 1 ..]
     else
         outer_cmd;
+    last_filter_name = cmd_basename;
 
     var ls_env_map = std.process.Environ.Map.init(allocator);
     var ls_env_map_active = false;
@@ -253,6 +260,7 @@ fn runWrapperInner(
     const is_streaming = lossless or isStreamingCommand(cmd_basename, argv) or is_raw_curl;
     if (is_streaming) {
         last_output_inherited = true;
+        last_filter_name = "passthrough";
         last_input_bytes = 0;
         last_stderr_bytes = 0;
         var child = std.process.spawn(io, .{
@@ -583,6 +591,16 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    if (eqAny(cmd_basename, &.{ "eslint", "biome" })) {
+        if (!lossless and (lint_compact.matches(stdout_slice) or lint_compact.matches(stderr_slice))) {
+            if (!applyFilter(lint_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
     if (eqAny(cmd_basename, &.{ "pip", "pip3" })) {
         const is_pip_table = eqAny(arg1, &.{ "list", "outdated" });
         const is_pip_install = eqAny(arg1, &.{ "install", "download", "wheel" });
@@ -590,6 +608,36 @@ fn runWrapperInner(
             if (!applyFilter(pip_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "next") and std.mem.eql(u8, arg1, "build")) {
+        if (!lossless and (build_output.matches(stdout_slice) or build_output.matches(stderr_slice))) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "terraform", "tofu" }) and std.mem.eql(u8, arg1, "plan")) {
+        if (!lossless and (plan_compact.matches(stdout_slice) or plan_compact.matches(stderr_slice))) {
+            if (!applyFilter(plan_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (eqAny(cmd_basename, &.{ "aws", "jq" })) {
+        if (!lossless and stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
+            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
         }
         return exit_code;
     }
@@ -670,7 +718,7 @@ fn runWrapperInner(
     // docker routes through docker_compact (name-only summary); the rest fall
     // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
     // passthrough.
-    if (eqAny(cmd_basename, &.{ "docker", "kubectl", "gh", "ps", "systemctl", "lsof", "npm", "pnpm", "yarn", "brew", "bun" })) {
+    if (eqAny(cmd_basename, &.{ "docker", "kubectl", "gh", "ps", "df", "psql", "systemctl", "lsof", "npm", "pnpm", "yarn", "brew", "bun" })) {
         const is_logs_subcmd = std.mem.eql(u8, arg1, "logs");
         // docker logs <container> — line dedup (before docker ps table dispatch).
         const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");

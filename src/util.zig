@@ -171,6 +171,29 @@ pub fn skipModeNum(s: []const u8) []const u8 {
     return if (std.mem.findScalar(u8, s, ' ')) |sp| s[sp + 1 ..] else s;
 }
 
+/// Parse local smll counters/timestamps from trusted schema fields.
+/// 17 digits is far above generated smll values and keeps later percent math
+/// bounded even when local state files are corrupted or manually edited.
+pub noinline fn parseU64(s: []const u8) ?u64 {
+    if (s.len == 0 or s.len > 17) return null;
+    var n: u64 = 0;
+    for (s) |c| {
+        if (c < '0' or c > '9') return null;
+        n = n * 10 + (c - '0');
+    }
+    return n;
+}
+
+pub noinline fn findJsonU64Opt(data: []const u8, key: []const u8) ?u64 {
+    const idx = std.mem.find(u8, data, key) orelse return null;
+    var pos = idx + key.len;
+    while (pos < data.len and (data[pos] == ' ' or data[pos] == '\t')) pos += 1;
+    if (pos >= data.len or data[pos] < '0' or data[pos] > '9') return null;
+    const start = pos;
+    while (pos < data.len and data[pos] >= '0' and data[pos] <= '9') pos += 1;
+    return parseU64(data[start..pos]);
+}
+
 /// Extract the conflicted path from a CONFLICT line.
 /// "CONFLICT (...): Merge conflict in <path>" → "<path>"
 /// Falls back to text after ": " if no " in " marker found.

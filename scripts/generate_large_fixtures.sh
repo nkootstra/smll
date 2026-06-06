@@ -13,7 +13,7 @@
 #   tests/fixtures/git_add_error.stderr.txt
 #   tests/fixtures/git_commit_simple.txt
 #   tests/fixtures/git_commit_multifile.txt
-#   tests/fixtures/git_push_simple.stdout.txt     (empty)
+#   tests/fixtures/git_push_simple.stdout.txt
 #   tests/fixtures/git_push_simple.stderr.txt
 #   tests/fixtures/git_pull_ff.stdout.txt
 #   tests/fixtures/git_pull_ff.stderr.txt
@@ -38,7 +38,7 @@
 #   tests/fixtures/large/git_merge.txt
 #   tests/fixtures/large/git_rebase.txt
 #   tests/fixtures/large/git_blame.txt
-#   tests/fixtures/large/git_push.stdout.txt      (empty)
+#   tests/fixtures/large/git_push.stdout.txt
 #   tests/fixtures/large/git_push.stderr.txt
 #
 # Stream-separation convention:
@@ -187,7 +187,7 @@ done
 for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
     f="src/mod_${n}.rs"
     {
-        printf '\n// finale-commit: version bump for mod_%s\n' "$n"
+        printf '// finale-commit: version bump for mod_%s\n' "$n"
         printf 'pub const MOD_%s_FINALE_VERSION: u32 = 2;\n' "$n"
     } >> "$f"
     git add "$f"
@@ -207,7 +207,7 @@ for n in 01 02 03 04 05 06 07 08 09 10 11 12; do
     {
         printf '\n// uncommitted scratch: tuning note for mod_%s\n' "$n"
         printf 'fn dirty_tuning_%s(value: i64) -> i64 {\n' "$n"
-        printf '    value.wrapping_add(%d).rotate_right(3)\n' "$((17 * n))"
+        printf '    value.wrapping_add(%d).rotate_right(3)\n' "$((17 * 10#$n))"
         printf '}\n'
     } >> "$f"
 done
@@ -856,6 +856,9 @@ git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
 # exercise drop logic. Stdout carries a realistic JSON body.
 {
     for n in $(seq 1 30); do
+        body=$(printf '{"id":%d,"name":"resource_%d","status":"ok"}' "$n" "$n")
+        body_len=$((${#body} + 1))
+        response_second=$(printf '%02d' "$((n % 60))")
         cat <<EOF
 *   Trying 10.0.0.$((n % 255 + 1)):443...
 * Connected to api.example.com (10.0.0.$((n % 255 + 1))) port 443
@@ -871,8 +874,8 @@ git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
 * ALPN: server accepted h2
 * Server certificate:
 *   subject: CN=api.example.com
-*   start date: Jan  1 00:00:00 2024 GMT
-*   expire date: Apr  1 00:00:00 2024 GMT
+*   start date: Apr  1 00:00:00 2024 GMT
+*   expire date: Jun 30 23:59:59 2024 GMT
 *   subjectAltName: host "api.example.com" matched cert's "api.example.com"
 *   issuer: C=US; O=Let's Encrypt; CN=R3
 *   SSL certificate verify ok.
@@ -890,9 +893,9 @@ git -C "$LARGE_SCRATCH" blame src/blamed_module.rs > "$OUT_DIR/git_blame.txt"
 * Connection state changed (MAX_CONCURRENT_STREAMS == 128)!
 < HTTP/2 200
 < content-type: application/json
-< content-length: 128
+< content-length: $body_len
 < cache-control: no-store
-< date: Mon, 22 Apr 2026 12:00:0$((n % 10)) GMT
+< date: Mon, 22 Apr 2024 12:00:$response_second GMT
 < x-request-id: req-${n}
 <
 EOF

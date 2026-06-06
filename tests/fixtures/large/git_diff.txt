@@ -1,8 +1,8 @@
 diff --git a/src/mod_01.rs b/src/mod_01.rs
-index 6d8694d..7908169 100644
+index 846c79b..bde8475 100644
 --- a/src/mod_01.rs
 +++ b/src/mod_01.rs
-@@ -325,3 +325,8 @@ fn xenon_brink_step_5(seed: u64) -> u64 {
+@@ -324,3 +324,8 @@ fn xenon_brink_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_01
  pub const MOD_01_FINALE_VERSION: u32 = 2;
@@ -12,10 +12,10 @@ index 6d8694d..7908169 100644
 +    value.wrapping_add(17).rotate_right(3)
 +}
 diff --git a/src/mod_02.rs b/src/mod_02.rs
-index c8db06d..a2d26bf 100644
+index 562faf7..759b636 100644
 --- a/src/mod_02.rs
 +++ b/src/mod_02.rs
-@@ -328,3 +328,8 @@ fn yarrow_crest_step_5(seed: u64) -> u64 {
+@@ -327,3 +327,8 @@ fn yarrow_crest_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_02
  pub const MOD_02_FINALE_VERSION: u32 = 2;
@@ -25,10 +25,10 @@ index c8db06d..a2d26bf 100644
 +    value.wrapping_add(34).rotate_right(3)
 +}
 diff --git a/src/mod_03.rs b/src/mod_03.rs
-index ae1025a..3641342 100644
+index 9a5345b..591685f 100644
 --- a/src/mod_03.rs
 +++ b/src/mod_03.rs
-@@ -325,3 +325,8 @@ fn zenith_drift_step_5(seed: u64) -> u64 {
+@@ -324,3 +324,8 @@ fn zenith_drift_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_03
  pub const MOD_03_FINALE_VERSION: u32 = 2;
@@ -38,10 +38,10 @@ index ae1025a..3641342 100644
 +    value.wrapping_add(51).rotate_right(3)
 +}
 diff --git a/src/mod_04.rs b/src/mod_04.rs
-index b4e55b0..26287f6 100644
+index 7434f49..ea522fc 100644
 --- a/src/mod_04.rs
 +++ b/src/mod_04.rs
-@@ -328,3 +328,8 @@ fn arcane_eddy_step_5(seed: u64) -> u64 {
+@@ -327,3 +327,8 @@ fn arcane_eddy_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_04
  pub const MOD_04_FINALE_VERSION: u32 = 2;
@@ -51,10 +51,10 @@ index b4e55b0..26287f6 100644
 +    value.wrapping_add(68).rotate_right(3)
 +}
 diff --git a/src/mod_05.rs b/src/mod_05.rs
-index eacf53b..471a570 100644
+index 4c17cc4..1037048 100644
 --- a/src/mod_05.rs
 +++ b/src/mod_05.rs
-@@ -325,3 +325,8 @@ fn bramble_fern_step_5(seed: u64) -> u64 {
+@@ -324,3 +324,8 @@ fn bramble_fern_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_05
  pub const MOD_05_FINALE_VERSION: u32 = 2;
@@ -64,10 +64,10 @@ index eacf53b..471a570 100644
 +    value.wrapping_add(85).rotate_right(3)
 +}
 diff --git a/src/mod_06.rs b/src/mod_06.rs
-index 53a7ee3..89b2f42 100644
+index df05699..fdc43a1 100644
 --- a/src/mod_06.rs
 +++ b/src/mod_06.rs
-@@ -328,3 +328,8 @@ fn citrine_grove_step_5(seed: u64) -> u64 {
+@@ -327,3 +327,8 @@ fn citrine_grove_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_06
  pub const MOD_06_FINALE_VERSION: u32 = 2;
@@ -77,11 +77,11 @@ index 53a7ee3..89b2f42 100644
 +    value.wrapping_add(102).rotate_right(3)
 +}
 diff --git a/src/mod_07.rs b/src/mod_07.rs
-index eaee346..15d94bc 100644
+index 048f21b..4b99287 100644
 --- a/src/mod_07.rs
 +++ b/src/mod_07.rs
-@@ -301,3 +301,8 @@ const COMMIT_30_TAG: &str = "citrine/grove";
- 
+@@ -300,3 +300,8 @@ fn russet_umbra_step_5(seed: u64) -> u64 {
+ const COMMIT_30_TAG: &str = "citrine/grove";
  // finale-commit: version bump for mod_07
  pub const MOD_07_FINALE_VERSION: u32 = 2;
 +
@@ -90,13 +90,67 @@ index eaee346..15d94bc 100644
 +    value.wrapping_add(119).rotate_right(3)
 +}
 diff --git a/src/mod_08.rs b/src/mod_08.rs
-index 3bc19c3..2c5efde 100644
+index 674f60a..33780bd 100644
 --- a/src/mod_08.rs
 +++ b/src/mod_08.rs
-@@ -298,3 +298,6 @@ fn silver_vista_step_5(seed: u64) -> u64 {
+@@ -297,3 +297,8 @@ fn silver_vista_step_5(seed: u64) -> u64 {
  
  // finale-commit: version bump for mod_08
  pub const MOD_08_FINALE_VERSION: u32 = 2;
 +
 +// uncommitted scratch: tuning note for mod_08
 +fn dirty_tuning_08(value: i64) -> i64 {
++    value.wrapping_add(136).rotate_right(3)
++}
+diff --git a/src/mod_09.rs b/src/mod_09.rs
+index b392817..201817f 100644
+--- a/src/mod_09.rs
++++ b/src/mod_09.rs
+@@ -300,3 +300,8 @@ fn teal_warden_step_5(seed: u64) -> u64 {
+ 
+ // finale-commit: version bump for mod_09
+ pub const MOD_09_FINALE_VERSION: u32 = 2;
++
++// uncommitted scratch: tuning note for mod_09
++fn dirty_tuning_09(value: i64) -> i64 {
++    value.wrapping_add(153).rotate_right(3)
++}
+diff --git a/src/mod_10.rs b/src/mod_10.rs
+index daffd9f..d694515 100644
+--- a/src/mod_10.rs
++++ b/src/mod_10.rs
+@@ -297,3 +297,8 @@ fn umber_yonder_step_5(seed: u64) -> u64 {
+ 
+ // finale-commit: version bump for mod_10
+ pub const MOD_10_FINALE_VERSION: u32 = 2;
++
++// uncommitted scratch: tuning note for mod_10
++fn dirty_tuning_10(value: i64) -> i64 {
++    value.wrapping_add(170).rotate_right(3)
++}
+diff --git a/src/mod_11.rs b/src/mod_11.rs
+index 8bf27c2..3f91140 100644
+--- a/src/mod_11.rs
++++ b/src/mod_11.rs
+@@ -300,3 +300,8 @@ fn vivid_zephyr_step_5(seed: u64) -> u64 {
+ 
+ // finale-commit: version bump for mod_11
+ pub const MOD_11_FINALE_VERSION: u32 = 2;
++
++// uncommitted scratch: tuning note for mod_11
++fn dirty_tuning_11(value: i64) -> i64 {
++    value.wrapping_add(187).rotate_right(3)
++}
+diff --git a/src/mod_12.rs b/src/mod_12.rs
+index fa7ff57..c95c3fc 100644
+--- a/src/mod_12.rs
++++ b/src/mod_12.rs
+@@ -297,3 +297,8 @@ fn wisteria_arbor_step_5(seed: u64) -> u64 {
+ 
+ // finale-commit: version bump for mod_12
+ pub const MOD_12_FINALE_VERSION: u32 = 2;
++
++// uncommitted scratch: tuning note for mod_12
++fn dirty_tuning_12(value: i64) -> i64 {
++    value.wrapping_add(204).rotate_right(3)
++}

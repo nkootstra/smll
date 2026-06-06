@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RTK_REF="${RTK_REF:-v0.42.1}"
+RTK_REF="${RTK_REF:-v0.42.3}"
 DOCKER="${DOCKER:-docker}"
 OUT_DIR="${OUT_DIR:-$REPO_ROOT/zig-out/benchmarks}"
 TAG_REF="$(printf '%s' "$RTK_REF" | tr -c 'A-Za-z0-9_.-' '-')"

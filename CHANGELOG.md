@@ -9,6 +9,23 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+### Added
+
+- Codex agent setup/unsetup, installing a `PreToolUse` hook under
+  `~/.codex/hooks.json` that rewrites noisy Bash commands through `smll`.
+- `--filters` to list supported filters and agent auto-wrap commands.
+- Compact filters for ESLint/Biome diagnostics, `next build`,
+  Terraform/OpenTofu plans, and clean JSON output from `aws`/`jq`.
+- Agent setup auto-wrap coverage for additional build, lint, infra, JSON,
+  table, and package-manager commands.
+- Append-only local command history in `~/.smll/history.jsonl`, keeping
+  per-command labels, project key, filter name, exit code, byte counts, and
+  duration without storing full argv.
+- Token-first `--stats` output with `--verbose`, `--since`, `--project`, and
+  `--by-command` views, plus `--discover` for low-savings, passthrough, and
+  top raw-output command labels.
+- `--explain`, `--rewrite`, `--err`, and `--test` flag-style wrapper commands.
+
 ## [1.4.0] — 2026-06-04
 
 ### Added
@@ -22,8 +39,8 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 - MIT license.
 - Raw-output tee logs for failed wrapped commands, with opt-outs via
   `SMLL_TEE=0` and `DO_NOT_TRACK=1`.
-- Containerized `smll`-vs-`rtk` benchmark tooling and expanded
-  agent-oriented fixtures.
+- Containerized comparison benchmark tooling and expanded agent-oriented
+  fixtures.
 
 ### Changed
 

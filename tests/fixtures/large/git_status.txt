@@ -133,6 +133,10 @@ Changes not staged for commit:
 	modified:   src/mod_06.rs
 	modified:   src/mod_07.rs
 	modified:   src/mod_08.rs
+	modified:   src/mod_09.rs
+	modified:   src/mod_10.rs
+	modified:   src/mod_11.rs
+	modified:   src/mod_12.rs
 
 Untracked files:
   (use "git add <file>..." to include in what will be committed)

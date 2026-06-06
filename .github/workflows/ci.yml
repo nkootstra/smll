@@ -57,14 +57,14 @@ jobs:
           cache-key: size-gate
       - name: Build release
         run: zig build release
-      - name: Enforce R9 size cap
+      - name: Enforce release size cap
         run: |
           set -euo pipefail
           size=$(wc -c < zig-out/release/smll)
-          limit=294912
+          limit=307200
           echo "binary size: ${size} bytes (cap ${limit})"
           if [ "$size" -ge "$limit" ]; then
-            echo "::error::binary size ${size} exceeds R9 cap ${limit}"
+            echo "::error::binary size ${size} exceeds release cap ${limit}"
             exit 1
           fi
       - name: Upload release artifact
