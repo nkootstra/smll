@@ -451,7 +451,9 @@ fn findJsonU64Opt(data: []const u8, key: []const u8) ?u64 {
     if (pos >= data.len or data[pos] < '0' or data[pos] > '9') return null;
     var val: u64 = 0;
     while (pos < data.len and data[pos] >= '0' and data[pos] <= '9') {
-        val = val *| 10 +| (data[pos] - '0');
+        const digit: u64 = data[pos] - '0';
+        if (val > (std.math.maxInt(u64) - digit) / 10) return null;
+        val = val * 10 + digit;
         pos += 1;
     }
     return val;
@@ -661,6 +663,14 @@ test "history parser skips oversized timestamps" {
     const line =
         "{\"v\":1,\"ts_ms\":18446744073709551616,\"project\":\"p\",\"cwd\":\"p\"," ++
         "\"cmd\":\"bad\",\"filter\":\"rg\",\"exit\":0,\"raw\":1,\"compact\":0,\"duration_ms\":1}";
+
+    try std.testing.expect(parseLine(line) == null);
+}
+
+test "history parser skips oversized byte counts" {
+    const line =
+        "{\"v\":1,\"ts_ms\":1,\"project\":\"p\",\"cwd\":\"p\"," ++
+        "\"cmd\":\"bad\",\"filter\":\"rg\",\"exit\":0,\"raw\":18446744073709551616,\"compact\":0,\"duration_ms\":1}";
 
     try std.testing.expect(parseLine(line) == null);
 }

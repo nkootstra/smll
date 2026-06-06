@@ -82,20 +82,13 @@ fn isSingleTopLevelContainer(s: []const u8) bool {
                 if (depth == 0) return false;
                 depth -= 1;
                 if (expected_closers[depth] != c) return false;
-                if (depth == 0) return onlyWhitespace(s[idx + 1 ..]);
+                if (depth == 0) return idx + 1 == s.len;
             },
             else => if (depth == 0 and !std.ascii.isWhitespace(c)) return false,
         }
     }
 
     return false;
-}
-
-fn onlyWhitespace(s: []const u8) bool {
-    for (s) |c| {
-        if (!std.ascii.isWhitespace(c)) return false;
-    }
-    return true;
 }
 
 fn trimBomAndSpace(input: []const u8) []const u8 {

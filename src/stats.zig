@@ -350,7 +350,9 @@ fn parseU64(s: []const u8) !u64 {
     var n: u64 = 0;
     for (s) |c| {
         if (c < '0' or c > '9') return error.InvalidArgs;
-        n = n *| 10 +| (c - '0');
+        const digit: u64 = c - '0';
+        if (n > (std.math.maxInt(u64) - digit) / 10) return error.InvalidArgs;
+        n = n * 10 + digit;
     }
     return n;
 }
@@ -398,7 +400,9 @@ fn findJsonU64Opt(data: []const u8, key: []const u8) ?u64 {
     if (pos >= data.len or data[pos] < '0' or data[pos] > '9') return null;
     var val: u64 = 0;
     while (pos < data.len and data[pos] >= '0' and data[pos] <= '9') {
-        val = val *| 10 +| (data[pos] - '0');
+        const digit: u64 = data[pos] - '0';
+        if (val > (std.math.maxInt(u64) - digit) / 10) return null;
+        val = val * 10 + digit;
         pos += 1;
     }
     return val;
@@ -670,6 +674,10 @@ test "writeHumanCount: millions" {
 
 test "parseDurationMs rejects oversized durations" {
     try std.testing.expectError(error.InvalidArgs, parseDurationMs("999999999999999999999999h"));
+}
+
+test "stats parser rejects overflowing json integers" {
+    try std.testing.expect(findJsonU64Opt("{\"n\":18446744073709551616}", "\"n\":") == null);
 }
 
 test "display: no commands" {
