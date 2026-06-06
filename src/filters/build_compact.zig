@@ -17,7 +17,9 @@ const Writer = std.Io.Writer;
 //
 // Shape of summary line (emitted once per tool that fired at least one
 // progress line): `Compiled N (cargo)` / `Compiled N (make)` /
-// `Compiled N (go)`.
+// `Compiled N (go)`. For successful `zig build --summary all`, the
+// original `Build Summary: …` line is forwarded verbatim with any
+// warning/error lines; no synthesized count line is emitted.
 
 // Source-line prefixes that count as "compiler progress" and collapse into
 // a count. Two space-prefixed entries cover cargo's leading 3-space indent
@@ -180,11 +182,11 @@ fn writeZigSuccess(
 
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
-    try writeZigWarnings(allocator, stdout, writer, &strip_buf);
-    try writeZigWarnings(allocator, stderr, writer, &strip_buf);
+    try writeZigWarningsAndErrors(allocator, stdout, writer, &strip_buf);
+    try writeZigWarningsAndErrors(allocator, stderr, writer, &strip_buf);
 }
 
-fn writeZigWarnings(
+fn writeZigWarningsAndErrors(
     allocator: Allocator,
     input: []const u8,
     writer: *Writer,
