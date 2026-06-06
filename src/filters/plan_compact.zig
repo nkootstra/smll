@@ -3,13 +3,15 @@ const ansi = @import("ansi");
 
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const terraform_box_prefix = "\xe2\x94\x82 ";
 
 pub fn matches(input: []const u8) bool {
     return std.mem.find(u8, input, "Terraform will perform") != null or
         std.mem.find(u8, input, "OpenTofu will perform") != null or
         std.mem.find(u8, input, "Plan: ") != null or
         std.mem.find(u8, input, "No changes.") != null or
-        std.mem.find(u8, input, "Error: ") != null;
+        std.mem.find(u8, input, "Error: ") != null or
+        std.mem.find(u8, input, "Warning: ") != null;
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
@@ -42,8 +44,9 @@ fn scan(allocator: Allocator, input: []const u8, writer: *Writer) !bool {
 fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "Plan: ")) return true;
     if (std.mem.startsWith(u8, line, "No changes.")) return true;
-    if (std.mem.startsWith(u8, line, "Error: ")) return true;
-    if (std.mem.startsWith(u8, line, "Warning: ")) return true;
+    const diagnostic = withoutTerraformBoxPrefix(line);
+    if (std.mem.startsWith(u8, diagnostic, "Error: ")) return true;
+    if (std.mem.startsWith(u8, diagnostic, "Warning: ")) return true;
     if (std.mem.startsWith(u8, line, "Terraform will perform")) return true;
     if (std.mem.startsWith(u8, line, "OpenTofu will perform")) return true;
     if (std.mem.startsWith(u8, line, "# ") and std.mem.indexOf(u8, line, " will be ") != null) return true;
@@ -52,6 +55,13 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "~ resource ")) return true;
     if (std.mem.startsWith(u8, line, "-/+ resource ")) return true;
     return false;
+}
+
+fn withoutTerraformBoxPrefix(line: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, line, terraform_box_prefix)) {
+        return line[terraform_box_prefix.len..];
+    }
+    return line;
 }
 
 test "terraform plan drops refresh chatter and keeps summary" {
@@ -68,4 +78,23 @@ test "terraform plan drops refresh chatter and keeps summary" {
     try std.testing.expect(std.mem.find(u8, got, "Refreshing state") == null);
     try std.testing.expect(std.mem.find(u8, got, "# aws_s3_bucket.example") != null);
     try std.testing.expect(std.mem.find(u8, got, "Plan: 1 to add") != null);
+}
+
+test "terraform plan keeps box-drawing diagnostics" {
+    const input =
+        "\xe2\x95\xb7\n" ++
+        "\xe2\x94\x82 Error: Provider configuration not present\n" ++
+        "\xe2\x94\x82\n" ++
+        "\xe2\x94\x82 Warning: Argument is deprecated\n" ++
+        "\xe2\x95\xb5\n";
+
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try std.testing.expect(matches(input));
+    try apply(std.testing.allocator, "", input, &out.writer);
+
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "\xe2\x94\x82 Error: Provider configuration not present") != null);
+    try std.testing.expect(std.mem.find(u8, got, "\xe2\x94\x82 Warning: Argument is deprecated") != null);
+    try std.testing.expect(std.mem.find(u8, got, "plan ok") == null);
 }
