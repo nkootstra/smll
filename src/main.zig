@@ -56,6 +56,52 @@ const GenericCompactPipe = pipe_filters.GenericCompactPipe;
 const GitLogCompact = pipe_filters.GitLogCompact;
 const envFlagOn = wrapper_util.envFlagOn;
 
+const help_text =
+    \\smll - compact noisy command output before it lands in agent context
+    \\
+    \\Usage:
+    \\  smll                                  show help in an interactive terminal
+    \\  smll <cmd...>                         run a command through smll
+    \\  <cmd> | smll                          compact stdin in pipe mode
+    \\  smll --explain <cmd...>               run and print compaction stats to stderr
+    \\  smll --err <cmd...>                   run and tag history as an error command
+    \\  smll --test <cmd...>                  run and tag history as a test command
+    \\  smll --rewrite <cmd...>               print the hook rewrite for a command
+    \\
+    \\Options:
+    \\  -h, --help                            show this help
+    \\  --version                             print the smll version
+    \\  --filters                             list supported filters and auto-wrap commands
+    \\  --stats [options]                     show local savings history
+    \\  --discover [options]                  find low-savings and high-output commands
+    \\  --setup <target> [--dry-run]          install agent integration
+    \\  --setup=<target> [--dry-run]          install agent integration
+    \\  --unsetup <target> [--dry-run]        remove agent integration
+    \\  --unsetup=<target> [--dry-run]        remove agent integration
+    \\
+    \\Stats options:
+    \\  --reset                               reset stats; only valid with --stats
+    \\  --verbose                             show exact byte counts; only valid with --stats
+    \\  --by-command                          show command labels; only valid with --stats
+    \\  --since <24h|7d|30d>                  filter history by age
+    \\  --since=<24h|7d|30d>                  filter history by age
+    \\  --project                             limit history to the current git project
+    \\
+    \\Agent targets:
+    \\  claude, opencode, cursor, codex
+    \\
+    \\Environment:
+    \\  SMLL_LOSSLESS=1                       bypass filters and pass output through raw
+    \\  SMLL_TEE=0                            disable raw failed-command logs
+    \\  DO_NOT_TRACK=1                        disable stats, history, and tee logs
+    \\
+    \\Examples:
+    \\  smll git status
+    \\  smll --explain npm test
+    \\  smll --stats --since 7d --by-command
+    \\
+;
+
 pub fn main(init: std.process.Init.Minimal) !void {
     var threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{
         .argv0 = .init(init.args),
@@ -81,14 +127,19 @@ pub fn main(init: std.process.Init.Minimal) !void {
     var stderr_file = std.Io.File.stderr();
     var stderr_writer = stderr_file.writer(io, &err_buf);
 
-    // Fast path: no extra argv → stdin mode. Skip setup check and
-    // wrapper-mode arena init entirely. Use a larger output buffer
-    // to reduce write syscalls for large passthrough data.
+    // Fast path: no extra argv -> help for humans, stdin mode for pipes.
+    // Skip setup check and wrapper-mode arena init entirely in pipe mode.
     if (args.len <= 1) {
+        var stdin_file = std.Io.File.stdin();
+        if (stdin_file.isTty(io) catch false) {
+            try printHelp(&stdout_writer.interface);
+            try stdout_writer.interface.flush();
+            return;
+        }
+
         var pipe_out_buf: [32768]u8 = undefined;
         var pipe_stdout_writer = stdout_file.writer(io, &pipe_out_buf);
         var in_buf: [4096]u8 = undefined;
-        var stdin_file = std.Io.File.stdin();
         var stdin_reader = stdin_file.reader(io, &in_buf);
         if (envFlagOn(environ, "SMLL_LOSSLESS")) {
             var copy_buf: [32768]u8 = undefined;
@@ -108,6 +159,12 @@ pub fn main(init: std.process.Init.Minimal) !void {
             );
         }
         try pipe_stdout_writer.interface.flush();
+        return;
+    }
+
+    if (args.len == 2 and (std.mem.eql(u8, args[1], "--help") or std.mem.eql(u8, args[1], "-h"))) {
+        try printHelp(&stdout_writer.interface);
+        try stdout_writer.interface.flush();
         return;
     }
 
@@ -355,6 +412,10 @@ fn prefixedFilterName(allocator: std.mem.Allocator, prefix: []const u8, filter_n
 
 fn exitIfNonzero(code: u8) void {
     if (code != 0) std.process.exit(code);
+}
+
+fn printHelp(stdout: *std.Io.Writer) !void {
+    try stdout.writeAll(help_text);
 }
 
 fn elapsedMs(start: std.Io.Clock.Timestamp, io: std.Io) u64 {

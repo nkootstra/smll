@@ -9,6 +9,20 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-06-06
+
+### Added
+
+- `-h` / `--help` with a full CLI usage reference covering wrapper mode,
+  pipe mode, stats/discovery, agent setup, diagnostics, and environment
+  overrides.
+
+### Changed
+
+- Running `smll` with no arguments from an interactive terminal now prints
+  help instead of waiting on stdin. Piped stdin (`cmd | smll`) still uses
+  pipe-filter mode.
+
 ## [1.5.0] — 2026-06-06
 
 ### Added
@@ -270,7 +284,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/nkootstra/smll/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/nkootstra/smll/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nkootstra/smll/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/nkootstra/smll/compare/v1.3.0...v1.3.1

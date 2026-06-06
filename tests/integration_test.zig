@@ -531,6 +531,55 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+fn expectHelpOutput(out: []const u8) !void {
+    try std.testing.expect(std.mem.startsWith(u8, out, "smll - compact noisy command output"));
+    try std.testing.expect(std.mem.find(u8, out, "Usage:") != null);
+    try std.testing.expect(std.mem.find(u8, out, "smll                                  show help") != null);
+    try std.testing.expect(std.mem.find(u8, out, "smll <cmd...>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "<cmd> | smll") != null);
+    try std.testing.expect(std.mem.find(u8, out, "-h, --help") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--version") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--filters") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--stats [options]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--discover [options]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--setup <target> [--dry-run]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--unsetup=<target> [--dry-run]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--explain <cmd...>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--err <cmd...>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--test <cmd...>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--rewrite <cmd...>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--since=<24h|7d|30d>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "SMLL_LOSSLESS=1") != null);
+    try std.testing.expect(std.mem.find(u8, out, "DO_NOT_TRACK=1") != null);
+}
+
+test "meta: --help and -h print usage" {
+    const allocator = std.testing.allocator;
+    const long = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--help" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(1024),
+    });
+    var long_wrapped: RunResult = .{ .stdout = long.stdout, .stderr = long.stderr, .term = long.term };
+    defer long_wrapped.deinit(allocator);
+
+    try expectHelpOutput(long_wrapped.stdout);
+    try std.testing.expectEqualStrings("", long_wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, long_wrapped.term);
+
+    const short = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "-h" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(1024),
+    });
+    var short_wrapped: RunResult = .{ .stdout = short.stdout, .stderr = short.stderr, .term = short.term };
+    defer short_wrapped.deinit(allocator);
+
+    try std.testing.expectEqualStrings(long_wrapped.stdout, short_wrapped.stdout);
+    try std.testing.expectEqualStrings("", short_wrapped.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, short_wrapped.term);
+}
+
 test "meta: --version prints package version" {
     const allocator = std.testing.allocator;
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);

@@ -29,6 +29,10 @@ dependency. See [Build from source](#build-from-source) for the manual path.
 
 ## Usage
 
+Run `smll --help` or `smll -h` for the full CLI reference. Running `smll`
+with no arguments in an interactive terminal prints the same help; piped stdin
+still uses pipe-filter mode.
+
 **Wrapper mode.** Prefix any supported command with `smll`:
 
 ```sh

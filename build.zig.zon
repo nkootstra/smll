@@ -1,6 +1,6 @@
 .{
     .name = .smll,
-    .version = "1.5.0",
+    .version = "1.5.1",
     .fingerprint = 0x958d81c50c0d38a1,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
