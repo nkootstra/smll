@@ -2,13 +2,12 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const max_json_nesting = 256;
 
 pub fn matches(input: []const u8) bool {
     const trimmed = trimBomAndSpace(input);
     if (trimmed.len < 2) return false;
-    const first = trimmed[0];
-    const last = trimmed[trimmed.len - 1];
-    return (first == '{' and last == '}') or (first == '[' and last == ']');
+    return isSingleTopLevelContainer(trimmed);
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
@@ -27,10 +26,6 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
 fn minify(input: []const u8, writer: *Writer) !void {
     const s = trimBomAndSpace(input);
-    if (hasUnterminatedString(s)) {
-        try writer.writeAll(input);
-        return;
-    }
 
     var in_string = false;
     var escaped = false;
@@ -58,23 +53,49 @@ fn minify(input: []const u8, writer: *Writer) !void {
     try writer.writeByte('\n');
 }
 
-fn hasUnterminatedString(s: []const u8) bool {
+fn isSingleTopLevelContainer(s: []const u8) bool {
+    var expected_closers: [max_json_nesting]u8 = undefined;
+    var depth: usize = 0;
     var in_string = false;
     var escaped = false;
-    for (s) |c| {
-        if (!in_string) {
-            if (c == '"') in_string = true;
+
+    for (s, 0..) |c, idx| {
+        if (in_string) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
             continue;
         }
-        if (escaped) {
-            escaped = false;
-        } else if (c == '\\') {
-            escaped = true;
-        } else if (c == '"') {
-            in_string = false;
+
+        switch (c) {
+            '"' => in_string = true,
+            '{', '[' => {
+                if (depth == expected_closers.len) return false;
+                expected_closers[depth] = if (c == '{') '}' else ']';
+                depth += 1;
+            },
+            '}', ']' => {
+                if (depth == 0) return false;
+                depth -= 1;
+                if (expected_closers[depth] != c) return false;
+                if (depth == 0) return onlyWhitespace(s[idx + 1 ..]);
+            },
+            else => if (depth == 0 and !std.ascii.isWhitespace(c)) return false,
         }
     }
-    return in_string;
+
+    return false;
+}
+
+fn onlyWhitespace(s: []const u8) bool {
+    for (s) |c| {
+        if (!std.ascii.isWhitespace(c)) return false;
+    }
+    return true;
 }
 
 fn trimBomAndSpace(input: []const u8) []const u8 {
@@ -94,4 +115,22 @@ test "unterminated strings fall open" {
     defer out.deinit();
     try apply(std.testing.allocator, "{\"a\":\"oops}\n", "", &out.writer);
     try std.testing.expectEqualStrings("{\"a\":\"oops}\n", out.written());
+}
+
+test "json lines are not concatenated" {
+    const input = "{\"a\":1}\n{\"b\":2}\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try std.testing.expect(!matches(input));
+    try apply(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expectEqualStrings(input, out.written());
+}
+
+test "single root container may contain nested objects and braces in strings" {
+    const input = "{\n  \"a\": [{\"b\": \"}\"}],\n  \"c\": \"{not structural}\"\n}\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try std.testing.expect(matches(input));
+    try apply(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expectEqualStrings("{\"a\":[{\"b\":\"}\"}],\"c\":\"{not structural}\"}\n", out.written());
 }

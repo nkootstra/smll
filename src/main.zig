@@ -308,10 +308,11 @@ fn runWrappedAndRecord(
     );
     const duration_ms = elapsedMs(start, io);
 
-    const recorded = result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK");
-    if (recorded) {
+    const should_record = result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK");
+    var recorded = false;
+    if (should_record) {
         const history_filter_name = try historyFilterName(allocator, mode, result.filter_name);
-        stats.record(allocator, io, home, child_argv, result.input_bytes, result.output_bytes, .{
+        recorded = stats.record(allocator, io, home, child_argv, result.input_bytes, result.output_bytes, .{
             .exit_code = result.exit_code,
             .filter_name = history_filter_name,
             .duration_ms = duration_ms,

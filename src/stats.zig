@@ -72,8 +72,9 @@ pub fn record(
     input_bytes: usize,
     output_bytes: usize,
     options: RecordOptions,
-) void {
-    recordInner(allocator, io, home, argv, input_bytes, output_bytes, options) catch {};
+) bool {
+    recordInner(allocator, io, home, argv, input_bytes, output_bytes, options) catch return false;
+    return true;
 }
 
 fn recordInner(
@@ -340,7 +341,8 @@ fn parseDurationMs(s: []const u8) !i64 {
         'd' => 24 * ms_per_hour,
         else => return error.InvalidArgs,
     };
-    return @intCast(number *| mult);
+    const ms = number *| mult;
+    return std.math.cast(i64, ms) orelse return error.InvalidArgs;
 }
 
 fn parseU64(s: []const u8) !u64 {
@@ -666,6 +668,10 @@ test "writeHumanCount: millions" {
     try std.testing.expectEqualStrings("2.3M", out.written());
 }
 
+test "parseDurationMs rejects oversized durations" {
+    try std.testing.expectError(error.InvalidArgs, parseDurationMs("999999999999999999999999h"));
+}
+
 test "display: no commands" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
@@ -680,11 +686,12 @@ test "record appends history without full argv" {
     const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home);
 
-    record(allocator, std.testing.io, home, &.{ "git", "status", "--secret-token=abc123" }, 120, 40, .{
+    const recorded = record(allocator, std.testing.io, home, &.{ "git", "status", "--secret-token=abc123" }, 120, 40, .{
         .exit_code = 7,
         .filter_name = "git_status",
         .duration_ms = 12,
     });
+    try std.testing.expect(recorded);
 
     const history_data = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(4096));
     defer allocator.free(history_data);

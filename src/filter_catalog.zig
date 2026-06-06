@@ -59,3 +59,19 @@ test "auto-wrap lookup uses the hook command catalog" {
     try std.testing.expect(shouldAutoWrap("pre-commit"));
     try std.testing.expect(!shouldAutoWrap("python"));
 }
+
+test "auto-wrap shell and js catalogs stay in sync" {
+    var shell_commands = std.mem.splitScalar(u8, auto_wrap_shell_case, '|');
+    while (shell_commands.next()) |command| {
+        var quoted_buf: [64]u8 = undefined;
+        const quoted = try std.fmt.bufPrint(&quoted_buf, "\"{s}\"", .{command});
+        try std.testing.expect(std.mem.find(u8, auto_wrap_js_array, quoted) != null);
+    }
+
+    var js_commands = std.mem.splitScalar(u8, auto_wrap_js_array, ',');
+    while (js_commands.next()) |quoted| {
+        try std.testing.expect(quoted.len >= 2);
+        try std.testing.expect(quoted[0] == '"' and quoted[quoted.len - 1] == '"');
+        try std.testing.expect(shouldAutoWrap(quoted[1 .. quoted.len - 1]));
+    }
+}
