@@ -295,7 +295,7 @@ pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
 
 fn parseLine(line: []const u8) ?Entry {
     var entry: Entry = .{};
-    entry.ts_ms = @intCast(findJsonU64Opt(line, "\"ts_ms\":") orelse return null);
+    entry.ts_ms = std.math.cast(i64, findJsonU64Opt(line, "\"ts_ms\":") orelse return null) orelse return null;
     entry.raw_bytes = findJsonU64Opt(line, "\"raw\":") orelse return null;
     entry.compact_bytes = findJsonU64Opt(line, "\"compact\":") orelse return null;
     _ = findJsonU64Opt(line, "\"exit\":") orelse return null;
@@ -655,6 +655,14 @@ test "history aggregation skips malformed lines and applies since" {
     try std.testing.expectEqual(@as(u64, 200), agg.input_bytes);
     try std.testing.expectEqual(@as(u64, 40), agg.output_bytes);
     try std.testing.expectEqualStrings("new", agg.by_cmd[0].nameSlice());
+}
+
+test "history parser skips oversized timestamps" {
+    const line =
+        "{\"v\":1,\"ts_ms\":18446744073709551616,\"project\":\"p\",\"cwd\":\"p\"," ++
+        "\"cmd\":\"bad\",\"filter\":\"rg\",\"exit\":0,\"raw\":1,\"compact\":0,\"duration_ms\":1}";
+
+    try std.testing.expect(parseLine(line) == null);
 }
 
 test "history aggregation filters to current project" {
