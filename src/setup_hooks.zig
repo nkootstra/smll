@@ -375,7 +375,7 @@ fn buildCursorHookScript() []const u8 {
 
 fn buildCodexHookScript() []const u8 {
     return hook_prefix ++
-        \\jq -cn --arg command "smll $c" '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":$command}}}';exit 0;;*)exit 0;;esac
+        \\wrapped="$(printf 'smll %s' "$c")";jq -cn --arg command "$wrapped" '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":$command}}}';exit 0;;*)exit 0;;esac
     ;
 }
 
@@ -408,7 +408,9 @@ test "setup codex writes PreToolUse hook and script" {
     try std.testing.expect(std.mem.startsWith(u8, hook_script, "#!/usr/bin/env bash\n"));
     try std.testing.expect(std.mem.find(u8, hook_script, "\"permissionDecision\":\"allow\"") != null);
     try std.testing.expect(std.mem.find(u8, hook_script, "\"updatedInput\"") != null);
-    try std.testing.expect(std.mem.find(u8, hook_script, "\"smll $c\"") != null);
+    try std.testing.expect(std.mem.find(u8, hook_script, "printf 'smll %s' \"$c\"") != null);
+    try std.testing.expect(std.mem.find(u8, hook_script, "--arg command \"$wrapped\"") != null);
+    try std.testing.expect(std.mem.find(u8, hook_script, "--arg command \"smll $c\"") == null);
     try std.testing.expect(std.mem.find(u8, hook_script, "terraform|tofu|aws|jq") != null);
 }
 

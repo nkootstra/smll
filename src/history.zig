@@ -265,8 +265,8 @@ pub fn displayDiscover(allocator: Allocator, io: Io, home: []const u8, opts: Que
 
 pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
     if (agg.cmd_count == 0) return;
-    try stdout.writeAll("\n  Command              Runs     Input     Output    Saved\n");
-    try stdout.writeAll("  --------------------------------------------------------\n");
+    try stdout.writeAll("\n  Command              Runs  Input tok  Output tok  Saved tok\n");
+    try stdout.writeAll("  -----------------------------------------------------------\n");
 
     var indices: [MAX_TRACKED_CMDS]usize = undefined;
     for (0..agg.cmd_count) |i| indices[i] = i;
@@ -277,19 +277,15 @@ pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
         const saved = savedBytes(entry.stats.in_bytes, entry.stats.out_bytes);
         const pct = percentSaved(entry.stats.in_bytes, entry.stats.out_bytes);
         try stdout.writeAll("  ");
-        try stdout.writeAll(entry.nameSlice());
-        if (entry.name_len < 20) {
-            var pad: usize = 20 - entry.name_len;
-            while (pad > 0) : (pad -= 1) try stdout.writeByte(' ');
-        }
-        try stdout.writeByte(' ');
-        try writeU64(stdout, entry.stats.n);
-        try stdout.writeByte('\t');
-        try writeHumanCount(stdout, entry.stats.in_bytes / 4);
-        try stdout.writeByte('\t');
-        try writeHumanCount(stdout, entry.stats.out_bytes / 4);
-        try stdout.writeByte('\t');
-        try writeHumanCount(stdout, saved / 4);
+        try writePaddedRight(stdout, entry.nameSlice(), 20);
+        try stdout.writeAll("  ");
+        try writeU64PaddedLeft(stdout, entry.stats.n, 4);
+        try stdout.writeAll("  ");
+        try writeHumanCountPaddedLeft(stdout, entry.stats.in_bytes / 4, 9);
+        try stdout.writeAll("  ");
+        try writeHumanCountPaddedLeft(stdout, entry.stats.out_bytes / 4, 10);
+        try stdout.writeAll("  ");
+        try writeHumanCountPaddedLeft(stdout, saved / 4, 9);
         try stdout.writeAll(" (");
         try writeU64(stdout, pct);
         try stdout.writeAll("%)\n");
@@ -554,6 +550,43 @@ fn writeHumanCount(w: *Writer, n: u64) !void {
     }
 }
 
+fn writeHumanCountPaddedLeft(w: *Writer, n: u64, width: usize) !void {
+    var buf: [24]u8 = undefined;
+    const text = try formatHumanCount(&buf, n);
+    try writePaddedLeft(w, text, width);
+}
+
+fn formatHumanCount(buf: []u8, n: u64) ![]const u8 {
+    if (n < 1000) {
+        return std.fmt.bufPrint(buf, "{d}", .{n});
+    } else if (n < 1_000_000) {
+        return std.fmt.bufPrint(buf, "{d}.{d}K", .{ n / 1000, (n % 1000) / 100 });
+    } else {
+        return std.fmt.bufPrint(buf, "{d}.{d}M", .{ n / 1_000_000, (n % 1_000_000) / 100_000 });
+    }
+}
+
+fn writeU64PaddedLeft(w: *Writer, n: u64, width: usize) !void {
+    var buf: [20]u8 = undefined;
+    const text = try std.fmt.bufPrint(&buf, "{d}", .{n});
+    try writePaddedLeft(w, text, width);
+}
+
+fn writePaddedLeft(w: *Writer, text: []const u8, width: usize) !void {
+    if (text.len < width) try writeSpaces(w, width - text.len);
+    try w.writeAll(text);
+}
+
+fn writePaddedRight(w: *Writer, text: []const u8, width: usize) !void {
+    try w.writeAll(text);
+    if (text.len < width) try writeSpaces(w, width - text.len);
+}
+
+fn writeSpaces(w: *Writer, count: usize) !void {
+    var remaining = count;
+    while (remaining > 0) : (remaining -= 1) try w.writeByte(' ');
+}
+
 fn writeHumanDecimal(w: *Writer, n: u64) !void {
     if (n < 1000) {
         try writeU64(w, n);
@@ -677,6 +710,33 @@ test "discover reports low savings passthrough and top raw commands" {
     try std.testing.expect(std.mem.find(u8, out.written(), "passthrough-cmd") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "Highest raw output") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "huge-raw") != null);
+}
+
+test "by-command stats label token estimates and avoid tabs" {
+    const allocator = std.testing.allocator;
+    var agg: Aggregate = .{ .commands = 2, .input_bytes = 1000, .output_bytes = 500 };
+    agg.cmd_count = 2;
+
+    const status = "git status";
+    @memcpy(agg.by_cmd[0].name[0..status.len], status);
+    agg.by_cmd[0].name_len = status.len;
+    agg.by_cmd[0].stats = .{ .n = 1, .in_bytes = 400, .out_bytes = 100 };
+
+    const logs = "docker logs";
+    @memcpy(agg.by_cmd[1].name[0..logs.len], logs);
+    agg.by_cmd[1].name_len = logs.len;
+    agg.by_cmd[1].stats = .{ .n = 1, .in_bytes = 600, .out_bytes = 400 };
+
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try writeByCommand(&out.writer, agg);
+
+    try std.testing.expect(std.mem.find(u8, out.written(), "Input tok") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Output tok") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Saved tok") != null);
+    try std.testing.expect(std.mem.findScalar(u8, out.written(), '\t') == null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "git status") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "docker logs") != null);
 }
 
 test "history append truncates before exceeding size cap" {
