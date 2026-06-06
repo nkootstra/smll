@@ -73,6 +73,7 @@ motivating output sample.
 zig build              # debug build
 zig build test         # full test suite (~770 tests)
 zig build release      # ReleaseSmall + strip, output at zig-out/release/smll
+scripts/smoke-supported-commands.py  # isolated wrapper dispatch smoke
 ```
 
 `zig build test --summary all` is the verification command required
