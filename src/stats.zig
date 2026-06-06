@@ -1,5 +1,6 @@
 const std = @import("std");
 const history = @import("history.zig");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Writer = std.Io.Writer;
@@ -212,7 +213,7 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
 }
 
 fn findJsonU64(data: []const u8, key: []const u8) u64 {
-    return findJsonU64Opt(data, key) orelse 0;
+    return util.findJsonU64Opt(data, key) orelse 0;
 }
 
 fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8, s: Stats) !void {
@@ -334,7 +335,7 @@ fn parseQueryOptions(args: []const []const u8, mode: QueryMode) !QueryOptions {
 fn parseDurationMs(s: []const u8) !i64 {
     if (s.len < 2) return error.InvalidArgs;
     const unit = s[s.len - 1];
-    const number = try parseU64(s[0 .. s.len - 1]);
+    const number = util.parseU64(s[0 .. s.len - 1]) orelse return error.InvalidArgs;
     const ms_per_hour: u64 = 60 * 60 * 1000;
     const mult: u64 = switch (unit) {
         'h' => ms_per_hour,
@@ -343,18 +344,6 @@ fn parseDurationMs(s: []const u8) !i64 {
     };
     const ms = number *| mult;
     return std.math.cast(i64, ms) orelse return error.InvalidArgs;
-}
-
-fn parseU64(s: []const u8) !u64 {
-    if (s.len == 0) return error.InvalidArgs;
-    var n: u64 = 0;
-    for (s) |c| {
-        if (c < '0' or c > '9') return error.InvalidArgs;
-        const digit: u64 = c - '0';
-        if (n > (std.math.maxInt(u64) - digit) / 10) return error.InvalidArgs;
-        n = n * 10 + digit;
-    }
-    return n;
 }
 
 fn reset(allocator: Allocator, io: Io, home: []const u8) !void {
@@ -391,21 +380,6 @@ pub fn display(allocator: Allocator, io: Io, home: []const u8, stdout: *Writer) 
 
 fn displayDiscover(allocator: Allocator, io: Io, home: []const u8, opts: QueryOptions, stdout: *Writer) !void {
     try history.displayDiscover(allocator, io, home, opts, stdout);
-}
-
-fn findJsonU64Opt(data: []const u8, key: []const u8) ?u64 {
-    const idx = std.mem.find(u8, data, key) orelse return null;
-    var pos = idx + key.len;
-    while (pos < data.len and (data[pos] == ' ' or data[pos] == '\t')) pos += 1;
-    if (pos >= data.len or data[pos] < '0' or data[pos] > '9') return null;
-    var val: u64 = 0;
-    while (pos < data.len and data[pos] >= '0' and data[pos] <= '9') {
-        const digit: u64 = data[pos] - '0';
-        if (val > (std.math.maxInt(u64) - digit) / 10) return null;
-        val = val * 10 + digit;
-        pos += 1;
-    }
-    return val;
 }
 
 fn writeAggregateStats(stdout: *Writer, commands: u64, input_bytes: u64, output_bytes: u64, verbose: bool) !void {
@@ -677,7 +651,7 @@ test "parseDurationMs rejects oversized durations" {
 }
 
 test "stats parser rejects overflowing json integers" {
-    try std.testing.expect(findJsonU64Opt("{\"n\":18446744073709551616}", "\"n\":") == null);
+    try std.testing.expect(util.findJsonU64Opt("{\"n\":18446744073709551616}", "\"n\":") == null);
 }
 
 test "display: no commands" {

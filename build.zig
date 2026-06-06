@@ -283,6 +283,9 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
+    exe_mod.addImport("util", util_mod);
+    stats_mod.addImport("util", util_mod);
+    history_mod.addImport("util", util_mod);
     const filter_catalog_mod = b.createModule(.{
         .root_source_file = b.path("src/filter_catalog.zig"),
         .target = target,
@@ -384,6 +387,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = false,
     });
     release_mod.addOptions("build_options", app_opts);
+    release_mod.addImport("util", util_mod);
     for (modules) |m| {
         if (!m.in_release) continue;
         const mod = registry.get(m.name) orelse unreachable;

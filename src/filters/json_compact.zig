@@ -2,7 +2,6 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
-const max_json_nesting = 256;
 
 pub fn matches(input: []const u8) bool {
     const trimmed = trimBomAndSpace(input);
@@ -54,7 +53,11 @@ fn minify(input: []const u8, writer: *Writer) !void {
 }
 
 fn isSingleTopLevelContainer(s: []const u8) bool {
-    var expected_closers: [max_json_nesting]u8 = undefined;
+    const root_closer: u8 = switch (s[0]) {
+        '{' => '}',
+        '[' => ']',
+        else => return false,
+    };
     var depth: usize = 0;
     var in_string = false;
     var escaped = false;
@@ -73,18 +76,12 @@ fn isSingleTopLevelContainer(s: []const u8) bool {
 
         switch (c) {
             '"' => in_string = true,
-            '{', '[' => {
-                if (depth == expected_closers.len) return false;
-                expected_closers[depth] = if (c == '{') '}' else ']';
-                depth += 1;
-            },
+            '{', '[' => depth += 1,
             '}', ']' => {
-                if (depth == 0) return false;
                 depth -= 1;
-                if (expected_closers[depth] != c) return false;
-                if (depth == 0) return idx + 1 == s.len;
+                if (depth == 0) return c == root_closer and idx + 1 == s.len;
             },
-            else => if (depth == 0 and !std.ascii.isWhitespace(c)) return false,
+            else => {},
         }
     }
 
@@ -93,7 +90,7 @@ fn isSingleTopLevelContainer(s: []const u8) bool {
 
 fn trimBomAndSpace(input: []const u8) []const u8 {
     const trimmed_ws = std.mem.trim(u8, input, " \t\r\n");
-    return if (std.mem.startsWith(u8, trimmed_ws, "\xef\xbb\xbf")) trimmed_ws[3..] else trimmed_ws;
+    return if (trimmed_ws.len >= 3 and trimmed_ws[0] == 0xef and trimmed_ws[1] == 0xbb and trimmed_ws[2] == 0xbf) trimmed_ws[3..] else trimmed_ws;
 }
 
 test "minifies object whitespace outside strings" {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Writer = std.Io.Writer;
@@ -295,10 +296,10 @@ pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
 
 fn parseLine(line: []const u8) ?Entry {
     var entry: Entry = .{};
-    entry.ts_ms = std.math.cast(i64, findJsonU64Opt(line, "\"ts_ms\":") orelse return null) orelse return null;
-    entry.raw_bytes = findJsonU64Opt(line, "\"raw\":") orelse return null;
-    entry.compact_bytes = findJsonU64Opt(line, "\"compact\":") orelse return null;
-    _ = findJsonU64Opt(line, "\"exit\":") orelse return null;
+    entry.ts_ms = std.math.cast(i64, util.findJsonU64Opt(line, "\"ts_ms\":") orelse return null) orelse return null;
+    entry.raw_bytes = util.findJsonU64Opt(line, "\"raw\":") orelse return null;
+    entry.compact_bytes = util.findJsonU64Opt(line, "\"compact\":") orelse return null;
+    _ = util.findJsonU64Opt(line, "\"exit\":") orelse return null;
     entry.cmd_len = readJsonStringInto(line, "\"cmd\":", &entry.cmd) orelse return null;
     entry.filter_len = readJsonStringInto(line, "\"filter\":", &entry.filter) orelse return null;
     entry.project_len = readJsonStringInto(line, "\"project\":", &entry.project) orelse return null;
@@ -442,21 +443,6 @@ fn aggLess(items: []const AggEntry, a: usize, b: usize, mode: AggSort) bool {
             break :blk if (pct_a != pct_b) pct_a < pct_b else items[a].stats.in_bytes > items[b].stats.in_bytes;
         },
     };
-}
-
-fn findJsonU64Opt(data: []const u8, key: []const u8) ?u64 {
-    const idx = std.mem.find(u8, data, key) orelse return null;
-    var pos = idx + key.len;
-    while (pos < data.len and (data[pos] == ' ' or data[pos] == '\t')) pos += 1;
-    if (pos >= data.len or data[pos] < '0' or data[pos] > '9') return null;
-    var val: u64 = 0;
-    while (pos < data.len and data[pos] >= '0' and data[pos] <= '9') {
-        const digit: u64 = data[pos] - '0';
-        if (val > (std.math.maxInt(u64) - digit) / 10) return null;
-        val = val * 10 + digit;
-        pos += 1;
-    }
-    return val;
 }
 
 fn readJsonStringInto(data: []const u8, key: []const u8, out: []u8) ?usize {
