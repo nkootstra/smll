@@ -2638,7 +2638,7 @@ test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
     // with examples; 2 entries in "./src" survive individually.
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/filter.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries: README.md, src/, tests/)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries: ./README.md, ./src/, ./tests/)") != null);
     // Metadata gone.
     try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);

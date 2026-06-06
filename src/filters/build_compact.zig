@@ -18,8 +18,8 @@ const Writer = std.Io.Writer;
 // Shape of summary line (emitted once per tool that fired at least one
 // progress line): `Compiled N (cargo)` / `Compiled N (make)` /
 // `Compiled N (go)`. For successful `zig build --summary all`, the
-// original `Build Summary: …` line is forwarded verbatim with any
-// warning/error lines; no synthesized count line is emitted.
+// original `Build Summary: …` line is forwarded verbatim; no synthesized
+// count line is emitted.
 
 // Source-line prefixes that count as "compiler progress" and collapse into
 // a count. Two space-prefixed entries cover cargo's leading 3-space indent
@@ -27,8 +27,6 @@ const Writer = std.Io.Writer;
 // invocations at column 0. Go progress covers `go build:` leader lines.
 const CARGO_PROGRESS_PREFIX = "   Compiling ";
 const GO_PROGRESS_PREFIX = "go build:";
-const ZIG_SUMMARY_PREFIX = "Build Summary: ";
-
 pub fn matches(stdout: []const u8, stderr: []const u8) bool {
     return scanForAny(stdout) or scanForAny(stderr);
 }
@@ -37,6 +35,7 @@ fn scanForAny(input: []const u8) bool {
     if (input.len == 0) return false;
     var it = std.mem.splitScalar(u8, input, '\n');
     while (it.next()) |line| {
+        if (std.mem.startsWith(u8, line, "Build Summary: ")) return true;
         if (classify(line) != .other) return true;
     }
     return false;
@@ -47,7 +46,6 @@ const LineKind = enum {
     cargo_verbose_invocation,
     make_progress,
     go_progress,
-    zig_success_summary,
     warning,
     err,
     other,
@@ -56,7 +54,6 @@ const LineKind = enum {
 fn classify(line: []const u8) LineKind {
     if (line.len == 0) return .other;
     // Progress classification first — these prefixes are anchored.
-    if (isZigSuccessSummary(line)) return .zig_success_summary;
     if (std.mem.startsWith(u8, line, CARGO_PROGRESS_PREFIX)) return .cargo_progress;
     if (std.mem.startsWith(u8, line, "     Running `rustc ")) return .cargo_verbose_invocation;
     if (std.mem.startsWith(u8, line, GO_PROGRESS_PREFIX)) return .go_progress;
@@ -80,7 +77,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     if (stdout.len == 0 and stderr.len == 0) return;
 
     if (findZigSuccessSummary(stdout) orelse findZigSuccessSummary(stderr)) |summary| {
-        try writeZigSuccess(allocator, stdout, stderr, summary, writer);
+        try writer.writeAll(summary);
+        try writer.writeByte('\n');
         return;
     }
 
@@ -141,10 +139,6 @@ fn processStream(
             .cargo_verbose_invocation => cargo_verbose_count.* += 1,
             .make_progress => make_count.* += 1,
             .go_progress => go_count.* += 1,
-            .zig_success_summary => {
-                try writer.writeAll(line);
-                try writer.writeByte('\n');
-            },
             .warning, .err, .other => {
                 try writer.writeAll(line);
                 try writer.writeByte('\n');
@@ -153,59 +147,13 @@ fn processStream(
     }
 }
 
-fn isZigSuccessSummary(line: []const u8) bool {
-    if (!std.mem.startsWith(u8, line, ZIG_SUMMARY_PREFIX)) return false;
-    if (std.mem.find(u8, line, "steps succeeded") == null) return false;
-    if (std.mem.find(u8, line, "failed") != null) return false;
-    return true;
-}
-
 fn findZigSuccessSummary(input: []const u8) ?[]const u8 {
-    if (input.len == 0) return null;
-    var it = std.mem.splitScalar(u8, input, '\n');
-    while (it.next()) |raw| {
-        const line = std.mem.trimEnd(u8, raw, " \t\r");
-        if (isZigSuccessSummary(line)) return line;
-    }
+    const start = std.mem.find(u8, input, "Build Summary: ") orelse return null;
+    const rest = input[start..];
+    const end = std.mem.findScalar(u8, rest, '\n') orelse rest.len;
+    const line = rest[0..end];
+    if (std.mem.find(u8, line, "failed") == null) return line;
     return null;
-}
-
-fn writeZigSuccess(
-    allocator: Allocator,
-    stdout: []const u8,
-    stderr: []const u8,
-    summary: []const u8,
-    writer: *Writer,
-) !void {
-    try writer.writeAll(summary);
-    try writer.writeByte('\n');
-
-    var strip_buf: std.ArrayList(u8) = .empty;
-    defer strip_buf.deinit(allocator);
-    try writeZigWarningsAndErrors(allocator, stdout, writer, &strip_buf);
-    try writeZigWarningsAndErrors(allocator, stderr, writer, &strip_buf);
-}
-
-fn writeZigWarningsAndErrors(
-    allocator: Allocator,
-    input: []const u8,
-    writer: *Writer,
-    strip_buf: *std.ArrayList(u8),
-) !void {
-    if (input.len == 0) return;
-    const trimmed = if (input[input.len - 1] == '\n') input[0 .. input.len - 1] else input;
-    if (trimmed.len == 0) return;
-    var it = std.mem.splitScalar(u8, trimmed, '\n');
-    while (it.next()) |raw| {
-        const line = ansi.stripInto(strip_buf, allocator, raw) catch raw;
-        switch (classify(line)) {
-            .warning, .err => {
-                try writer.writeAll(line);
-                try writer.writeByte('\n');
-            },
-            else => {},
-        }
-    }
 }
 
 test "matches: cargo progress" {
@@ -337,8 +285,7 @@ test "apply: zig successful build summary drops step tree" {
     defer out.deinit();
     try apply(std.testing.allocator, input, "", &out.writer);
     try std.testing.expectEqualStrings(
-        "Build Summary: 140/140 steps succeeded; 871/871 tests passed\n" ++
-            "warning: cache directory is not writable\n",
+        "Build Summary: 140/140 steps succeeded; 871/871 tests passed\n",
         out.written(),
     );
 }
