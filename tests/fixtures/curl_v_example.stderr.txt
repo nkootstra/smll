@@ -12,8 +12,8 @@
 * ALPN: server accepted h2
 * Server certificate:
 *   subject: CN=example.com
-*   start date: Jan  1 00:00:00 2024 GMT
-*   expire date: Apr  1 00:00:00 2024 GMT
+*   start date: Apr  1 00:00:00 2024 GMT
+*   expire date: Jun 30 23:59:59 2024 GMT
 *   subjectAltName: host "example.com" matched cert's "example.com"
 *   issuer: C=US; O=Let's Encrypt; CN=R3
 *   SSL certificate verify ok.
@@ -25,7 +25,7 @@
 >
 < HTTP/2 200
 < content-type: text/html; charset=UTF-8
-< content-length: 1256
-< date: Mon, 22 Apr 2026 12:00:00 GMT
+< content-length: 182
+< date: Mon, 22 Apr 2024 12:00:00 GMT
 <
 * Connection #0 to host example.com left intact

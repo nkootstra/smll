@@ -73,6 +73,8 @@ motivating output sample.
 zig build              # debug build
 zig build test         # full test suite (~770 tests)
 zig build release      # ReleaseSmall + strip, output at zig-out/release/smll
+scripts/audit-fixtures.py           # fixture references + generated drift
+python3 scripts/test_compare_rtk_metrics.py  # benchmark metric contract
 scripts/smoke-supported-commands.py  # isolated wrapper dispatch smoke
 ```
 
@@ -85,6 +87,7 @@ remain green.
 ```sh
 scripts/measure.sh           # latency + compression ratio per fixture
 scripts/generate_large_fixtures.sh   # regenerate large fixtures
+scripts/audit-fixtures.py            # verify committed fixtures stay coherent
 scripts/compare-rtk-container.sh     # Dockerized default agent-profile comparison vs rtk
 scripts/compare-rtk-container.sh --profile rtk     # rtk-suite-inspired cases only
 scripts/compare-rtk-container.sh --profile stress  # oversized coverage-gap probes
@@ -97,6 +100,9 @@ when adding a new one.
 The rtk comparison is intentionally container-first so contributors do not need
 rtk, Rust, Zig, or tokenizer packages installed locally. It pins rtk to
 `v0.42.3` by default; set `RTK_REF=<tag-or-sha>` to compare another revision.
+The headline comparison is exact tokenizer-counted stdout+stderr net savings;
+native stats/gain estimates in the report are diagnostics, not the benchmark
+score.
 The default `agent` profile focuses on commands agent harnesses commonly run;
 the `rtk` profile tracks cases inspired by rtk's own filter/test surface; and
 `stress` keeps very large pass-through probes out of the default headline.

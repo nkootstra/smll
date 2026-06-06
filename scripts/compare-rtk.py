@@ -58,6 +58,7 @@ class ToolRun:
 
 
 CASES_FILE = pathlib.Path("benchmarks/smll-vs-rtk/cases.json")
+COMPARISON_BASIS = "tokenizer(stdout+stderr), net savings, unclamped"
 
 
 class TokenCounter:
@@ -368,10 +369,14 @@ def signals_for(case: Case, tool: str) -> tuple[str, ...]:
     return case.tool_signals.get(tool, case.signals)
 
 
-def pct(saved_from: int, output: int) -> float:
-    if saved_from <= 0:
+def benchmark_saved_tokens(raw_tokens: int, tool_tokens: int) -> int:
+    return raw_tokens - tool_tokens
+
+
+def benchmark_savings_pct(raw_tokens: int, tool_tokens: int) -> float:
+    if raw_tokens <= 0:
         return 0.0
-    return 100.0 * (saved_from - output) / saved_from
+    return 100.0 * benchmark_saved_tokens(raw_tokens, tool_tokens) / raw_tokens
 
 
 def winner(smll_tokens: int, rtk_tokens: int) -> str:
@@ -414,30 +419,49 @@ def build_stats_models(cases: list[dict], raw_tokens: int, smll_tokens: int, rtk
 
     return {
         "smll_stats": {
+            "role": "native_estimate_diagnostic",
             "basis": "agent-visible stdout+stderr bytes recorded by smll wrapper stats; displayed token savings are floor(saved_bytes / 4)",
             "input_bytes": raw_bytes,
             "output_bytes": smll_bytes,
             "saved_bytes": smll_saved_bytes,
             "estimated_tokens_saved": smll_saved_bytes // 4,
-            "exact_benchmark_tokens_saved": raw_tokens - smll_tokens,
-            "estimated_vs_exact_delta": (smll_saved_bytes // 4) - (raw_tokens - smll_tokens),
+            "exact_benchmark_tokens_saved": benchmark_saved_tokens(raw_tokens, smll_tokens),
+            "estimated_vs_exact_delta": (smll_saved_bytes // 4) - benchmark_saved_tokens(raw_tokens, smll_tokens),
             "included_raw_stderr_bytes": raw_stderr_bytes,
             "included_smll_stderr_bytes": smll_stderr_bytes,
             "factuality": "Factual for smll's recorded agent-visible byte totals; token savings remain an explicit bytes/4 estimate, not tokenizer-factual.",
         },
         "rtk_gain": {
+            "role": "native_estimate_diagnostic",
             "basis": "ceil(combined stdout+stderr bytes / 4) token estimates, with per-command saved_tokens clamped at zero",
             "estimated_input_tokens": rtk_input_estimate,
             "estimated_output_tokens": rtk_output_estimate,
             "estimated_tokens_saved": rtk_saved_estimate,
-            "exact_benchmark_tokens_saved": raw_tokens - rtk_tokens,
-            "estimated_vs_exact_delta": rtk_saved_estimate - (raw_tokens - rtk_tokens),
+            "exact_benchmark_tokens_saved": benchmark_saved_tokens(raw_tokens, rtk_tokens),
+            "estimated_vs_exact_delta": rtk_saved_estimate - benchmark_saved_tokens(raw_tokens, rtk_tokens),
             "exact_positive_tokens_saved": sum(max(row["raw"]["tokens"] - row["rtk"]["tokens"], 0) for row in cases),
             "exact_expansion_tokens": sum(max(row["rtk"]["tokens"] - row["raw"]["tokens"], 0) for row in cases),
             "expansion_case_count": len(rtk_expansion_cases),
             "expansion_cases": rtk_expansion_cases,
             "factuality": "Factual for rtk's stored heuristic estimates; not factual for tokenizer tokens, and expansion cases do not reduce saved_tokens.",
         },
+    }
+
+
+def build_summary(case_count: int, raw_tokens: int, smll_tokens: int, rtk_tokens: int) -> dict:
+    smll_saved = benchmark_saved_tokens(raw_tokens, smll_tokens)
+    rtk_saved = benchmark_saved_tokens(raw_tokens, rtk_tokens)
+    return {
+        "winner": winner(smll_tokens, rtk_tokens),
+        "case_count": case_count,
+        "raw_tokens": raw_tokens,
+        "smll_tokens": smll_tokens,
+        "rtk_tokens": rtk_tokens,
+        "smll_saved_tokens": smll_saved,
+        "rtk_saved_tokens": rtk_saved,
+        "smll_savings_pct": benchmark_savings_pct(raw_tokens, smll_tokens),
+        "rtk_savings_pct": benchmark_savings_pct(raw_tokens, rtk_tokens),
+        "smll_vs_rtk_delta_tokens": smll_tokens - rtk_tokens,
     }
 
 
@@ -459,20 +483,36 @@ def render_markdown(result: dict, markdown_path: pathlib.Path | None) -> str:
         "",
         f"- Profile: `{settings['profile']}` ({summary['case_count']} cases)",
         f"- Winner for this profile: **{summary['winner']}**",
-        f"- Raw command tokens: {fmt_int(summary['raw_tokens'])}",
-        f"- smll tokens: {fmt_int(summary['smll_tokens'])} ({summary['smll_savings_pct']:.1f}% saved)",
-        f"- rtk tokens: {fmt_int(summary['rtk_tokens'])} ({summary['rtk_savings_pct']:.1f}% saved)",
         f"- Tokenizer: {result['tokenizer']['actual']} (requested: {result['tokenizer']['requested']})",
+        f"- Comparison basis: `{settings['comparison_basis']}`",
         "",
         "Each row invokes the same top-level command three ways: the normal command, `smll <command>`, and `rtk <command>`. Full captured outputs are embedded below and written next to this report.",
         "",
         "The fixture tool records whether each wrapper called the committed fixture command as declared. Warnings show missing signals, exit-code mismatches, fixture bypasses, or wrapper-side argument rewrites; those rows still measure observed wrapper behavior, but they are not pure identical-child-invocation rows.",
         "",
-        "## Tool Stats Models",
+        "## Same-Basis Benchmark Score",
         "",
-        "These rows model what each tool's own cumulative stats feature would report for this benchmark. They are diagnostics, not the benchmark score above.",
+        "Benchmark savings are exact tokenizer-counted stdout+stderr tokens. Expansions are not clamped; negative savings reduce totals.",
         "",
-        "| stats source | basis | dashboard estimate | exact benchmark equivalent | gap | factuality |",
+        "| output | tokens | saved vs raw | saved |",
+        "|---|---:|---:|---:|",
+        "| raw commands | {tokens} | - | - |".format(tokens=fmt_int(summary["raw_tokens"])),
+        "| `smll` | {tokens} | {saved} | {pct:.1f}% |".format(
+            tokens=fmt_int(summary["smll_tokens"]),
+            saved=fmt_int(summary["smll_saved_tokens"]),
+            pct=summary["smll_savings_pct"],
+        ),
+        "| `rtk` | {tokens} | {saved} | {pct:.1f}% |".format(
+            tokens=fmt_int(summary["rtk_tokens"]),
+            saved=fmt_int(summary["rtk_saved_tokens"]),
+            pct=summary["rtk_savings_pct"],
+        ),
+        "",
+        "## Native Product Estimates",
+        "",
+        "These rows model what each tool's own cumulative stats feature would report for this benchmark. They are not used for the winner; formulas differ by product and are not directly comparable to the tokenizer score.",
+        "",
+        "| native estimate | basis | product estimate | benchmark equivalent | gap | note |",
         "|---|---|---:|---:|---:|---|",
     ]
     stats_models = result["stats_models"]
@@ -480,7 +520,7 @@ def render_markdown(result: dict, markdown_path: pathlib.Path | None) -> str:
     rtk_gain = stats_models["rtk_gain"]
     lines.extend(
         [
-            "| `smll --stats` | stdout+stderr bytes, then saved bytes / 4 | {estimate} est. saved tokens | {exact} saved tokens | {gap} | {note} |".format(
+            "| `smll --stats` | stdout+stderr bytes, then saved bytes / 4 | {estimate} est. saved tokens | {exact} net saved tokens | {gap} | {note} |".format(
                 estimate=fmt_int(smll_stats["estimated_tokens_saved"]),
                 exact=fmt_int(smll_stats["exact_benchmark_tokens_saved"]),
                 gap=fmt_int(smll_stats["estimated_vs_exact_delta"]),
@@ -602,17 +642,28 @@ def render_console_summary(result: dict) -> str:
         "smll vs rtk command token benchmark",
         f"Profile: {settings['profile']} ({summary['case_count']} cases)",
         f"Winner for this profile: {summary['winner']}",
-        f"Raw command tokens: {fmt_int(summary['raw_tokens'])}",
-        f"smll tokens: {fmt_int(summary['smll_tokens'])} ({summary['smll_savings_pct']:.1f}% saved)",
-        f"rtk tokens: {fmt_int(summary['rtk_tokens'])} ({summary['rtk_savings_pct']:.1f}% saved)",
         f"Tokenizer: {result['tokenizer']['actual']} (requested: {result['tokenizer']['requested']})",
+        f"Comparison basis: {settings['comparison_basis']}",
         "",
-        "Tool stats models:",
-        "- smll --stats: ~{estimate} est. saved tokens; exact benchmark saved {exact}".format(
+        "Same-basis benchmark score:",
+        "- raw commands: {tokens} tokens".format(tokens=fmt_int(summary["raw_tokens"])),
+        "- smll: {tokens} tokens; saved {saved} ({pct:.1f}%)".format(
+            tokens=fmt_int(summary["smll_tokens"]),
+            saved=fmt_int(summary["smll_saved_tokens"]),
+            pct=summary["smll_savings_pct"],
+        ),
+        "- rtk: {tokens} tokens; saved {saved} ({pct:.1f}%)".format(
+            tokens=fmt_int(summary["rtk_tokens"]),
+            saved=fmt_int(summary["rtk_saved_tokens"]),
+            pct=summary["rtk_savings_pct"],
+        ),
+        "",
+        "Native product estimates (diagnostic; not used for winner):",
+        "- smll --stats: ~{estimate} est. saved tokens; benchmark equivalent {exact}".format(
             estimate=fmt_int(result["stats_models"]["smll_stats"]["estimated_tokens_saved"]),
             exact=fmt_int(result["stats_models"]["smll_stats"]["exact_benchmark_tokens_saved"]),
         ),
-        "- rtk gain: ~{estimate} est. saved tokens; exact benchmark net saved {exact}".format(
+        "- rtk gain: ~{estimate} est. saved tokens; benchmark equivalent {exact}".format(
             estimate=fmt_int(result["stats_models"]["rtk_gain"]["estimated_tokens_saved"]),
             exact=fmt_int(result["stats_models"]["rtk_gain"]["exact_benchmark_tokens_saved"]),
         ),
@@ -824,7 +875,8 @@ def main() -> int:
                         "stdout_bytes": len(smll_run.stdout),
                         "stderr_bytes": len(smll_run.stderr),
                         "tokens": smll_tokens,
-                        "savings_pct": pct(raw_tokens, smll_tokens),
+                        "saved_tokens": benchmark_saved_tokens(raw_tokens, smll_tokens),
+                        "savings_pct": benchmark_savings_pct(raw_tokens, smll_tokens),
                         "median_ms": smll_run.median_ms,
                         "exit_code": smll_run.exit_code,
                         "missing_signals": smll_missing,
@@ -836,7 +888,8 @@ def main() -> int:
                         "stdout_bytes": len(rtk_run.stdout),
                         "stderr_bytes": len(rtk_run.stderr),
                         "tokens": rtk_tokens,
-                        "savings_pct": pct(raw_tokens, rtk_tokens),
+                        "saved_tokens": benchmark_saved_tokens(raw_tokens, rtk_tokens),
+                        "savings_pct": benchmark_savings_pct(raw_tokens, rtk_tokens),
                         "median_ms": rtk_run.median_ms,
                         "exit_code": rtk_run.exit_code,
                         "missing_signals": rtk_missing,
@@ -863,8 +916,10 @@ def main() -> int:
                 "smll_tokens": smll,
                 "rtk_tokens": rtk,
                 "winner": winner(smll, rtk),
-                "smll_savings_pct": pct(raw, smll),
-                "rtk_savings_pct": pct(raw, rtk),
+                "smll_saved_tokens": benchmark_saved_tokens(raw, smll),
+                "rtk_saved_tokens": benchmark_saved_tokens(raw, rtk),
+                "smll_savings_pct": benchmark_savings_pct(raw, smll),
+                "rtk_savings_pct": benchmark_savings_pct(raw, rtk),
             }
         )
 
@@ -885,17 +940,9 @@ def main() -> int:
             "warmup": args.warmup,
             "timeout_s": args.timeout,
             "outputs_dir": str(outputs_dir),
+            "comparison_basis": COMPARISON_BASIS,
         },
-        "summary": {
-            "winner": winner(smll_total, rtk_total),
-            "case_count": len(cases_out),
-            "raw_tokens": raw_total,
-            "smll_tokens": smll_total,
-            "rtk_tokens": rtk_total,
-            "smll_savings_pct": pct(raw_total, smll_total),
-            "rtk_savings_pct": pct(raw_total, rtk_total),
-            "smll_vs_rtk_delta_tokens": smll_total - rtk_total,
-        },
+        "summary": build_summary(len(cases_out), raw_total, smll_total, rtk_total),
         "categories": categories,
         "stats_models": build_stats_models(cases_out, raw_total, smll_total, rtk_total),
         "cases": cases_out,
