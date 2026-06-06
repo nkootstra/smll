@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 pub const panic = std.debug.simple_panic;
 pub const std_options: std.Options = .{
@@ -57,29 +58,14 @@ const GitLogCompact = pipe_filters.GitLogCompact;
 const envFlagOn = wrapper_util.envFlagOn;
 
 const help_text =
-    \\smll - compact noisy command output for coding agents
-    \\
     \\Usage:
-    \\  smll                                  help if stdin is a terminal
-    \\  smll <cmd...>                         run command with compact output
-    \\  <cmd> | smll                          compact stdin
-    \\  smll --explain <cmd...>               print filter/byte stats
-    \\  smll --err <cmd...>                   history=error
-    \\  smll --test <cmd...>                  history=test
-    \\  smll --rewrite <cmd...>               hook rewrite
-    \\
-    \\Commands:
-    \\  -h, --help
-    \\  --version
-    \\  --filters
-    \\  --stats [--reset|--verbose|--by-command] [--since <24h|7d|30d>] [--project]
-    \\  --discover [--since <24h|7d|30d>] [--project]
-    \\  --setup[=]<target> [--dry-run]
-    \\  --unsetup[=]<target> [--dry-run]
-    \\
-    \\Targets: claude opencode cursor codex
-    \\Env: SMLL_LOSSLESS=1 raw; SMLL_TEE=0 no tee; DO_NOT_TRACK=1 no records
-    \\
+    \\smll|smll <cmd...>|<cmd>|smll
+    \\-h --help --version --filters
+    \\--explain|--err|--test|--rewrite <cmd...>
+    \\--stats [--reset|--verbose|--by-command|--since <24h|7d|30d>|--project]
+    \\--discover [--since <24h|7d|30d>|--project]
+    \\--setup[=]T --unsetup[=]T [--dry-run]
+    \\T=claude|opencode|cursor|codex
 ;
 
 pub fn main(init: std.process.Init.Minimal) !void {
@@ -110,8 +96,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     // Fast path: no extra argv -> help for humans, stdin mode for pipes.
     // Skip setup check and wrapper-mode arena init entirely in pipe mode.
     if (args.len <= 1) {
-        var stdin_file = std.Io.File.stdin();
-        if (stdin_file.isTty(io) catch false) {
+        if (stdinIsTty()) {
             try printHelp(&stdout_writer.interface);
             try stdout_writer.interface.flush();
             return;
@@ -120,6 +105,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         var pipe_out_buf: [32768]u8 = undefined;
         var pipe_stdout_writer = stdout_file.writer(io, &pipe_out_buf);
         var in_buf: [4096]u8 = undefined;
+        var stdin_file = std.Io.File.stdin();
         var stdin_reader = stdin_file.reader(io, &in_buf);
         if (envFlagOn(environ, "SMLL_LOSSLESS")) {
             var copy_buf: [32768]u8 = undefined;
@@ -157,7 +143,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     if (args.len == 2 and std.mem.eql(u8, args[1], "--filters")) {
-        try stdout_writer.interface.writeAll(filter_catalog.text);
+        try filter_catalog.write(&stdout_writer.interface);
         try stdout_writer.interface.flush();
         return;
     }
@@ -396,6 +382,16 @@ fn exitIfNonzero(code: u8) void {
 
 fn printHelp(stdout: *std.Io.Writer) !void {
     try stdout.writeAll(help_text);
+}
+
+fn stdinIsTty() bool {
+    if (builtin.os.tag == .linux and !builtin.link_libc) {
+        var wsz: std.posix.winsize = undefined;
+        const rc = std.os.linux.syscall3(.ioctl, 0, std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
+        return std.os.linux.errno(rc) == .SUCCESS;
+    }
+    const rc = std.posix.system.isatty(0);
+    return std.posix.errno(rc - 1) == .SUCCESS;
 }
 
 fn elapsedMs(start: std.Io.Clock.Timestamp, io: std.Io) u64 {

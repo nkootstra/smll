@@ -21,22 +21,24 @@ pub fn shouldAutoWrap(command: []const u8) bool {
     return false;
 }
 
-pub const text =
-    \\smll filters
-    \\
-    \\Auto-wrap: common dev commands from the hook catalog.
-    \\
-    \\Dedicated: git; files; docker/kubectl/gh; ps/ls/df/du/curl; aws JSON/jq JSON; make/cargo/zig/go/dotnet/swift/xcodebuild/gradle/mvn; pytest/jest/vitest/tsc/mypy/ruff/eslint/biome/prettier; npm/pnpm/yarn/bun/uv/pip/composer; next build/Vite/Nuxt; pre-commit; terraform plan/tofu plan; generic table/list/text fallback
-    \\
-;
+pub fn write(stdout: *std.Io.Writer) !void {
+    try stdout.writeAll("smll filters\n\nAuto-wrap: ");
+    try stdout.writeAll(auto_wrap_shell_case);
+    try stdout.writeAll("\n\nDedicated: next build eslint terraform plan aws gradle pre-commit\n");
+}
 
 test "catalog names high-value filters" {
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try write(&out.writer);
+    const rendered = out.written();
+
     try std.testing.expect(std.mem.find(u8, auto_wrap_shell_case, "terraform") != null);
     try std.testing.expect(std.mem.find(u8, auto_wrap_js_array, "\"aws\"") != null);
-    try std.testing.expect(std.mem.find(u8, text, "next build") != null);
-    try std.testing.expect(std.mem.find(u8, text, "terraform plan") != null);
-    try std.testing.expect(std.mem.find(u8, text, "eslint") != null);
-    try std.testing.expect(std.mem.find(u8, text, "aws JSON") != null);
+    try std.testing.expect(std.mem.find(u8, rendered, "next build") != null);
+    try std.testing.expect(std.mem.find(u8, rendered, "terraform plan") != null);
+    try std.testing.expect(std.mem.find(u8, rendered, "eslint") != null);
+    try std.testing.expect(std.mem.find(u8, rendered, "aws") != null);
 }
 
 test "auto-wrap lookup uses the hook command catalog" {

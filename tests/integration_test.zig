@@ -532,25 +532,21 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
 }
 
 fn expectHelpOutput(out: []const u8) !void {
-    try std.testing.expect(std.mem.startsWith(u8, out, "smll - compact noisy command output"));
+    try std.testing.expect(std.mem.startsWith(u8, out, "Usage:"));
     try std.testing.expect(std.mem.find(u8, out, "Usage:") != null);
-    try std.testing.expect(std.mem.find(u8, out, "smll                                  help if stdin is a terminal") != null);
-    try std.testing.expect(std.mem.find(u8, out, "smll <cmd...>") != null);
-    try std.testing.expect(std.mem.find(u8, out, "<cmd> | smll") != null);
-    try std.testing.expect(std.mem.find(u8, out, "-h, --help") != null);
+    try std.testing.expect(std.mem.find(u8, out, "smll|smll <cmd...>|<cmd>|smll") != null);
+    try std.testing.expect(std.mem.find(u8, out, "-h --help") != null);
     try std.testing.expect(std.mem.find(u8, out, "--version") != null);
     try std.testing.expect(std.mem.find(u8, out, "--filters") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--stats [--reset|--verbose|--by-command]") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--discover [--since <24h|7d|30d>] [--project]") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--setup[=]<target> [--dry-run]") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--unsetup[=]<target> [--dry-run]") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--explain <cmd...>") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--err <cmd...>") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--test <cmd...>") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--stats [--reset|--verbose|--by-command") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--discover [--since <24h|7d|30d>|--project]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--setup[=]T --unsetup[=]T [--dry-run]") != null);
+    try std.testing.expect(std.mem.find(u8, out, "T=claude|opencode|cursor|codex") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--explain") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--err") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--test") != null);
     try std.testing.expect(std.mem.find(u8, out, "--rewrite <cmd...>") != null);
     try std.testing.expect(std.mem.find(u8, out, "--since <24h|7d|30d>") != null);
-    try std.testing.expect(std.mem.find(u8, out, "SMLL_LOSSLESS=1") != null);
-    try std.testing.expect(std.mem.find(u8, out, "DO_NOT_TRACK=1") != null);
 }
 
 test "meta: --help and -h print usage" {
