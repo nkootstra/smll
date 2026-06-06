@@ -9,6 +9,8 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-06-06
+
 ### Added
 
 - Codex agent setup/unsetup, installing a `PreToolUse` hook under
@@ -25,6 +27,13 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   `--by-command` views, plus `--discover` for low-savings, passthrough, and
   top raw-output command labels.
 - `--explain`, `--rewrite`, `--err`, and `--test` flag-style wrapper commands.
+- Successful `zig build --summary all` compaction that keeps the summary line
+  while dropping the successful step tree.
+
+### Changed
+
+- `find -ls` directory-collapsed output now keeps representative example paths
+  in aggregate lines.
 
 ## [1.4.0] — 2026-06-04
 
@@ -261,7 +270,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/nkootstra/smll/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nkootstra/smll/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/nkootstra/smll/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/nkootstra/smll/compare/v1.2.5...v1.3.0
