@@ -95,7 +95,7 @@ when adding a new one.
 
 The rtk comparison is intentionally container-first so contributors do not need
 rtk, Rust, Zig, or tokenizer packages installed locally. It pins rtk to
-`v0.42.1` by default; set `RTK_REF=<tag-or-sha>` to compare another revision.
+`v0.42.3` by default; set `RTK_REF=<tag-or-sha>` to compare another revision.
 The default `agent` profile focuses on commands agent harnesses commonly run;
 the `rtk` profile tracks cases inspired by rtk's own filter/test surface; and
 `stress` keeps very large pass-through probes out of the default headline.
