@@ -177,7 +177,7 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
 
     if (entries.items.len == 0) return;
 
-    std.sort.insertion(PlainEntry, entries.items, {}, struct {
+    std.sort.pdq(PlainEntry, entries.items, {}, struct {
         fn lessThan(_: void, a: PlainEntry, b: PlainEntry) bool {
             const cmp = std.mem.order(u8, a.parent, b.parent);
             if (cmp != .eq) return cmp == .lt;

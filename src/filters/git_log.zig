@@ -162,16 +162,6 @@ pub fn applyStatCompact(allocator: Allocator, stdout: []const u8, stderr: []cons
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
 
-        if (isStatSummaryLine(trimmed)) {
-            current.summary = trimmed;
-            continue;
-        }
-
-        if (parseStatLine(trimmed)) |stat_line| {
-            try current.stat_lines.append(allocator, stat_line);
-            continue;
-        }
-
         if (std.mem.startsWith(u8, line, "    ")) {
             const body_line = std.mem.trim(u8, line[4..], " \t\r");
             if (body_line.len == 0) continue;
@@ -180,6 +170,16 @@ pub fn applyStatCompact(allocator: Allocator, stdout: []const u8, stderr: []cons
             } else if (isImportantCompactBodyLine(body_line)) {
                 current.header.appendImportant(body_line);
             }
+            continue;
+        }
+
+        if (isStatSummaryLine(trimmed)) {
+            current.summary = trimmed;
+            continue;
+        }
+
+        if (parseStatLine(trimmed)) |stat_line| {
+            try current.stat_lines.append(allocator, stat_line);
         }
     }
 
@@ -864,6 +864,29 @@ test "applyStatCompact: stat fixture is ≤ 45% of raw" {
     defer out.deinit();
     try applyStatCompact(allocator, stat_fixture, &.{}, &out.writer);
     try std.testing.expect(out.written().len <= (stat_fixture.len * 45) / 100);
+}
+
+test "applyStatCompact: important trailers that mention files changed are not mistaken for stat summaries" {
+    const allocator = std.testing.allocator;
+    const input =
+        "commit abcdef0123456789abcdef0123456789abcdef01\n" ++
+        "Author: Alice <a@example.com>\n" ++
+        "Date:   Sat Apr 18 09:00:00 2026 +0000\n" ++
+        "\n" ++
+        "    fix: keep trailer text\n" ++
+        "\n" ++
+        "    Refs: fix 1 file changed in wrong place\n" ++
+        "\n" ++
+        " src/main.zig | 2 ++\n" ++
+        " 1 file changed, 2 insertions(+)\n";
+
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyStatCompact(allocator, input, &.{}, &out.writer);
+    const got = out.written();
+
+    try std.testing.expect(std.mem.find(u8, got, "abcdef0 fix: keep trailer text [Refs: fix 1 file changed in wrong place]") != null);
+    try std.testing.expect(std.mem.find(u8, got, "  1 file changed, 2 insertions(+)") != null);
 }
 
 test "pipe-mode idempotence: v0.4 log output piped again is unchanged" {

@@ -387,9 +387,9 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    // tree wrapper: requires box-drawing chars in the first few lines.
-    // `bun` can emit other tree-shaped output; route it through tree when the
-    // package-tree filter above did not match.
+    // tree wrapper: matches Unicode box-drawing and ASCII `|--` / `` `-- ``
+    // tree output. `bun` can emit other tree-shaped output; route it through
+    // tree when the package-tree filter above did not match.
     if (std.mem.eql(u8, cmd_basename, "tree") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
