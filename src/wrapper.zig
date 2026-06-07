@@ -98,6 +98,14 @@ fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code
     try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
 }
 
+fn findHasTypeFile(argv: []const []const u8) bool {
+    var i: usize = 0;
+    while (i + 1 < argv.len) : (i += 1) {
+        if (std.mem.eql(u8, argv[i], "-type") and std.mem.eql(u8, argv[i + 1], "f")) return true;
+    }
+    return false;
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -334,6 +342,7 @@ fn runWrapperInner(
     const is_find_cmd = std.mem.eql(u8, cmd_basename, "find");
     if (is_rg_cmd or is_find_cmd) {
         const is_find_ls = is_find_cmd and hasArg(argv, "-ls");
+        const is_find_print0 = is_find_cmd and hasArg(argv, "-print0");
         // For rg: only apply --files dirname RLE when the output is confirmed file-list
         // mode. Guards against rg -N (no line numbers) output which is path:content —
         // matchesPattern correctly rejects it, but rg.matches() could accept it and
@@ -348,6 +357,12 @@ fn runWrapperInner(
             try writer.writeAll(stdout_slice);
         } else if (is_find_ls and find_compact.matches(stdout_slice)) {
             if (!applyFilter(find_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (is_find_plain and !is_find_print0 and find_compact.matchesPlain(stdout_slice)) {
+            if (findHasTypeFile(argv)) {
+                if (!applyFilter(find_compact.applyPlainFiles, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else {
+                if (!applyFilter(find_compact.applyPlainEntries, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            }
         } else if (rg.matchesPattern(stdout_slice)) {
             if (!applyFilter(rg.applyPattern, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
@@ -379,7 +394,7 @@ fn runWrapperInner(
         std.mem.eql(u8, cmd_basename, "bun"))
     {
         if (tree.matches(stdout_slice)) {
-            if (!applyFilter(tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(tree.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }

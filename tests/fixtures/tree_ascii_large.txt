@@ -1,0 +1,77 @@
+.
+|-- .git
+|   |-- COMMIT_EDITMSG
+|   |-- HEAD
+|   |-- config
+|   |-- description
+|   |-- index
+|   `-- hooks
+|       |-- applypatch-msg.sample
+|       |-- commit-msg.sample
+|       |-- fsmonitor-watchman.sample
+|       |-- post-update.sample
+|       |-- pre-applypatch.sample
+|       |-- pre-commit.sample
+|       |-- pre-merge-commit.sample
+|       |-- pre-push.sample
+|       |-- pre-rebase.sample
+|       |-- pre-receive.sample
+|       |-- prepare-commit-msg.sample
+|       |-- push-to-checkout.sample
+|       |-- sendemail-validate.sample
+|       `-- update.sample
+|-- docs
+|   `-- guides
+|       |-- file_003.txt
+|       |-- file_009.txt
+|       |-- file_015.txt
+|       |-- file_021.txt
+|       |-- file_027.txt
+|       |-- file_033.txt
+|       |-- file_039.txt
+|       |-- file_045.txt
+|       |-- file_051.txt
+|       |-- file_057.txt
+|       |-- file_063.txt
+|       `-- file_069.txt
+|-- src
+|   |-- core
+|   |   |-- file_000.txt
+|   |   |-- file_001.txt
+|   |   |-- file_003.txt
+|   |   |-- file_005.txt
+|   |   |-- file_007.txt
+|   |   |-- file_009.txt
+|   |   |-- file_011.txt
+|   |   |-- file_013.txt
+|   |   |-- file_015.txt
+|   |   |-- file_017.txt
+|   |   |-- file_019.txt
+|   |   `-- file_021.txt
+|   |-- main.zig
+|   |-- ui
+|   |   |-- file_000.txt
+|   |   |-- file_001.txt
+|   |   |-- file_002.txt
+|   |   |-- file_004.txt
+|   |   |-- file_006.txt
+|   |   |-- file_008.txt
+|   |   |-- file_010.txt
+|   |   |-- file_012.txt
+|   |   |-- file_014.txt
+|   |   |-- file_016.txt
+|   |   |-- file_018.txt
+|   |   `-- file_020.txt
+|   `-- wrapper.zig
+|-- tests
+|   |-- fixtures
+|   |   |-- cargo_test_failing.txt
+|   |   |-- find_plain_many.txt
+|   |   |-- git_diff_simple.txt
+|   |   |-- git_log_stat.txt
+|   |   |-- git_show_stat.txt
+|   |   `-- tree_ascii_large.txt
+|   `-- integration_test.zig
+`-- README.md
+
+167 directories, 166 files

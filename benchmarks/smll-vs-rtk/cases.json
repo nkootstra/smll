@@ -94,6 +94,25 @@
       }
     },
     {
+      "name": "git-log-stat",
+      "category": "git",
+      "command": [
+        "git",
+        "log",
+        "--stat"
+      ],
+      "fixture": "tests/fixtures/git_log_stat.txt",
+      "signals": [
+        "abcdef0",
+        "round 8 updates",
+        "src/core/",
+        "src/ui/",
+        "14 files changed",
+        "Refs: SMLL-42",
+        "src/{old_name.zig => name.zig}"
+      ]
+    },
+    {
       "name": "git-show-simple",
       "category": "git",
       "command": [
@@ -117,6 +136,24 @@
       "signals": [
         "BENCH-FINAL",
         "MOD_01_FINALE_VERSION"
+      ]
+    },
+    {
+      "name": "git-show-stat",
+      "category": "git",
+      "command": [
+        "git",
+        "show",
+        "--stat"
+      ],
+      "fixture": "tests/fixtures/git_show_stat.txt",
+      "signals": [
+        "c3d4e5f",
+        "fix: preserve failed test evidence",
+        "tests/fixtures/",
+        "9 files changed",
+        "Refs: SMLL-77",
+        "tests/{old_fail.txt => new_fail.txt}"
       ]
     },
     {
@@ -786,6 +823,28 @@
       }
     },
     {
+      "name": "find-plain-many",
+      "category": "search/listing",
+      "command": [
+        "find",
+        "."
+      ],
+      "fixture": "tests/fixtures/find_plain_many.txt",
+      "signals": [
+        "src/core/cache.zig",
+        "README.md"
+      ],
+      "tool_signals": {
+        "smll": [
+          "src/core/",
+          "12 entries",
+          "src/core/cache.zig",
+          "README.md"
+        ],
+        "rtk": []
+      }
+    },
+    {
       "name": "find-ls-large",
       "category": "search/listing",
       "profiles": [
@@ -871,6 +930,41 @@
       "signals": [
         "filters",
         "git_status.zig"
+      ]
+    },
+    {
+      "name": "tree-large",
+      "category": "search/listing",
+      "command": [
+        "tree",
+        "-a",
+        "-L",
+        "3"
+      ],
+      "fixture": "tests/fixtures/tree_large.txt",
+      "signals": [
+        "src",
+        "filters",
+        "git_log.zig",
+        "7 directories, 24 files"
+      ]
+    },
+    {
+      "name": "tree-ascii-large",
+      "category": "search/listing",
+      "command": [
+        "tree",
+        "-a",
+        "-L",
+        "3"
+      ],
+      "fixture": "tests/fixtures/tree_ascii_large.txt",
+      "signals": [
+        ".git",
+        "hooks",
+        "src",
+        "core",
+        "167 directories, 166 files"
       ]
     },
     {

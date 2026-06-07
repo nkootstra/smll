@@ -18,8 +18,10 @@ const diff_multi_fixture = @embedFile("fixture_git_diff_multi");
 const diff_rename_modify_fixture = @embedFile("fixture_git_diff_rename_modify");
 const log_linear_fixture = @embedFile("fixture_git_log_linear");
 const log_merge_fixture = @embedFile("fixture_git_log_merge");
+const log_stat_fixture = @embedFile("fixture_git_log_stat");
 const show_simple_fixture = @embedFile("fixture_git_show_simple");
 const show_body_fixture = @embedFile("fixture_git_show_body");
+const show_stat_fixture = @embedFile("fixture_git_show_stat");
 const status_large_fixture = @embedFile("fixture_git_status_large");
 const diff_large_fixture = @embedFile("fixture_git_diff_large");
 const log_large_fixture = @embedFile("fixture_git_log_large");
@@ -70,6 +72,9 @@ const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
 const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
 const gh_run_list_fixture = @embedFile("fixture_gh_run_list");
 const ls_la_fixture = @embedFile("fixture_ls_la");
+const find_plain_many_fixture = @embedFile("fixture_find_plain_many");
+const tree_large_fixture = @embedFile("fixture_tree_large");
+const tree_ascii_large_fixture = @embedFile("fixture_tree_ascii_large");
 // v0.9 smoke-test fixtures
 const jest_failing_fixture = @embedFile("fixture_jest_failing");
 const tsc_errors_fixture = @embedFile("fixture_tsc_errors");
@@ -2012,6 +2017,77 @@ test "wrapper: ls -la fixture compacts without crashing" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "main.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "pipeline.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "nielskootstra") == null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "wrapper: plain find groups dense parent directories" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_plain_many_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < find_plain_many_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 entries: src/core/analyzer.zig, src/core/cache.zig, src/core/config.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "tests/fixtures/ (12 entries:") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "README.md\n") != null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "wrapper: find -type f groups with files noun" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", find_plain_many_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", ".", "-type", "f" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 files:") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "entries:") == null);
+}
+
+test "wrapper: tree uses readable structural summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "tree", tree_large_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"tree"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < tree_large_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "  src/\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    fixtures/ (5 files: find_plain_many.txt, git_diff_simple.txt, git_log_stat.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "7 directories, 24 files") != null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "wrapper: ASCII tree uses readable structural summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "tree", tree_ascii_large_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "tree", "-a", "-L", "3" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < tree_ascii_large_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "  .git/\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    hooks/ (14 files: applypatch-msg.sample, commit-msg.sample, fsmonitor-watchman.sample, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    core/ (12 files: file_000.txt, file_001.txt, file_003.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "167 directories, 166 files") != null);
     try std.testing.expectEqualStrings("", result.stderr);
 }
 
@@ -4023,4 +4099,74 @@ test "git diff (full): still compressed when no summary flag" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "d src/main.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "index abc1234") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "+const y = 2;") != null);
+}
+
+test "git log --stat: compacts stat output instead of passthrough" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "git", log_stat_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "git", "log", "--stat" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < log_stat_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "abcdef0 round 8 updates") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (6 files, +30 -0)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/{old_name.zig => name.zig}") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "14 files changed") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "abcdef0123456789abcdef0123456789abcdef01") == null);
+}
+
+test "git show --stat: compacts stat output instead of passthrough" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "git", show_stat_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "git", "show", "--stat" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < show_stat_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "c3d4e5f fix: preserve failed test evidence") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "tests/fixtures/ (7 files, +48 -0)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "tests/{old_fail.txt => new_fail.txt}") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "9 files changed") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "c3d4e5f678901234567890abcdef123456789abc") == null);
+}
+
+test "git log --name-only: passes through until dedicated compactor exists" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture = "commit a1b2c3d4e5f678901234567890abcdef12345678\nsrc/main.zig\nsrc/wrapper.zig\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "git", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "git", "log", "--name-only" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
+}
+
+test "git show --raw: passes through until dedicated compactor exists" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture = "commit c3d4e5f678901234567890abcdef123456789abc\n:100644 100644 abc1234 def5678 M\tsrc/main.zig\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "git", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "git", "show", "--raw" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, fixture, result.stdout);
 }

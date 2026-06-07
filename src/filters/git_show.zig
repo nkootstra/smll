@@ -46,6 +46,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try git_diff.apply(allocator, input[diff_start..], &.{}, writer);
 }
 
+pub fn applyStatCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    return git_log.applyStatCompact(allocator, stdout, stderr, writer);
+}
+
 fn findDiffStart(input: []const u8) ?usize {
     // Fast scan: search for the diff marker directly in the input.
     // The marker must appear at the start of a line.
@@ -82,6 +86,7 @@ fn stripTrailingBlankLines(header: []const u8) usize {
 
 const simple_fixture = @embedFile("fixture_git_show_simple");
 const body_fixture = @embedFile("fixture_git_show_body");
+const stat_fixture = @embedFile("fixture_git_show_stat");
 
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
@@ -224,6 +229,33 @@ test "apply: preserves trailing newline when input has one" {
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
     try std.testing.expect(out.len > 0 and out[out.len - 1] == '\n');
+}
+
+test "applyStatCompact: keeps stat facts and drops scaffolding" {
+    const allocator = std.testing.allocator;
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyStatCompact(allocator, stat_fixture, &.{}, &out.writer);
+    const got = out.written();
+
+    try std.testing.expect(std.mem.find(u8, got, "c3d4e5f fix: preserve failed test evidence") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/filters/cargo_test.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (7 files, +48 -0)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "tests/{old_fail.txt => new_fail.txt}") != null);
+    try std.testing.expect(std.mem.find(u8, got, "9 files changed") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Refs: SMLL-77") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Date:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "c3d4e5f678901234567890abcdef123456789abc") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Keep the files") == null);
+}
+
+test "applyStatCompact: stat fixture is ≤ 45% of raw" {
+    const allocator = std.testing.allocator;
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyStatCompact(allocator, stat_fixture, &.{}, &out.writer);
+    try std.testing.expect(out.written().len <= (stat_fixture.len * 45) / 100);
 }
 
 test "apply: show priority over log (output differs from log-only on same input)" {

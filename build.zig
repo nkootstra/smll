@@ -53,10 +53,12 @@ const modules = [_]ModuleEntry{
     .{ .name = "git_log", .needs_util = true, .fixtures = &.{
         .{ .name = "fixture_git_log_linear", .path = "tests/fixtures/git_log_linear.txt" },
         .{ .name = "fixture_git_log_merge", .path = "tests/fixtures/git_log_merge.txt" },
+        .{ .name = "fixture_git_log_stat", .path = "tests/fixtures/git_log_stat.txt" },
     } },
     .{ .name = "git_show", .needs_util = true, .extra_deps = &.{ "git_log", "git_diff" }, .fixtures = &.{
         .{ .name = "fixture_git_show_simple", .path = "tests/fixtures/git_show_simple.txt" },
         .{ .name = "fixture_git_show_body", .path = "tests/fixtures/git_show_body.txt" },
+        .{ .name = "fixture_git_show_stat", .path = "tests/fixtures/git_show_stat.txt" },
     } },
     .{ .name = "git_add", .needs_util = true, .fixtures = &.{
         .{ .name = "fixture_git_add_error_stdout", .path = "tests/fixtures/git_add_error.stdout.txt" },
@@ -119,6 +121,8 @@ const modules = [_]ModuleEntry{
     } },
     .{ .name = "tree", .fixtures = &.{
         .{ .name = "fixture_tree_src", .path = "tests/fixtures/tree_src.txt" },
+        .{ .name = "fixture_tree_large", .path = "tests/fixtures/tree_large.txt" },
+        .{ .name = "fixture_tree_ascii_large", .path = "tests/fixtures/tree_ascii_large.txt" },
     } },
 
     // Columnar / generic.
@@ -133,6 +137,7 @@ const modules = [_]ModuleEntry{
     } },
     .{ .name = "find_compact", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_find_ls", .path = "tests/fixtures/find_ls.txt" },
+        .{ .name = "fixture_find_plain_many", .path = "tests/fixtures/find_plain_many.txt" },
     } },
     .{ .name = "du_compact", .needs_ansi = true },
     .{ .name = "wc_compact" },

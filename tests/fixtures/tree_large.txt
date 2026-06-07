@@ -1,0 +1,34 @@
+.
+├── docs
+│   └── README.md
+├── scripts
+│   ├── audit.sh
+│   ├── bench.sh
+│   ├── release.sh
+│   └── smoke.sh
+├── src
+│   ├── core
+│   │   ├── analyzer.zig
+│   │   ├── main.zig
+│   │   ├── parser.zig
+│   │   ├── scanner.zig
+│   │   └── token.zig
+│   ├── filters
+│   │   ├── cargo_test.zig
+│   │   ├── git_diff.zig
+│   │   ├── git_log.zig
+│   │   ├── git_show.zig
+│   │   ├── rg.zig
+│   │   └── tree.zig
+│   ├── main.zig
+│   └── wrapper.zig
+└── tests
+    ├── fixtures
+    │   ├── find_plain_many.txt
+    │   ├── git_diff_simple.txt
+    │   ├── git_log_stat.txt
+    │   ├── git_show_stat.txt
+    │   └── tree_large.txt
+    └── integration_test.zig
+
+7 directories, 24 files
