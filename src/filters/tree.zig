@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const ansi = @import("ansi");
 
 // v0.6 grammar for `tree` output:
 //
@@ -162,7 +163,10 @@ pub fn applyCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8
     }
 
     if (entries.items.len == 0) {
-        if (summary) |s| try writer.print("{s}\n", .{s});
+        if (summary) |s| {
+            try writer.writeAll(s);
+            try writer.writeByte('\n');
+        }
         return;
     }
 
@@ -341,7 +345,7 @@ fn writeCollapsedDirLine(
     try writer.writeAll(entry.name);
     if (!std.mem.endsWith(u8, entry.name, "/")) try writer.writeByte('/');
     try writer.writeAll(" (");
-    try writer.print("{d}", .{direct_count});
+    try ansi.writeDecimal(writer, direct_count);
     try writer.writeByte(' ');
     try writer.writeAll(if (directChildrenAllFiles(entries, idx, end)) "files" else "entries");
     try writer.writeAll(": ");
@@ -361,7 +365,7 @@ fn writeCollapsedFilesLine(
     if (!first_out.*) try writer.writeByte('\n');
     try writeIndent(writer, entries[idx].depth + 1);
     try writer.writeAll("(");
-    try writer.print("{d}", .{file_count});
+    try ansi.writeDecimal(writer, file_count);
     try writer.writeAll(" files: ");
 
     var written: usize = 0;

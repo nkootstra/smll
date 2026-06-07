@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const ansi = @import("ansi");
 const util = @import("util");
 
 // v0.5 grammar for `git log`:
@@ -151,12 +152,12 @@ pub fn applyStatCompact(allocator: Allocator, stdout: []const u8, stderr: []cons
             try flushStatCommit(writer, &current, &first_out);
             current.deinit(allocator);
             current = .{};
-            current.sha7 = util.sha7(line["commit ".len..][0..40]);
-            current.has_sha = true;
+            current.header.sha7 = util.sha7(line["commit ".len..][0..40]);
+            current.header.has_sha = true;
             continue;
         }
 
-        if (!current.has_sha) continue;
+        if (!current.header.has_sha) continue;
 
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
@@ -174,10 +175,10 @@ pub fn applyStatCompact(allocator: Allocator, stdout: []const u8, stderr: []cons
         if (std.mem.startsWith(u8, line, "    ")) {
             const body_line = std.mem.trim(u8, line[4..], " \t\r");
             if (body_line.len == 0) continue;
-            if (current.subject_len == 0) {
-                current.copySubject(body_line);
+            if (current.header.subject_len == 0) {
+                current.header.copySubject(body_line);
             } else if (isImportantCompactBodyLine(body_line)) {
-                current.appendImportant(body_line);
+                current.header.appendImportant(body_line);
             }
         }
     }
@@ -214,56 +215,32 @@ const CompactCommit = struct {
 
 const StatLine = struct {
     raw: []const u8,
-    path: []const u8,
     parent: []const u8,
-    changed: u64 = 0,
-    insertions: u64 = 0,
-    deletions: u64 = 0,
+    insertions: usize = 0,
+    deletions: usize = 0,
     keep_raw: bool = false,
 };
 
 const StatCommit = struct {
-    has_sha: bool = false,
-    sha7: [7]u8 = undefined,
-    subject: [512]u8 = undefined,
-    subject_len: usize = 0,
-    important: [768]u8 = undefined,
-    important_len: usize = 0,
+    header: CompactCommit = .{},
     stat_lines: std.ArrayList(StatLine) = .empty,
     summary: ?[]const u8 = null,
 
     fn deinit(self: *StatCommit, allocator: Allocator) void {
         self.stat_lines.deinit(allocator);
     }
-
-    fn copySubject(self: *StatCommit, subject: []const u8) void {
-        self.subject_len = @min(subject.len, self.subject.len);
-        @memcpy(self.subject[0..self.subject_len], subject[0..self.subject_len]);
-    }
-
-    fn appendImportant(self: *StatCommit, line: []const u8) void {
-        const sep = if (self.important_len == 0) "" else "; ";
-        if (self.important_len + sep.len >= self.important.len) return;
-        @memcpy(self.important[self.important_len .. self.important_len + sep.len], sep);
-        self.important_len += sep.len;
-
-        const room = self.important.len - self.important_len;
-        const n = @min(line.len, room);
-        @memcpy(self.important[self.important_len .. self.important_len + n], line[0..n]);
-        self.important_len += n;
-    }
 };
 
 fn flushStatCommit(writer: *Writer, commit: *const StatCommit, first_out: *bool) !void {
-    if (!commit.has_sha or commit.subject_len == 0) return;
+    if (!commit.header.has_sha or commit.header.subject_len == 0) return;
 
     if (!first_out.*) try writer.writeByte('\n');
-    try writer.writeAll(&commit.sha7);
+    try writer.writeAll(&commit.header.sha7);
     try writer.writeByte(' ');
-    try writer.writeAll(commit.subject[0..commit.subject_len]);
-    if (commit.important_len > 0) {
+    try writer.writeAll(commit.header.subject[0..commit.header.subject_len]);
+    if (commit.header.important_len > 0) {
         try writer.writeAll(" [");
-        try writer.writeAll(commit.important[0..commit.important_len]);
+        try writer.writeAll(commit.header.important[0..commit.header.important_len]);
         try writer.writeByte(']');
     }
     first_out.* = false;
@@ -304,8 +281,8 @@ fn writeGroupedStatLines(writer: *Writer, first_out: *bool, lines: []const StatL
 
         const parent = lines[i].parent;
         var end = i + 1;
-        var insertions: u64 = lines[i].insertions;
-        var deletions: u64 = lines[i].deletions;
+        var insertions: usize = lines[i].insertions;
+        var deletions: usize = lines[i].deletions;
         while (end < lines.len and !lines[end].keep_raw and std.mem.eql(u8, lines[end].parent, parent)) : (end += 1) {
             insertions += lines[end].insertions;
             deletions += lines[end].deletions;
@@ -326,8 +303,8 @@ fn writeCollapsedStatGroup(
     first_out: *bool,
     parent: []const u8,
     count: usize,
-    insertions: u64,
-    deletions: u64,
+    insertions: usize,
+    deletions: usize,
 ) !void {
     if (!first_out.*) try writer.writeByte('\n');
     try writer.writeAll("  ");
@@ -338,11 +315,11 @@ fn writeCollapsedStatGroup(
         if (!std.mem.endsWith(u8, parent, "/")) try writer.writeByte('/');
     }
     try writer.writeAll(" (");
-    try writer.print("{d}", .{count});
+    try ansi.writeDecimal(writer, count);
     try writer.writeAll(" files, +");
-    try writer.print("{d}", .{insertions});
+    try ansi.writeDecimal(writer, insertions);
     try writer.writeAll(" -");
-    try writer.print("{d}", .{deletions});
+    try ansi.writeDecimal(writer, deletions);
     try writer.writeByte(')');
     first_out.* = false;
 }
@@ -386,21 +363,18 @@ fn parseStatLine(line: []const u8) ?StatLine {
     if (std.mem.startsWith(u8, after, "Bin ")) {
         return .{
             .raw = line,
-            .path = path,
             .parent = parentDir(path),
             .keep_raw = true,
         };
     }
 
     if (!std.ascii.isDigit(after[0])) return null;
-    const changed = parseLeadingU64(after) orelse return null;
+    if (parseLeadingUsize(after) == null) return null;
 
     const keep_raw = hasRenameSyntax(path);
     return .{
         .raw = line,
-        .path = path,
         .parent = parentDir(path),
-        .changed = changed,
         .insertions = countByte(after, '+'),
         .deletions = countByte(after, '-'),
         .keep_raw = keep_raw,
@@ -424,8 +398,8 @@ fn parentDir(path: []const u8) []const u8 {
     return ".";
 }
 
-fn parseLeadingU64(s: []const u8) ?u64 {
-    var value: u64 = 0;
+fn parseLeadingUsize(s: []const u8) ?usize {
+    var value: usize = 0;
     var i: usize = 0;
     while (i < s.len and std.ascii.isDigit(s[i])) : (i += 1) {
         value = value * 10 + (s[i] - '0');
@@ -433,8 +407,8 @@ fn parseLeadingU64(s: []const u8) ?u64 {
     return if (i == 0) null else value;
 }
 
-fn countByte(s: []const u8, needle: u8) u64 {
-    var count: u64 = 0;
+fn countByte(s: []const u8, needle: u8) usize {
+    var count: usize = 0;
     for (s) |c| {
         if (c == needle) count += 1;
     }
