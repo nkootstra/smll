@@ -9,6 +9,30 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-06-07
+
+### Added
+
+- Directory-aware readable compaction for `git log --stat` and
+  `git show --stat`, preserving commit identity, subjects, trailers, file
+  paths, and summary lines while trimming noisy stat details.
+- ASCII `tree` output detection and summarization, with integration
+  fixtures and benchmark coverage for larger tree outputs.
+- Plain `find` output grouping for repeated directory-heavy listings.
+
+### Changed
+
+- Wrapper routing now recognizes the new readable `git` stat and `tree`
+  compaction paths.
+- Release binary size guidance and CI size cap now reflect the expanded
+  compaction coverage.
+
+### Fixed
+
+- Help output remains under the release size cap.
+- `git` stat ordering and plain `find` grouping now produce stable sorted
+  summaries.
+
 ## [1.5.1] — 2026-06-06
 
 ### Added
@@ -284,7 +308,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/nkootstra/smll/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/nkootstra/smll/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/nkootstra/smll/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/nkootstra/smll/compare/v1.3.1...v1.4.0
