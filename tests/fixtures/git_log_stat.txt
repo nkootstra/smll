@@ -1,0 +1,38 @@
+commit abcdef0123456789abcdef0123456789abcdef01
+Author: Alice Anderson <alice@example.com>
+Date:   Sat Apr 18 09:31:49 2026 +0200
+
+    round 8 updates
+
+    Cache parse trees for repeated queries and make warm runs faster.
+    Refs: SMLL-42
+    Fixes: #123
+
+ docs/guides/release_08.md      |  2 ++
+ src/core/file_025.txt          |  5 +++++
+ src/core/file_027.txt          |  5 +++++
+ src/core/file_029.txt          |  5 +++++
+ src/core/file_031.txt          |  5 +++++
+ src/core/file_033.txt          |  5 +++++
+ src/core/file_035.txt          |  5 +++++
+ src/ui/file_024.txt            |  5 +++++
+ src/ui/file_026.txt            |  5 +++++
+ src/ui/file_028.txt            |  5 +++++
+ src/ui/file_030.txt            |  5 +++++
+ src/ui/file_032.txt            |  5 +++++
+ src/ui/file_034.txt            |  5 +++++
+ src/{old_name.zig => name.zig} | 10 +++++-----
+ 14 files changed, 67 insertions(+), 5 deletions(-)
+
+commit b2c3d4e5f678901234567890abcdef123456789a
+Author: Bob Builder <bob@example.com>
+Date:   Sun Apr 19 10:12:00 2026 +0200
+
+    fix: keep count summaries
+
+    Drop surrounding prose but keep the summary counters visible.
+    BREAKING CHANGE: count lines stay visible
+
+ src/filters/git_log.zig | 18 ++++++++++++------
+ src/wrapper_git.zig     |  9 +++++----
+ 2 files changed, 17 insertions(+), 10 deletions(-)

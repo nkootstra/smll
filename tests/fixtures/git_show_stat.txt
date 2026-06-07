@@ -1,0 +1,19 @@
+commit c3d4e5f678901234567890abcdef123456789abc
+Author: Casey Chen <casey@example.com>
+Date:   Mon Apr 20 14:00:00 2026 +0200
+
+    fix: preserve failed test evidence
+
+    Keep the files and changed-line counts because agents need them.
+    Refs: SMLL-77
+
+ src/filters/cargo_test.zig             | 18 ++++++++++++------
+ tests/fixtures/cargo_fail_01.txt       |  6 ++++++
+ tests/fixtures/cargo_fail_02.txt       |  6 ++++++
+ tests/fixtures/cargo_fail_03.txt       |  6 ++++++
+ tests/fixtures/cargo_fail_04.txt       |  6 ++++++
+ tests/fixtures/cargo_fail_05.txt       |  6 ++++++
+ tests/fixtures/cargo_fail_06.txt       |  6 ++++++
+ tests/fixtures/cargo_test_failing.txt  | 12 ++++++++++++
+ tests/{old_fail.txt => new_fail.txt}   |  4 ++--
+ 9 files changed, 56 insertions(+), 8 deletions(-)

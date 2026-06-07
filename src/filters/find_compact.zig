@@ -61,6 +61,11 @@ const Entry = struct {
     is_dir: bool,
 };
 
+const PlainEntry = struct {
+    path: []const u8,
+    parent: []const u8,
+};
+
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = stderr;
     if (stdout.len == 0) return;
@@ -128,6 +133,98 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         i = j;
     }
     if (!first) try writer.writeByte('\n');
+}
+
+pub fn matchesPlain(input: []const u8) bool {
+    if (input.len == 0) return false;
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    var saw_any = false;
+    while (lines.next()) |raw| {
+        const line = std.mem.trimEnd(u8, raw, "\r");
+        if (line.len == 0) continue;
+        if (std.mem.indexOfScalar(u8, line, 0) != null) return false;
+        if (line[0] == ' ' or line[0] == '\t') return false;
+        saw_any = true;
+    }
+    return saw_any;
+}
+
+pub fn applyPlainEntries(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    return applyPlain(allocator, stdout, stderr, writer, "entries");
+}
+
+pub fn applyPlainFiles(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    return applyPlain(allocator, stdout, stderr, writer, "files");
+}
+
+fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer, noun: []const u8) !void {
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var entries: std.ArrayList(PlainEntry) = .empty;
+    defer entries.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    while (lines.next()) |raw| {
+        const path = std.mem.trimEnd(u8, raw, "\r");
+        if (path.len == 0) continue;
+        if (std.mem.indexOfScalar(u8, path, 0) != null) continue;
+        try entries.append(allocator, .{
+            .path = path,
+            .parent = parentDir(path),
+        });
+    }
+
+    if (entries.items.len == 0) return;
+
+    std.sort.pdq(PlainEntry, entries.items, {}, struct {
+        fn lessThan(_: void, a: PlainEntry, b: PlainEntry) bool {
+            const cmp = std.mem.order(u8, a.parent, b.parent);
+            if (cmp != .eq) return cmp == .lt;
+            return std.mem.order(u8, a.path, b.path) == .lt;
+        }
+    }.lessThan);
+
+    var first = true;
+    var i: usize = 0;
+    while (i < entries.items.len) {
+        const parent = entries.items[i].parent;
+        var j = i + 1;
+        while (j < entries.items.len and std.mem.eql(u8, entries.items[j].parent, parent)) : (j += 1) {}
+        const count = j - i;
+        if (count >= 4) {
+            if (!first) try writer.writeByte('\n');
+            first = false;
+            try writeParentLabel(writer, parent);
+            try writer.writeAll(" (");
+            try ansi.writeDecimal(writer, count);
+            try writer.writeByte(' ');
+            try writer.writeAll(noun);
+            try writer.writeAll(": ");
+            for (entries.items[i .. i + 3], 0..) |entry, idx| {
+                if (idx > 0) try writer.writeAll(", ");
+                try writer.writeAll(entry.path);
+            }
+            try writer.writeByte(')');
+        } else {
+            for (entries.items[i..j]) |entry| {
+                if (!first) try writer.writeByte('\n');
+                first = false;
+                try writer.writeAll(entry.path);
+            }
+        }
+        i = j;
+    }
+    if (!first) try writer.writeByte('\n');
+}
+
+fn writeParentLabel(writer: *Writer, parent: []const u8) !void {
+    if (std.mem.eql(u8, parent, ".")) {
+        try writer.writeAll("./");
+        return;
+    }
+    try writer.writeAll(parent);
+    if (!std.mem.endsWith(u8, parent, "/")) try writer.writeByte('/');
 }
 
 /// Parent directory of a path. "./src/main.zig" → "./src",
@@ -263,6 +360,33 @@ test "apply: small fixture reduces output and keeps paths" {
     try std.testing.expect(std.mem.find(u8, got, "./src/filter.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "./ (3 entries: ./README.md, ./src/, ./tests/)") != null);
     try std.testing.expect(std.mem.find(u8, got, "user") == null);
+}
+
+test "applyPlainEntries: groups parent directories and preserves small groups" {
+    const fixture = @embedFile("fixture_find_plain_many");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyPlainEntries(std.testing.allocator, fixture, &.{}, &out.writer);
+    const got = out.written();
+
+    try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 entries: src/core/analyzer.zig, src/core/cache.zig, src/core/config.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/filters/ (12 entries: src/filters/build_output.zig, src/filters/cargo_test.zig, src/filters/find_compact.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (12 entries: tests/fixtures/build_output.txt, tests/fixtures/cargo_test_failing.txt, tests/fixtures/find_plain_many.txt)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "README.md\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "build.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "docs/audit.md\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "entries:") != null);
+    try std.testing.expect(got.len < fixture.len);
+}
+
+test "applyPlainFiles: -type f uses files noun" {
+    const fixture = @embedFile("fixture_find_plain_many");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyPlainFiles(std.testing.allocator, fixture, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 files:") != null);
+    try std.testing.expect(std.mem.find(u8, got, "entries:") == null);
 }
 
 test "apply: large same-parent fixture collapses (≥95% reduction)" {

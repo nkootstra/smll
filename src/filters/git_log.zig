@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const ansi = @import("ansi");
 const util = @import("util");
 
 // v0.5 grammar for `git log`:
@@ -134,6 +135,58 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
     if (!first_out) try writer.writeByte('\n');
 }
 
+/// Compact `git log --stat` / `--shortstat` while keeping the reviewable facts:
+/// short commit id, subject, important trailers, representative file/path
+/// signal, and the final changed-files summary.
+pub fn applyStatCompact(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    var current: StatCommit = .{};
+    defer current.deinit(allocator);
+    var first_out = true;
+
+    while (lines.next()) |line| {
+        if (isCommitLine(line)) {
+            try flushStatCommit(writer, &current, &first_out);
+            current.deinit(allocator);
+            current = .{};
+            current.header.sha7 = util.sha7(line["commit ".len..][0..40]);
+            current.header.has_sha = true;
+            continue;
+        }
+
+        if (!current.header.has_sha) continue;
+
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) continue;
+
+        if (std.mem.startsWith(u8, line, "    ")) {
+            const body_line = std.mem.trim(u8, line[4..], " \t\r");
+            if (body_line.len == 0) continue;
+            if (current.header.subject_len == 0) {
+                current.header.copySubject(body_line);
+            } else if (isImportantCompactBodyLine(body_line)) {
+                current.header.appendImportant(body_line);
+            }
+            continue;
+        }
+
+        if (isStatSummaryLine(trimmed)) {
+            current.summary = trimmed;
+            continue;
+        }
+
+        if (parseStatLine(trimmed)) |stat_line| {
+            try current.stat_lines.append(allocator, stat_line);
+        }
+    }
+
+    try flushStatCommit(writer, &current, &first_out);
+    if (!first_out) try writer.writeByte('\n');
+}
+
 const CompactCommit = struct {
     has_sha: bool = false,
     sha7: [7]u8 = undefined,
@@ -160,6 +213,49 @@ const CompactCommit = struct {
     }
 };
 
+const StatLine = struct {
+    raw: []const u8,
+    parent: []const u8,
+    insertions: usize = 0,
+    deletions: usize = 0,
+    keep_raw: bool = false,
+};
+
+const StatCommit = struct {
+    header: CompactCommit = .{},
+    stat_lines: std.ArrayList(StatLine) = .empty,
+    summary: ?[]const u8 = null,
+
+    fn deinit(self: *StatCommit, allocator: Allocator) void {
+        self.stat_lines.deinit(allocator);
+    }
+};
+
+fn flushStatCommit(writer: *Writer, commit: *const StatCommit, first_out: *bool) !void {
+    if (!commit.header.has_sha or commit.header.subject_len == 0) return;
+
+    if (!first_out.*) try writer.writeByte('\n');
+    try writer.writeAll(&commit.header.sha7);
+    try writer.writeByte(' ');
+    try writer.writeAll(commit.header.subject[0..commit.header.subject_len]);
+    if (commit.header.important_len > 0) {
+        try writer.writeAll(" [");
+        try writer.writeAll(commit.header.important[0..commit.header.important_len]);
+        try writer.writeByte(']');
+    }
+    first_out.* = false;
+
+    if (commit.stat_lines.items.len <= 5) {
+        for (commit.stat_lines.items) |line| try writeIndentedStatLine(writer, first_out, line.raw);
+    } else {
+        try writeGroupedStatLines(writer, first_out, commit.stat_lines.items);
+    }
+
+    if (commit.summary) |summary| {
+        try writeIndentedStatLine(writer, first_out, summary);
+    }
+}
+
 fn flushCompactCommit(writer: *Writer, commit: *const CompactCommit, first_out: *bool) !void {
     if (!commit.has_sha or commit.subject_len == 0) return;
     if (!first_out.*) try writer.writeByte('\n');
@@ -171,6 +267,67 @@ fn flushCompactCommit(writer: *Writer, commit: *const CompactCommit, first_out: 
         try writer.writeAll(commit.important[0..commit.important_len]);
         try writer.writeByte(']');
     }
+    first_out.* = false;
+}
+
+fn writeGroupedStatLines(writer: *Writer, first_out: *bool, lines: []const StatLine) !void {
+    var i: usize = 0;
+    while (i < lines.len) {
+        if (lines[i].keep_raw) {
+            try writeIndentedStatLine(writer, first_out, lines[i].raw);
+            i += 1;
+            continue;
+        }
+
+        const parent = lines[i].parent;
+        var end = i + 1;
+        var insertions: usize = lines[i].insertions;
+        var deletions: usize = lines[i].deletions;
+        while (end < lines.len and !lines[end].keep_raw and std.mem.eql(u8, lines[end].parent, parent)) : (end += 1) {
+            insertions += lines[end].insertions;
+            deletions += lines[end].deletions;
+        }
+
+        const count = end - i;
+        if (count >= 3) {
+            try writeCollapsedStatGroup(writer, first_out, parent, count, insertions, deletions);
+        } else {
+            for (lines[i..end]) |line| try writeIndentedStatLine(writer, first_out, line.raw);
+        }
+        i = end;
+    }
+}
+
+fn writeCollapsedStatGroup(
+    writer: *Writer,
+    first_out: *bool,
+    parent: []const u8,
+    count: usize,
+    insertions: usize,
+    deletions: usize,
+) !void {
+    if (!first_out.*) try writer.writeByte('\n');
+    try writer.writeAll("  ");
+    if (std.mem.eql(u8, parent, ".")) {
+        try writer.writeAll("./");
+    } else {
+        try writer.writeAll(parent);
+        if (!std.mem.endsWith(u8, parent, "/")) try writer.writeByte('/');
+    }
+    try writer.writeAll(" (");
+    try ansi.writeDecimal(writer, count);
+    try writer.writeAll(" files, +");
+    try ansi.writeDecimal(writer, insertions);
+    try writer.writeAll(" -");
+    try ansi.writeDecimal(writer, deletions);
+    try writer.writeByte(')');
+    first_out.* = false;
+}
+
+fn writeIndentedStatLine(writer: *Writer, first_out: *bool, line: []const u8) !void {
+    if (!first_out.*) try writer.writeByte('\n');
+    try writer.writeAll("  ");
+    try writer.writeAll(line);
     first_out.* = false;
 }
 
@@ -191,6 +348,76 @@ fn isImportantCompactBodyLine(line: []const u8) bool {
         if (std.mem.startsWith(u8, line, prefix)) return true;
     }
     return false;
+}
+
+fn isPerFileStatLine(line: []const u8) bool {
+    return parseStatLine(line) != null;
+}
+
+fn parseStatLine(line: []const u8) ?StatLine {
+    const pipe = std.mem.indexOfScalar(u8, line, '|') orelse return null;
+    const path = std.mem.trim(u8, line[0..pipe], " \t");
+    const after = std.mem.trim(u8, line[pipe + 1 ..], " \t");
+    if (path.len == 0 or after.len == 0) return null;
+
+    if (std.mem.startsWith(u8, after, "Bin ")) {
+        return .{
+            .raw = line,
+            .parent = parentDir(path),
+            .keep_raw = true,
+        };
+    }
+
+    if (!std.ascii.isDigit(after[0])) return null;
+    if (parseLeadingUsize(after) == null) return null;
+
+    const keep_raw = hasRenameSyntax(path);
+    return .{
+        .raw = line,
+        .parent = parentDir(path),
+        .insertions = countByte(after, '+'),
+        .deletions = countByte(after, '-'),
+        .keep_raw = keep_raw,
+    };
+}
+
+fn hasRenameSyntax(path: []const u8) bool {
+    return std.mem.indexOf(u8, path, "=>") != null or
+        (std.mem.indexOfScalar(u8, path, '{') != null and std.mem.indexOfScalar(u8, path, '}') != null);
+}
+
+fn parentDir(path: []const u8) []const u8 {
+    var i = path.len;
+    while (i > 0) {
+        i -= 1;
+        if (path[i] == '/') {
+            if (i == 0) return ".";
+            return path[0..i];
+        }
+    }
+    return ".";
+}
+
+fn parseLeadingUsize(s: []const u8) ?usize {
+    var value: usize = 0;
+    var i: usize = 0;
+    while (i < s.len and std.ascii.isDigit(s[i])) : (i += 1) {
+        value = value * 10 + (s[i] - '0');
+    }
+    return if (i == 0) null else value;
+}
+
+fn countByte(s: []const u8, needle: u8) usize {
+    var count: usize = 0;
+    for (s) |c| {
+        if (c == needle) count += 1;
+    }
+    return count;
+}
+
+fn isStatSummaryLine(line: []const u8) bool {
+    return std.mem.find(u8, line, " file changed") != null or
+        std.mem.find(u8, line, " files changed") != null;
 }
 
 fn applyInner(input: []const u8, writer: *Writer) !void {
@@ -438,6 +665,7 @@ fn isCommitLine(line: []const u8) bool {
 
 const linear_fixture = @embedFile("fixture_git_log_linear");
 const merge_fixture = @embedFile("fixture_git_log_merge");
+const stat_fixture = @embedFile("fixture_git_log_stat");
 
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
@@ -602,6 +830,63 @@ test "applyCompact: preserves important commit trailers inline" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "abcdef0 feat: group status output [Refs: BENCH-42; Fixes: #123]\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "release note") == null);
+}
+
+test "applyStatCompact: keeps stat facts and drops scaffolding" {
+    const allocator = std.testing.allocator;
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyStatCompact(allocator, stat_fixture, &.{}, &out.writer);
+    const got = out.written();
+
+    try std.testing.expect(std.mem.find(u8, got, "abcdef0 round 8 updates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "b2c3d4e fix: keep count summaries") != null);
+    try std.testing.expect(std.mem.find(u8, got, "docs/guides/release_08.md") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/core/ (6 files, +30 -0)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/ui/ (6 files, +30 -0)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/{old_name.zig => name.zig}") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/filters/git_log.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/wrapper_git.zig") != null);
+    try std.testing.expect(std.mem.find(u8, got, "14 files changed") != null);
+    try std.testing.expect(std.mem.find(u8, got, "2 files changed") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Refs: SMLL-42") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Fixes: #123") != null);
+    try std.testing.expect(std.mem.find(u8, got, "BREAKING CHANGE: count lines stay visible") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Author:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Date:") == null);
+    try std.testing.expect(std.mem.find(u8, got, "abcdef0123456789abcdef0123456789abcdef01") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Cache parse trees") == null);
+}
+
+test "applyStatCompact: stat fixture is ≤ 45% of raw" {
+    const allocator = std.testing.allocator;
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyStatCompact(allocator, stat_fixture, &.{}, &out.writer);
+    try std.testing.expect(out.written().len <= (stat_fixture.len * 45) / 100);
+}
+
+test "applyStatCompact: important trailers that mention files changed are not mistaken for stat summaries" {
+    const allocator = std.testing.allocator;
+    const input =
+        "commit abcdef0123456789abcdef0123456789abcdef01\n" ++
+        "Author: Alice <a@example.com>\n" ++
+        "Date:   Sat Apr 18 09:00:00 2026 +0000\n" ++
+        "\n" ++
+        "    fix: keep trailer text\n" ++
+        "\n" ++
+        "    Refs: fix 1 file changed in wrong place\n" ++
+        "\n" ++
+        " src/main.zig | 2 ++\n" ++
+        " 1 file changed, 2 insertions(+)\n";
+
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyStatCompact(allocator, input, &.{}, &out.writer);
+    const got = out.written();
+
+    try std.testing.expect(std.mem.find(u8, got, "abcdef0 fix: keep trailer text [Refs: fix 1 file changed in wrong place]") != null);
+    try std.testing.expect(std.mem.find(u8, got, "  1 file changed, 2 insertions(+)") != null);
 }
 
 test "pipe-mode idempotence: v0.4 log output piped again is unchanged" {

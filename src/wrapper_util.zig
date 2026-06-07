@@ -44,14 +44,6 @@ pub fn hasFormatOrPrettyArg(argv: []const []const u8) bool {
     return false;
 }
 
-pub fn hasStatOrNameFlags(argv: []const []const u8) bool {
-    return hasArg(argv, "--stat") or
-        hasArg(argv, "--shortstat") or
-        hasArg(argv, "--name-only") or
-        hasArg(argv, "--name-status") or
-        hasArg(argv, "--compact-summary");
-}
-
 fn hasBinaryMagic(input: []const u8) bool {
     return std.mem.startsWith(u8, input, "\x89PNG\r\n\x1a\n") or
         std.mem.startsWith(u8, input, "\xff\xd8\xff") or

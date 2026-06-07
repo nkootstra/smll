@@ -25,7 +25,6 @@ const applyFilter = wrapper_io.applyFilter;
 const passthrough = wrapper_io.passthrough;
 const hasArg = wrapper_util.hasArg;
 const hasFormatOrPrettyArg = wrapper_util.hasFormatOrPrettyArg;
-const hasStatOrNameFlags = wrapper_util.hasStatOrNameFlags;
 
 // All 15 R4 git subcommands.  Phase 2 fills in the remaining 11; for now
 // only the 4 v0.3 filters (status, diff, log, show) are wired — the other
@@ -79,7 +78,10 @@ pub fn dispatch(
     // argv[1] is the git subcommand (e.g. "status", "diff").
     const subcmd_str = arg1;
     const git_argv = argv[1..];
-    const has_stat_or_name_flags = hasStatOrNameFlags(git_argv);
+    const has_stat = hasArg(git_argv, "--stat") or hasArg(git_argv, "--shortstat");
+    const has_name_only = hasArg(git_argv, "--name-only");
+    const has_name_status = hasArg(git_argv, "--name-status");
+    const has_compact_summary = hasArg(git_argv, "--compact-summary");
     if (std.meta.stringToEnum(KnownSubcommand, subcmd_str)) |subcmd| switch (subcmd) {
         .status => {
             // --porcelain / -z are machine-readable contracts consumed by
@@ -100,7 +102,10 @@ pub fn dispatch(
             // with a leading space (treated as context and dropped) or a
             // summary line. Passthrough these modes rather than corrupting them.
             const diff_summary_mode =
-                has_stat_or_name_flags or
+                has_stat or
+                has_name_only or
+                has_name_status or
+                has_compact_summary or
                 hasArg(git_argv, "--summary") or
                 hasArg(git_argv, "--patch-with-stat"); // stat lines start with space, dropped by filter
             if (diff_summary_mode) {
@@ -112,11 +117,13 @@ pub fn dispatch(
         .log => {
             // v0.6: compact is default; SMLL_LOSSLESS=1 opts out to the
             // fuller bespoke formatter (keeps commit bodies).
-            // --oneline / --stat / --name-only / --format= / --pretty= use custom
-            // output shapes that the filter does not understand. Passthrough raw.
+            // --oneline / --name-only / --format= / --pretty= use custom output
+            // shapes that the default log filter does not understand.
             const log_custom_format =
                 hasArg(git_argv, "--oneline") or
-                has_stat_or_name_flags or
+                has_name_only or
+                has_name_status or
+                has_compact_summary or
                 hasArg(git_argv, "--no-walk") or
                 hasArg(git_argv, "--abbrev-commit") or // shortened SHA breaks isCommitLine
                 hasArg(git_argv, "-p") or
@@ -126,16 +133,19 @@ pub fn dispatch(
             const log_custom_format2 = hasFormatOrPrettyArg(git_argv);
             if (log_custom_format or log_custom_format2) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            } else if (has_stat) {
+                if (!applyFilter(git_log.applyStatCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             } else {
                 if (!applyFilter(git_log.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             }
         },
         .show => {
-            // --stat / --name-only / --name-status produce summary-format output
-            // whose file-stat lines all start with a space and would be silently
-            // dropped by the diff section of git_show.apply. Passthrough raw.
+            // --name-only / --name-status / --raw / blob specs use output shapes
+            // that are intentionally passed through until dedicated tests exist.
             const show_summary_mode =
-                has_stat_or_name_flags or
+                has_name_only or
+                has_name_status or
+                has_compact_summary or
                 hasArg(git_argv, "--no-patch") or
                 hasArg(git_argv, "--raw") or // object-hash format instead of diff
                 hasArg(git_argv, "-s");
@@ -152,6 +162,8 @@ pub fn dispatch(
             };
             if (show_summary_mode or show_custom_format or show_blob) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            } else if (has_stat) {
+                if (!applyFilter(git_show.applyStatCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             } else {
                 if (!applyFilter(git_show.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             }
