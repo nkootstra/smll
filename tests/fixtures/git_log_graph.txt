@@ -1,0 +1,43 @@
+* commit 8c8d4a765fe676742523f53fb5b9c6e1ef40d35d
+| Author: Niels Kootstra <545768+nkootstra@users.noreply.github.com>
+| Date:   Sun Jun 7 19:28:46 2026 +0200
+| 
+|     chore: release v1.6.0 (#40)
+| 
+* commit dbd4d3e80038de394fc3a8911ea4770b13120b04
+| Author: Niels Kootstra <545768+nkootstra@users.noreply.github.com>
+| Date:   Sun Jun 7 19:13:35 2026 +0200
+| 
+|     Improve readable compaction for git stat and tree (#39)
+|     
+|     * Improve readable compaction for git stat and tree
+|     
+|     * Raise release cap and document larger binary size
+|     
+|     * Fix git stat ordering and plain find sort
+| 
+* commit 8fa70442ee7114700660fb06b20dd60978504f93
+| Author: Niels Kootstra <545768+nkootstra@users.noreply.github.com>
+| Date:   Sat Jun 6 22:58:58 2026 +0200
+| 
+|     fix: keep help under release size cap
+| 
+* commit f629f6942f37650419e297e78cea0b9909168405
+| Author: Niels Kootstra <545768+nkootstra@users.noreply.github.com>
+| Date:   Sat Jun 6 22:36:47 2026 +0200
+| 
+|     fix: keep help under release size cap
+| 
+* commit eea9f80b87bdbe1d0b54624fa8db75e38233cd4c
+| Author: Niels Kootstra <545768+nkootstra@users.noreply.github.com>
+| Date:   Sat Jun 6 22:30:25 2026 +0200
+| 
+|     chore: release v1.5.1
+| 
+* commit 40b9edf14056323352e77374b158c90c318debbe
+| Author: Niels Kootstra <545768+nkootstra@users.noreply.github.com>
+| Date:   Sat Jun 6 21:40:05 2026 +0200
+| 
+|     chore: release v1.5.0
+|     
+|     Prepare smll v1.5.0 release metadata.
