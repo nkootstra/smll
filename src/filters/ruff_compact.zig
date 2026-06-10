@@ -32,6 +32,8 @@ fn scan(allocator: Allocator, input: []const u8, writer: *Writer, strip_buf: *st
 
 fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "All checks passed")) return true;
+    // Summary counts, e.g. "Found 3 errors." / "Found 1 error." (mirrors mypy).
+    if (std.mem.startsWith(u8, line, "Found ")) return true;
     if (std.mem.endsWith(u8, line, "would be reformatted") or std.mem.endsWith(u8, line, "left unchanged")) return true;
     if (std.mem.indexOf(u8, line, " files would be reformatted") != null) return true;
     if (std.mem.indexOf(u8, line, " files left unchanged") != null) return true;
@@ -51,12 +53,12 @@ fn looksLikeDiagnostic(line: []const u8) bool {
     return p > d2 and p < line.len and line[p] == ':';
 }
 
-test "ruff check diagnostics are preserved" {
+test "ruff check diagnostics and Found summary are preserved" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     const input = "src/a.py:1:8: F401 `os` imported but unused\nFound 1 error.\n";
     try apply(std.testing.allocator, input, "", &out.writer);
-    try std.testing.expectEqualStrings("src/a.py:1:8: F401 `os` imported but unused\n", out.written());
+    try std.testing.expectEqualStrings("src/a.py:1:8: F401 `os` imported but unused\nFound 1 error.\n", out.written());
 }
 
 test "ruff no issues summary is preserved" {

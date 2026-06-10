@@ -37,6 +37,10 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.indexOf(u8, trimmed, " error CS") != null or std.mem.indexOf(u8, trimmed, " warning CS") != null) return true;
     if (containsIgnoreCase(trimmed, "build failed")) return true;
     if (containsIgnoreCase(trimmed, "build succeeded")) return true;
+    // Build summary counts: "N Error(s)" / "N Warning(s)".
+    if (std.mem.endsWith(u8, trimmed, " Error(s)") or std.mem.endsWith(u8, trimmed, " Warning(s)")) return true;
+    // `dotnet restore` per-project confirmations: "Restored <proj> (in ...)".
+    if (std.mem.startsWith(u8, trimmed, "Restored ")) return true;
     if (containsIgnoreCase(trimmed, "restore failed")) return true;
     if (containsIgnoreCase(trimmed, "restore succeeded")) return true;
     if (containsIgnoreCase(trimmed, "test run failed")) return true;
@@ -76,6 +80,20 @@ test "build errors and summary are preserved" {
     try apply(std.testing.allocator, input, "", &out.writer);
     try std.testing.expect(std.mem.find(u8, out.written(), "error CS1002") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "Build FAILED") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "1 Error(s)") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "0 Warning(s)") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Determining projects") == null);
+}
+
+test "dotnet restore Restored lines are preserved" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    const input =
+        "  Determining projects to restore...\n" ++
+        "  Restored /tmp/app.csproj (in 1.2 sec).\n" ++
+        "Restore succeeded.\n";
+    try apply(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Restored /tmp/app.csproj") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "Determining projects") == null);
 }
 
