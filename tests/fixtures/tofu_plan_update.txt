@@ -1,0 +1,31 @@
+terraform_data.web: Refreshing state... [id=4f4129d5-fdf1-fa3d-a77a-feed5840774b]
+null_resource.db: Refreshing state... [id=4903565372425979214]
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  ~ update in-place (current -> planned)
+-/+ destroy and then create replacement
+
+OpenTofu will perform the following actions:
+
+  # null_resource.db must be replaced
+-/+ resource "null_resource" "db" {
+      ~ id       = "4903565372425979214" -> (known after apply)
+      ~ triggers = { # forces replacement
+          ~ "version" = "1" -> "2"
+        }
+    }
+
+  # terraform_data.web will be updated in-place
+  ~ resource "terraform_data" "web" {
+        id     = "4f4129d5-fdf1-fa3d-a77a-feed5840774b"
+      ~ input  = "small" -> "large"
+      ~ output = "small" -> (known after apply)
+    }
+
+Plan: 1 to add, 1 to change, 1 to destroy.
+
+─────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so OpenTofu can't
+guarantee to take exactly these actions if you run "tofu apply" now.
