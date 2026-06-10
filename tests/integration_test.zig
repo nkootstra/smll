@@ -1096,7 +1096,7 @@ test "diff simple fixture: v0.4 format — d sigil, @ sigil, no diff --git" {
     var result = try runSmll(allocator, diff_simple_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.find(u8, result.stdout, "d simple.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@1\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@1|1,3\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "+line two") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "diff --git") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "index ") == null);
@@ -1107,7 +1107,7 @@ test "diff rename+modify fixture: v0.4 format — d rename sigil, @ sigil" {
     var result = try runSmll(allocator, diff_rename_modify_fixture);
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.find(u8, result.stdout, "d old.txt -> new.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@1\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@1,3|1,4\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "rename from") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "similarity index") == null);
 }
@@ -1147,7 +1147,7 @@ test "show simple fixture: compact header + d sigil, no diff --git or Author/Dat
     defer result.deinit(allocator);
     try std.testing.expect(std.mem.find(u8, result.stdout, "95cbeda feat: add a.txt with one line\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "d a.txt\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "@0\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "@0,0|1\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "+line1") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "diff --git") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Author:") == null);

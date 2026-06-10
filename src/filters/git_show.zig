@@ -169,7 +169,8 @@ test "apply: emits @ hunk sigil on simple show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@0\n") != null);
+    // `@@ -0,0 +1 @@` → `@0,0|1`: the new-file range survives the rewrite.
+    try std.testing.expect(std.mem.find(u8, out, "@0,0|1\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "+line1") != null);
 }
 
@@ -189,7 +190,8 @@ test "apply: emits @ hunk and + lines on body show" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, body_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@1\n") != null);
+    // `@@ -1 +1,2 @@` → `@1|1,2`: the new-file range survives the rewrite.
+    try std.testing.expect(std.mem.find(u8, out, "@1|1,2\n") != null);
     // Context lines dropped; only + lines preserved
     try std.testing.expect(std.mem.find(u8, out, "+line2") != null);
 }
