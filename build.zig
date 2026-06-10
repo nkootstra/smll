@@ -145,7 +145,10 @@ const modules = [_]ModuleEntry{
     .{ .name = "mypy_compact", .needs_ansi = true },
     .{ .name = "ruff_compact", .needs_ansi = true },
     .{ .name = "pip_compact", .needs_ansi = true },
-    .{ .name = "prettier_compact" },
+    .{ .name = "prettier_compact", .needs_ansi = true, .fixtures = &.{
+        .{ .name = "fixture_prettier_write", .path = "tests/fixtures/prettier_write.txt" },
+        .{ .name = "fixture_prettier_check_color", .path = "tests/fixtures/prettier_check_color.txt" },
+    } },
     .{ .name = "dotnet_compact", .needs_ansi = true },
     .{ .name = "gradle_compact", .needs_ansi = true },
     .{ .name = "maven_compact", .needs_ansi = true },
