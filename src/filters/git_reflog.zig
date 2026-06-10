@@ -2,18 +2,16 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// `git reflog` default format:
+// `git reflog` / `git reflog <ref>` / `git reflog show stash` format:
 //
-//   <sha7> HEAD@{N}: <op>: <subject>
+//   <sha7> <ref>@{N}: <op>: <subject>     (<ref> = HEAD, stash, branch…)
 //
 // Compaction:
-//   • Drop the `HEAD@{` and `}` scaffolding around N; keep `@N` so the
-//     identifier remains actionable (`git reset @5` is not valid, but
-//     the agent can reconstruct `HEAD@{5}` from `@5`). Saves ~7 bytes
-//     per line on typical reflog entries.
-//   • SHA-prefix RLE: consecutive entries with the same SHA omit the SHA
-//     on subsequent lines (replaced by an equivalent leading 7-space
-//     gutter so column alignment is preserved). Triggers on runs of 2+.
+//   • Drop the `@{` and `}` scaffolding around N. For the implicit HEAD ref
+//     keep just `@N`; for any other ref keep `ref@N` (e.g. `stash@0`,
+//     `main@2`) so the identifier remains reconstructible.
+//   • SHA-prefix RLE: consecutive entries with the same SHA replace the SHA
+//     on subsequent lines with a single `~` sigil. Triggers on runs of 2+.
 //   • Unknown line shapes pass through verbatim.
 
 pub fn matches(input: []const u8) bool {
@@ -46,14 +44,20 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
         const same_sha = run_len > 0 and std.mem.eql(u8, &prev_sha, &parsed.sha);
         if (same_sha) {
-            // SHA-prefix RLE — 7-space gutter preserves column alignment.
-            try writer.writeAll("       ");
+            // SHA-prefix RLE — a single `~` sigil marks "same SHA as above".
+            try writer.writeByte('~');
         } else {
             try writer.writeAll(&parsed.sha);
             prev_sha = parsed.sha;
             run_len = 0;
         }
-        try writer.writeAll(" @");
+        try writer.writeByte(' ');
+        // HEAD is the implicit ref — drop it (`@N`). Any other ref (stash,
+        // branch name) is kept so the identifier stays reconstructible (`ref@N`).
+        if (!std.mem.eql(u8, parsed.ref, "HEAD")) {
+            try writer.writeAll(parsed.ref);
+        }
+        try writer.writeByte('@');
         try writer.writeAll(parsed.index);
         try writer.writeByte(' ');
         try writer.writeAll(parsed.rest);
@@ -64,19 +68,27 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
 const ParsedLine = struct {
     sha: [7]u8,
+    ref: []const u8,
     index: []const u8,
     rest: []const u8,
 };
 
 fn parseLine(line: []const u8) ?ParsedLine {
-    // Minimum shape: "1234567 HEAD@{0}: x"
-    if (line.len < 19) return null;
+    // Shape: "<sha7> <ref>@{N}: <rest>" where <ref> is HEAD, stash, or a
+    // branch name. Minimum is "1234567 X@{0}: y" (16 bytes).
+    if (line.len < 16) return null;
     if (!isHex(line[0]) or !isHex(line[1]) or !isHex(line[2]) or
         !isHex(line[3]) or !isHex(line[4]) or !isHex(line[5]) or
         !isHex(line[6])) return null;
     if (line[7] != ' ') return null;
-    if (!std.mem.startsWith(u8, line[8..], "HEAD@{")) return null;
-    const after_brace = line[14..];
+    const after_sha = line[8..];
+    // The ref is the token before "@{". Branch names cannot contain "@{"
+    // or whitespace, so this split is unambiguous across HEAD/stash/branch.
+    const at_brace = std.mem.indexOf(u8, after_sha, "@{") orelse return null;
+    if (at_brace == 0) return null; // empty ref
+    const ref = after_sha[0..at_brace];
+    if (std.mem.indexOfScalar(u8, ref, ' ') != null) return null;
+    const after_brace = after_sha[at_brace + "@{".len ..];
     const close = std.mem.indexOfScalar(u8, after_brace, '}') orelse return null;
     if (close == 0) return null;
     const index = after_brace[0..close];
@@ -86,13 +98,14 @@ fn parseLine(line: []const u8) ?ParsedLine {
     const rest = after_close[2..];
     return .{
         .sha = .{ line[0], line[1], line[2], line[3], line[4], line[5], line[6] },
+        .ref = ref,
         .index = index,
         .rest = rest,
     };
 }
 
 fn isHex(c: u8) bool {
-    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f');
+    return (c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F');
 }
 
 fn isReflogLine(line: []const u8) bool {
@@ -142,7 +155,7 @@ test "apply: consecutive same-sha entries collapse to a gutter" {
     defer allocator.free(out);
     try std.testing.expectEqualStrings(
         "1edb490 @4 checkout: a to b\n" ++
-            "        @5 pull --ff-only: Fast-forward\n",
+            "~ @5 pull --ff-only: Fast-forward\n",
         out,
     );
 }
@@ -157,6 +170,30 @@ test "apply: sha change breaks the run" {
     try std.testing.expectEqualStrings(
         "1edb490 @4 checkout: a\n" ++
             "78a9d9e @5 checkout: b\n",
+        out,
+    );
+}
+
+test "apply: stash reflog ref is preserved as stash@N" {
+    // Real `git reflog show stash` line.
+    const allocator = std.testing.allocator;
+    const input = "de9b67d stash@{0}: WIP on main: 05132ce second commit on main\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        "de9b67d stash@0 WIP on main: 05132ce second commit on main\n",
+        out,
+    );
+}
+
+test "apply: branch reflog ref is preserved as branch@N" {
+    // Real `git reflog main` line.
+    const allocator = std.testing.allocator;
+    const input = "05132ce main@{0}: commit: second commit on main\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings(
+        "05132ce main@0 commit: second commit on main\n",
         out,
     );
 }
