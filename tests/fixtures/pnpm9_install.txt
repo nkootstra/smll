@@ -1,0 +1,16 @@
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages: +16
+++++++++++++++++
+Progress: resolved 62, reused 16, downloaded 0, added 16, done
+
+dependencies:
++ react 18.2.0 (19.2.7 is available)
++ react-dom 18.2.0 (19.2.7 is available)
+
+devDependencies:
++ vite 5.0.0 (8.0.16 is available)
+
+The following dependencies have build scripts that were ignored: esbuild
+To allow the execution of build scripts for these packages, add their names to "pnpm.onlyBuiltDependencies" in your "package.json", then run "pnpm rebuild"
+
+Done in 838ms using pnpm v9.15.9

@@ -180,6 +180,7 @@ const modules = [_]ModuleEntry{
     .{ .name = "npm_install", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_npm_install", .path = "tests/fixtures/npm_install.txt" },
         .{ .name = "fixture_pnpm_install", .path = "tests/fixtures/pnpm_install.txt" },
+        .{ .name = "fixture_pnpm9_install", .path = "tests/fixtures/pnpm9_install.txt" },
         .{ .name = "fixture_bun_install", .path = "tests/fixtures/bun_install.txt" },
         .{ .name = "fixture_yarn_install", .path = "tests/fixtures/yarn_install.txt" },
         .{ .name = "fixture_composer_require", .path = "tests/fixtures/composer_require.txt" },

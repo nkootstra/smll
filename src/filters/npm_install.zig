@@ -352,14 +352,23 @@ fn scanPnpm(allocator: Allocator, input: []const u8, summary: *PnpmSummary) !voi
             continue;
         }
         if (std.mem.startsWith(u8, trimmed, "+ ")) {
+            const entry = pnpmDepEntry(trimmed[2..]);
             switch (section) {
-                .deps => try summary.deps.add(allocator, trimmed[2..]),
-                .dev_deps => try summary.dev_deps.add(allocator, trimmed[2..]),
+                .deps => try summary.deps.add(allocator, entry),
+                .dev_deps => try summary.dev_deps.add(allocator, entry),
                 .none => {},
             }
             continue;
         }
         section = .none;
+
+        // pnpm reports packages whose install/postinstall scripts were blocked.
+        // This is an actionable fact (native deps may be unbuilt until the agent
+        // runs `pnpm rebuild` / `pnpm approve-builds`), so keep the header line.
+        if (std.mem.startsWith(u8, trimmed, "The following dependencies have build scripts that were ignored")) {
+            try appendLine(allocator, &summary.head, trimmed);
+            continue;
+        }
 
         if (std.mem.find(u8, trimmed, "deprecated ") != null and
             std.mem.startsWith(u8, trimmed, "WARN"))
@@ -448,6 +457,17 @@ fn scanBunYarn(allocator: Allocator, input: []const u8, summary: *JsInstallSumma
             continue;
         }
     }
+}
+
+// A pnpm `+ <name> <version>` entry may carry trailing hints like
+// "(19.2.7 is available)" or "already in devDependencies, ...". Keep only the
+// "<name> <version>" pair so the deps/dev summary stays clean and factual.
+fn pnpmDepEntry(rest: []const u8) []const u8 {
+    var i: usize = 0;
+    while (i < rest.len and rest[i] != ' ' and rest[i] != '\t') : (i += 1) {} // name
+    while (i < rest.len and (rest[i] == ' ' or rest[i] == '\t')) : (i += 1) {} // gap
+    while (i < rest.len and rest[i] != ' ' and rest[i] != '\t') : (i += 1) {} // version
+    return std.mem.trimEnd(u8, rest[0..i], " \t");
 }
 
 fn appendLine(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8) !void {
@@ -647,6 +667,26 @@ test "apply: pnpm fixture summarizes WARN + deps, drops duplicate progress/count
     try std.testing.expect(std.mem.find(u8, got, "Packages: +3") == null);
     try std.testing.expect(std.mem.find(u8, got, "Done in 1.2s") == null);
     try std.testing.expect(std.mem.find(u8, got, "WARN  deprecated") == null);
+}
+
+test "apply: pnpm9 fixture trims version hints and keeps ignored-build-scripts warning" {
+    const input = @embedFile("fixture_pnpm9_install");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(got.len < input.len);
+    // Dep entries are clean "<name> <version>" — the "(x is available)" upgrade
+    // hint is dropped, matching the established deps/dev grammar.
+    try std.testing.expect(std.mem.find(u8, got, "deps +2: react 18.2.0, react-dom 18.2.0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "dev +1: vite 5.0.0") != null);
+    try std.testing.expect(std.mem.find(u8, got, "is available") == null);
+    // The ignored-build-scripts warning is an actionable fact — keep it.
+    try std.testing.expect(std.mem.find(u8, got, "build scripts that were ignored: esbuild") != null);
+    // Progress / Packages / Done chatter is still dropped.
+    try std.testing.expect(std.mem.find(u8, got, "Progress: ") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Packages: +16") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Done in ") == null);
 }
 
 test "apply: bun fixture keeps warn + dependency summary, drops banner + raw per-pkg" {
