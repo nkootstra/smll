@@ -124,7 +124,7 @@ pub fn append(
     try writeU64(w, options.duration_ms);
     try w.writeAll("}\n");
 
-    try appendLineBounded(io, history_path, lock_path, line.written(), MAX_HISTORY_SIZE);
+    try appendLineBounded(allocator, io, history_path, lock_path, line.written(), MAX_HISTORY_SIZE);
 }
 
 pub fn reset(allocator: Allocator, io: Io, home: []const u8) !void {
@@ -176,7 +176,7 @@ const HistoryData = struct {
     lines: []const u8,
 };
 
-fn appendLineBounded(io: Io, history_path: []const u8, lock_path: []const u8, line: []const u8, max_size: usize) !void {
+fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, lock_path: []const u8, line: []const u8, max_size: usize) !void {
     if (line.len > max_size) return;
 
     const cwd = Io.Dir.cwd();
@@ -193,9 +193,17 @@ fn appendLineBounded(io: Io, history_path: []const u8, lock_path: []const u8, li
         }
     }
 
+    // Overflow: keep the newest half of history instead of discarding it all.
+    // Read the tail (line-aligned), rewrite it, then append the new line.
+    // Best-effort: a failed tail read degrades to keeping only the new line.
+    const maybe_tail: ?HistoryData = readHistoryTail(allocator, io, history_path, max_size / 2) catch null;
+    defer if (maybe_tail) |t| allocator.free(t.owned);
+    const tail_lines: []const u8 = if (maybe_tail) |t| t.lines else "";
+
     var file = try cwd.createFile(io, history_path, .{ .read = true, .truncate = true });
     defer file.close(io);
-    try file.writePositionalAll(io, line, 0);
+    try file.writePositionalAll(io, tail_lines, 0);
+    try file.writePositionalAll(io, line, tail_lines.len);
 }
 
 fn openLockFile(io: Io, lock_path: []const u8) !?Io.File {
@@ -756,11 +764,41 @@ test "history append truncates before exceeding size cap" {
     defer allocator.free(history_path);
     const lock_path = try joinPath(allocator, home, history_lock_file);
     defer allocator.free(lock_path);
-    try appendLineBounded(std.testing.io, history_path, lock_path, "new\n", 12);
+    try appendLineBounded(allocator, std.testing.io, history_path, lock_path, "new\n", 12);
 
     const got = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(32));
     defer allocator.free(got);
     try std.testing.expectEqualStrings("new\n", got);
+}
+
+test "history append keeps newest tail when exceeding size cap" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".smll");
+    // Five 7-byte lines = 35 bytes exactly.
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".smll/history.jsonl",
+        .data = "aaaa-1\nbbbb-2\ncccc-3\ndddd-4\neeee-5\n",
+    });
+
+    const history_path = try joinPath(allocator, home, history_file);
+    defer allocator.free(history_path);
+    const lock_path = try joinPath(allocator, home, history_lock_file);
+    defer allocator.free(lock_path);
+    // cap=35: existing history fills the cap, so "ffff-6\n" overflows.
+    try appendLineBounded(allocator, std.testing.io, history_path, lock_path, "ffff-6\n", 35);
+
+    const got = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(128));
+    defer allocator.free(got);
+    // Newest entries survive; only the oldest are dropped (not a full wipe).
+    try std.testing.expect(std.mem.find(u8, got, "ffff-6\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "eeee-5\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "aaaa-1\n") == null);
+    // The compacted file stays within the cap.
+    try std.testing.expect(got.len <= 35);
 }
 
 test "history reader tails oversized files from a complete line" {
