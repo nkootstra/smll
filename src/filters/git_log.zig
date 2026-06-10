@@ -96,6 +96,8 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
     var subject_emitted = false;
     var in_body = false;
     var first_out = true;
+    var merge_parents: [128]u8 = undefined; // "sha7 sha7 ..." from Merge: line
+    var merge_parents_len: usize = 0;
 
     while (lines.next()) |line| {
         if (isCommitLine(line)) {
@@ -103,10 +105,18 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
             sha7_valid = true;
             subject_emitted = false;
             in_body = false;
+            merge_parents_len = 0;
             continue;
         }
         if (!sha7_valid) continue;
         if (!subject_emitted) {
+            if (std.mem.startsWith(u8, line, "Merge: ")) {
+                // Buffer merge parents — emit as a `p` row after the subject.
+                const parents = line["Merge: ".len..];
+                merge_parents_len = @min(parents.len, merge_parents.len);
+                @memcpy(merge_parents[0..merge_parents_len], parents[0..merge_parents_len]);
+                continue;
+            }
             if (!std.mem.startsWith(u8, line, "    ")) continue;
             const subject = std.mem.trim(u8, line[4..], " \t\r");
             if (subject.len == 0) continue;
@@ -114,6 +124,11 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
             try writer.writeAll(&sha7);
             try writer.writeByte(' ');
             try writer.writeAll(subject);
+            if (merge_parents_len > 0) {
+                try writer.writeByte('\n');
+                try writer.writeAll("p ");
+                try writer.writeAll(merge_parents[0..merge_parents_len]);
+            }
             first_out = false;
             subject_emitted = true;
             in_body = true;
@@ -810,6 +825,25 @@ test "applyCompact: emits sha7 + subject, drops date/author/prose body" {
     const lossless = try applyToString(allocator, linear_fixture);
     defer allocator.free(lossless);
     try std.testing.expect(got.len < lossless.len);
+}
+
+test "applyCompactWithBody: keeps Merge parents as p sigil" {
+    // Real `git show` of a --no-ff merge commit (no diff section, so git_show
+    // routes here). The `Merge:` line must survive as a `p` sigil row.
+    const allocator = std.testing.allocator;
+    const input =
+        "commit e2e6c6be43374824f46accd736d23f6c4b837eb1\n" ++
+        "Merge: fafdbd2 e24b139\n" ++
+        "Author: Tester <t@t.t>\n" ++
+        "Date:   Wed Jun 10 23:31:28 2026 +0200\n" ++
+        "\n" ++
+        "    Merge branch 'feature'\n";
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyCompactWithBody(allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "e2e6c6b Merge branch 'feature'") != null);
+    try std.testing.expect(std.mem.find(u8, got, "p fafdbd2 e24b139") != null);
 }
 
 test "applyCompact: preserves important commit trailers inline" {

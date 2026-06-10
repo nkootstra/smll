@@ -63,14 +63,14 @@ fn groupMergeEntries(output: []const u8, w: *Writer) !void {
             if (run_end - i >= 3) {
                 if (is_stat) {
                     try w.writeAll(d);
-                    try w.writeAll(" ×");
+                    try w.writeAll(" x");
                     try ansi.writeDecimal(w, run_end - i);
                     try w.writeByte('\n');
                 } else {
                     // Preserve the sigil (+ or -)
                     try w.writeAll(line[0..2]);
                     try w.writeAll(d);
-                    try w.writeAll(" ×");
+                    try w.writeAll(" x");
                     try ansi.writeDecimal(w, run_end - i);
                     try w.writeByte('\n');
                 }
@@ -283,6 +283,20 @@ test "conflict: path and failed" {
     try std.testing.expect(std.mem.find(u8, out, "! conflict conflict.txt\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "! failed\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "Auto-merging") == null);
+}
+
+test "grouped stat paths use ASCII x count marker" {
+    const a = std.testing.allocator;
+    const stdout_in =
+        "Merge made by the 'ort' strategy.\n" ++
+        " src/a.txt | 1 +\n" ++
+        " src/b.txt | 1 +\n" ++
+        " src/c.txt | 1 +\n" ++
+        " 3 files changed, 3 insertions(+)\n";
+    const out = try str(a, stdout_in, "");
+    defer a.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "src/ x3\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "\u{00d7}") == null);
 }
 
 test "large: grouped stat paths and summary" {

@@ -43,6 +43,7 @@ const KnownSubcommand = enum(u8) {
     rebase,
     stash,
     checkout,
+    @"switch",
     branch,
     blame,
     grep,
@@ -204,6 +205,13 @@ pub fn dispatch(
             } else if (!applyFilter(git_rebase.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         },
         .checkout => {
+            if (lossless) {
+                passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            } else if (!applyFilter(git_checkout.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        },
+        .@"switch" => {
+            // `git switch` confirmation output ("Switched to branch 'x'") is
+            // identical to checkout — reuse the checkout filter.
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else if (!applyFilter(git_checkout.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;

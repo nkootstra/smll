@@ -102,7 +102,7 @@ fn groupFileEntries(output: []const u8, writer: *Writer) !void {
                     try writer.writeAll(sigil);
                     try writer.writeAll(" ");
                     try writer.writeAll(dir);
-                    try writer.writeAll(" ×");
+                    try writer.writeAll(" x");
                     try ansi.writeDecimal(writer, run_end - i);
                     try writer.writeByte('\n');
                     i = run_end;
@@ -369,9 +369,11 @@ test "apply: large fixture groups create-mode paths by directory" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, fixture_large);
     defer allocator.free(out);
-    // Paths should be grouped by directory
-    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/") != null);
+    // Paths should be grouped by directory with an ASCII `x` count marker.
+    try std.testing.expect(std.mem.find(u8, out, "+ src/generated/ x100\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "+750/-0 files=150\n") != null);
+    // The 2-byte `×` glyph must not appear.
+    try std.testing.expect(std.mem.find(u8, out, "\u{00d7}") == null);
 }
 
 test "apply: R3 gate — simple fixture smll ≤ 80% of raw" {

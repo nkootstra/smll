@@ -48,6 +48,7 @@ fn scan(src: []const u8, w: *Writer) !void {
             while (end < branch.len and branch[end] != '\n' and branch[end] != '\r') end += 1;
             branch = branch[0..end];
             if (std.mem.endsWith(u8, branch, ".")) branch = branch[0 .. branch.len - 1];
+            if (std.mem.startsWith(u8, branch, "refs/heads/")) branch = branch["refs/heads/".len..];
             try w.writeAll("@ rebased ");
             try w.writeAll(branch);
             try w.writeByte('\n');
@@ -129,7 +130,7 @@ test "simple: @ rebased" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_simple, "");
     defer a.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@ rebased refs/heads/rebase-branch\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ rebased rebase-branch\n") != null);
 }
 
 test "simple: no progress noise" {
@@ -143,7 +144,7 @@ test "large: @ rebased" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_large, "");
     defer a.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@ rebased refs/heads/large-rebase-branch\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ rebased large-rebase-branch\n") != null);
 }
 
 test "up-to-date" {
@@ -168,7 +169,7 @@ test "Applying becomes r row" {
     const out = try str(a, input, "");
     defer a.free(out);
     try std.testing.expect(std.mem.find(u8, out, "r feat: add feature\n") != null);
-    try std.testing.expect(std.mem.find(u8, out, "@ rebased refs/heads/main\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@ rebased main\n") != null);
 }
 
 test "R3: simple" {
