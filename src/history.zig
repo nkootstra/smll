@@ -196,7 +196,12 @@ fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, loc
     // Overflow: keep the newest half of history instead of discarding it all.
     // Read the tail (line-aligned), rewrite it, then append the new line.
     // Best-effort: a failed tail read degrades to keeping only the new line.
-    const maybe_tail: ?HistoryData = readHistoryTail(allocator, io, history_path, max_size / 2) catch null;
+    //
+    // Budget the tail at max_size/2 to amortize compaction, but never more than
+    // max_size - line.len so tail_lines + line is strictly bounded by max_size
+    // even when a single line exceeds half the cap (line.len <= max_size here).
+    const tail_budget = @min(max_size / 2, max_size - line.len);
+    const maybe_tail: ?HistoryData = readHistoryTail(allocator, io, history_path, tail_budget) catch null;
     defer if (maybe_tail) |t| allocator.free(t.owned);
     const tail_lines: []const u8 = if (maybe_tail) |t| t.lines else "";
 
@@ -799,6 +804,36 @@ test "history append keeps newest tail when exceeding size cap" {
     try std.testing.expect(std.mem.find(u8, got, "aaaa-1\n") == null);
     // The compacted file stays within the cap.
     try std.testing.expect(got.len <= 35);
+}
+
+test "history append strictly bounds size when the new line exceeds half the cap" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".smll");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".smll/history.jsonl",
+        .data = "aaaa-1\nbbbb-2\n",
+    });
+
+    const history_path = try joinPath(allocator, home, history_file);
+    defer allocator.free(history_path);
+    const lock_path = try joinPath(allocator, home, history_lock_file);
+    defer allocator.free(lock_path);
+    // cap=20; the new 14-byte line is larger than max_size/2 (10). A naive
+    // max_size/2 tail (7 bytes) plus the line would reach 21 bytes, breaking
+    // the size invariant — the tail budget must shrink to fit.
+    const line = "xxxxxxxxxxxxx\n"; // 14 bytes
+    try appendLineBounded(allocator, std.testing.io, history_path, lock_path, line, 20);
+
+    const got = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(128));
+    defer allocator.free(got);
+    // Invariant: the post-compaction file never exceeds the cap...
+    try std.testing.expect(got.len <= 20);
+    // ...and the newest line always survives.
+    try std.testing.expect(std.mem.find(u8, got, "xxxxxxxxxxxxx\n") != null);
 }
 
 test "history reader tails oversized files from a complete line" {
