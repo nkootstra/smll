@@ -304,11 +304,10 @@ fn isElisionTrigger(trimmed: []const u8, lang: Lang) bool {
             std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "test "),
         .go => std.mem.startsWith(u8, trimmed, "func "),
+        // `export …` lines are caught earlier by isImportLine and kept
+        // verbatim, so only the non-exported function forms reach here.
         .typescript, .javascript => std.mem.startsWith(u8, trimmed, "function ") or
-            std.mem.startsWith(u8, trimmed, "async function ") or
-            std.mem.startsWith(u8, trimmed, "export function ") or
-            std.mem.startsWith(u8, trimmed, "export async function ") or
-            std.mem.startsWith(u8, trimmed, "export default function "),
+            std.mem.startsWith(u8, trimmed, "async function "),
         // Java method: an access modifier with a parameter list, but not a
         // class/interface declaration (those are containers we keep).
         .java => (std.mem.startsWith(u8, trimmed, "public ") or
