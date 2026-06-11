@@ -44,11 +44,12 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_git_status_conflict", .path = "tests/fixtures/git_status_conflict.txt" },
         .{ .name = "fixture_git_status_short", .path = "tests/fixtures/git_status_short.txt" },
     } },
-    .{ .name = "git_diff", .needs_util = true, .fixtures = &.{
+    .{ .name = "git_diff", .needs_util = true, .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_git_diff_simple", .path = "tests/fixtures/git_diff_simple.txt" },
         .{ .name = "fixture_git_diff_multi", .path = "tests/fixtures/git_diff_multi.txt" },
         .{ .name = "fixture_git_diff_rename", .path = "tests/fixtures/git_diff_rename.txt" },
         .{ .name = "fixture_git_diff_rename_modify", .path = "tests/fixtures/git_diff_rename_modify.txt" },
+        .{ .name = "fixture_git_diff_color", .path = "tests/fixtures/git_diff_color.txt" },
     } },
     .{ .name = "git_log", .needs_util = true, .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_git_log_linear", .path = "tests/fixtures/git_log_linear.txt" },

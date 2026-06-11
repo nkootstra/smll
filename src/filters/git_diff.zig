@@ -1,4 +1,5 @@
 const std = @import("std");
+const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -44,21 +45,28 @@ pub fn matches(input: []const u8) bool {
 }
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    _ = allocator;
     _ = stderr;
-    try applyInner(stdout, writer);
+    try applyInner(allocator, stdout, writer);
 }
 
 /// Apply the v0.4 diff grammar with proper sigil transformations.
 /// This is the real implementation that handles diff --git → d, @@ → @.
-fn applyInner(stdout: []const u8, writer: *Writer) !void {
+fn applyInner(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
     const had_trailing_newline = stdout.len > 0 and stdout[stdout.len - 1] == '\n';
     const content = if (had_trailing_newline) stdout[0 .. stdout.len - 1] else stdout;
 
     var lines = std.mem.splitScalar(u8, content, '\n');
     var first_out = true;
 
-    while (lines.next()) |line| {
+    // Defensive ANSI strip: agents hit `--color=always` / `color.ui=always`,
+    // which wraps every sigil and even splits the leading +/- from its content
+    // (e.g. `\x1b[32m+\x1b[m\x1b[32madded`). Stripping per line restores the
+    // sigil grammar the rest of this function relies on.
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+
+    while (lines.next()) |raw| {
+        const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         // Fast path for content lines (+/-, context) — the majority of diff lines.
         // Check before metadata to avoid the startsWith cascade for common cases.
         if (line.len > 1) {
@@ -133,14 +141,13 @@ fn applyInner(stdout: []const u8, writer: *Writer) !void {
                 try writer.writeByte('@');
                 if (split) |sp| {
                     const old_range = coords[0..sp];
-                    const new_range = coords[sp + " +".len ..];
+                    const new_range = coords[sp + " +".len ..]; // already past the '+'
                     const old_clean = if (old_range.len > 0 and old_range[0] == '-') old_range[1..] else old_range;
-                    // Emit compact format: @<start_line> only (agents need location, not exact ranges)
-                    // Extract just the start line from old range (before comma)
-                    const comma = std.mem.indexOfScalar(u8, old_clean, ',');
-                    const start_line = if (comma) |c| old_clean[0..c] else old_clean;
-                    try writer.writeAll(start_line);
-                    _ = new_range;
+                    // Emit the full `@<old>|<new>` form: the new-file range is a
+                    // fact (where the change lands in the post-image), not noise.
+                    try writer.writeAll(old_clean);
+                    try writer.writeByte('|');
+                    try writer.writeAll(new_range);
                 } else {
                     // Malformed coords — emit verbatim
                     try writer.writeAll(coords);
@@ -200,6 +207,7 @@ const simple_fixture = @embedFile("fixture_git_diff_simple");
 const multi_fixture = @embedFile("fixture_git_diff_multi");
 const rename_fixture = @embedFile("fixture_git_diff_rename");
 const rename_modify_fixture = @embedFile("fixture_git_diff_rename_modify");
+const color_fixture = @embedFile("fixture_git_diff_color");
 
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
@@ -263,7 +271,8 @@ test "apply: emits @ sigil for hunk header on simple" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@1\n") != null);
+    // Full old|new range: `@@ -1 +1,3 @@` → `@1|1,3`. The new range must survive.
+    try std.testing.expect(std.mem.find(u8, out, "@1|1,3\n") != null);
     // Old @@ form is gone
     try std.testing.expect(std.mem.find(u8, out, "@@ -1 +1,3 @@") == null);
 }
@@ -357,8 +366,24 @@ test "apply: emits @ hunk header on rename+modify" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, rename_modify_fixture);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "@1\n") != null);
+    // `@@ -1,3 +1,4 @@` → `@1,3|1,4`.
+    try std.testing.expect(std.mem.find(u8, out, "@1,3|1,4\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "+date") != null);
+}
+
+test "apply: strips ANSI from color.ui=always diff and keeps full hunk range" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, color_fixture);
+    defer allocator.free(out);
+    // No escape bytes survive the strip.
+    try std.testing.expect(std.mem.find(u8, out, "\x1b") == null);
+    // File header and full old|new hunk range recovered from colored input.
+    try std.testing.expect(std.mem.find(u8, out, "d f.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "@1,3|1,4\n") != null);
+    // Colored sigil split from content (`\x1b[32m+\x1b[m\x1b[32m...`) is rejoined.
+    try std.testing.expect(std.mem.find(u8, out, "+LINE TWO changed") != null);
+    try std.testing.expect(std.mem.find(u8, out, "+line four added") != null);
+    try std.testing.expect(std.mem.find(u8, out, "-line two") != null);
 }
 
 test "apply: hunk-internal line starting with --- is preserved (state tracking)" {
