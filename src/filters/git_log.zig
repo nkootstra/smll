@@ -666,11 +666,19 @@ fn isCommitLine(line: []const u8) bool {
 const linear_fixture = @embedFile("fixture_git_log_linear");
 const merge_fixture = @embedFile("fixture_git_log_merge");
 const stat_fixture = @embedFile("fixture_git_log_stat");
+const graph_fixture = @embedFile("fixture_git_log_graph");
 
 fn applyToString(allocator: Allocator, input: []const u8) ![]u8 {
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
     try apply(allocator, input, &.{}, &out.writer);
+    return allocator.dupe(u8, out.written());
+}
+
+fn applyCompactToString(allocator: Allocator, input: []const u8) ![]u8 {
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyCompact(allocator, input, &.{}, &out.writer);
     return allocator.dupe(u8, out.written());
 }
 
@@ -692,6 +700,17 @@ test "matches: non-log input returns false" {
     try std.testing.expect(!matches("diff --git a/x b/x\n"));
     try std.testing.expect(!matches("commit short\n"));
     try std.testing.expect(!matches("commit g0ad49edaad09b3977b23cc38c5552c76734c2de\n"));
+}
+
+test "matches: graph gutter defeats isCommitLine (documents the --graph passthrough gate)" {
+    // `git log --graph` prefixes every line with gutter glyphs (`* `, `| `),
+    // so no line satisfies isCommitLine and applyCompact would emit nothing.
+    // wrapper_git routes --graph to passthrough instead; this asserts why.
+    try std.testing.expect(!matches(graph_fixture));
+    const allocator = std.testing.allocator;
+    const out = try applyCompactToString(allocator, graph_fixture);
+    defer allocator.free(out);
+    try std.testing.expectEqual(@as(usize, 0), out.len);
 }
 
 test "apply: emits c sigil with sha7, date, author on linear (first commit full)" {

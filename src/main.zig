@@ -11,6 +11,7 @@ const filter_catalog = @import("filter_catalog.zig");
 const pipeline = @import("pipeline.zig");
 const stats = @import("stats.zig");
 const wrapper = @import("wrapper.zig");
+const wrapper_git = @import("wrapper_git.zig");
 const wrapper_util = @import("wrapper_util.zig");
 const git_status = @import("git_status");
 const git_diff = @import("git_diff");
@@ -47,6 +48,7 @@ test {
     _ = pipe_filters;
     _ = pipeline;
     _ = wrapper;
+    _ = wrapper_git;
     _ = wrapper_util;
 }
 

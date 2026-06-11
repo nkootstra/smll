@@ -126,6 +126,7 @@ pub fn dispatch(
                 has_compact_summary or
                 hasArg(git_argv, "--no-walk") or
                 hasArg(git_argv, "--abbrev-commit") or // shortened SHA breaks isCommitLine
+                hasArg(git_argv, "--graph") or // gutter glyphs (* | / \) defeat isCommitLine -> empty output
                 hasArg(git_argv, "-p") or
                 hasArg(git_argv, "--patch") or
                 hasArg(git_argv, "-u"); // -u is alias for --patch
@@ -275,4 +276,24 @@ pub fn dispatch(
     }
 
     return exit_code;
+}
+
+const graph_fixture = @embedFile("fixture_git_log_graph");
+
+// Regression: `git log --graph` prefixes every line with gutter glyphs
+// (`* `, `| `), so git_log.isCommitLine never matches and applyCompact
+// emits nothing — the agent sees the "no output" hint and loses all six
+// commits. The fix routes --graph through the passthrough gate.
+test "git log --graph passes through unchanged" {
+    const allocator = std.testing.allocator;
+    var out: std.Io.Writer.Allocating = .init(allocator);
+    defer out.deinit();
+    var err: std.Io.Writer.Allocating = .init(allocator);
+    defer err.deinit();
+
+    const argv = &[_][]const u8{ "git", "log", "--graph", "-6" };
+    _ = try dispatch(allocator, argv, graph_fixture, "", false, 0, &out.writer, &err.writer);
+
+    try std.testing.expect(out.written().len > 0);
+    try std.testing.expectEqualStrings(graph_fixture, out.written());
 }

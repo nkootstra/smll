@@ -54,6 +54,7 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_git_log_linear", .path = "tests/fixtures/git_log_linear.txt" },
         .{ .name = "fixture_git_log_merge", .path = "tests/fixtures/git_log_merge.txt" },
         .{ .name = "fixture_git_log_stat", .path = "tests/fixtures/git_log_stat.txt" },
+        .{ .name = "fixture_git_log_graph", .path = "tests/fixtures/git_log_graph.txt" },
     } },
     .{ .name = "git_show", .needs_util = true, .extra_deps = &.{ "git_log", "git_diff" }, .fixtures = &.{
         .{ .name = "fixture_git_show_simple", .path = "tests/fixtures/git_show_simple.txt" },
@@ -272,6 +273,12 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     exe_mod.addOptions("build_options", app_opts);
+    // Fixture embedded only by wrapper_git's unit tests (wrapper-mode argv
+    // dispatch). Unreferenced in non-test builds, so it never enters the
+    // production binary.
+    exe_mod.addAnonymousImport("fixture_git_log_graph", .{
+        .root_source_file = b.path("tests/fixtures/git_log_graph.txt"),
+    });
 
     const util_mod = b.createModule(.{
         .root_source_file = b.path("src/util.zig"),
