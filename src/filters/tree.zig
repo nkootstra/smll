@@ -285,7 +285,14 @@ fn emitTreeEntry(entries: []const TreeEntry, idx: usize, writer: *Writer, first_
 
         const child_end = subtreeEnd(entries, child);
         const direct_count = directChildCount(entries, child, child_end);
-        if (child_entry.depth >= 2 and direct_count >= 4) {
+        // Collapse a directory to a single counted line when it has ≥4 direct
+        // children. Deep dirs (depth ≥2) collapse regardless of child type, as
+        // before. At depth 1 we only collapse *pure file groups* (e.g. a flat
+        // `scripts/` of shell scripts) so the top-level structure — and the
+        // per-subdirectory file breakdowns under dirs like `src/` — is never
+        // destroyed (AGENTS.md: preserve actionable signal).
+        const collapsible_depth1 = child_entry.depth == 1 and directChildrenAllFiles(entries, child, child_end);
+        if (direct_count >= 4 and (child_entry.depth >= 2 or collapsible_depth1)) {
             try writeCollapsedDirLine(writer, first_out, entries, child, child_end, direct_count);
         } else {
             try emitTreeEntry(entries, child, writer, first_out);
@@ -589,6 +596,22 @@ test "applyCompact: large tree keeps structure and collapsed counts" {
     try std.testing.expect(got.len < fixture_tree_large.len);
 }
 
+test "applyCompact: depth-1 pure file group collapses to one line" {
+    const a = std.testing.allocator;
+    var out = Writer.Allocating.init(a);
+    defer out.deinit();
+    try applyCompact(a, fixture_tree_large, &.{}, &out.writer);
+    const got = out.written();
+    // `scripts/` is a flat depth-1 directory of 4 files; it now collapses onto
+    // a single line instead of `scripts/\n  (4 files: …)`.
+    try std.testing.expect(std.mem.find(u8, got, "  scripts/ (4 files: audit.sh, bench.sh, release.sh, ...)") != null);
+    // Mixed top-level dirs keep their per-subdirectory breakdowns: `src/`
+    // stays a bare line and its `filters/`/`core/` counts survive.
+    try std.testing.expect(std.mem.find(u8, got, "  src/\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    wrapper.zig\n") != null);
+}
+
 test "applyCompact: ASCII tree keeps structure and collapsed counts" {
     const a = std.testing.allocator;
     var out = Writer.Allocating.init(a);
@@ -615,8 +638,9 @@ test "applyCompact: preserves small tree facts" {
     try applyCompact(a, fixture_tree_src, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "src/") != null);
-    try std.testing.expect(std.mem.find(u8, got, "  filters/\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    (19 files: detect.zig, git_add.zig, git_blame.zig, ...)") != null);
+    // `filters/` is a depth-1 pure file group, so it now collapses onto its own
+    // line instead of `filters/\n  (19 files: …)`.
+    try std.testing.expect(std.mem.find(u8, got, "  filters/ (19 files: detect.zig, git_add.zig, git_blame.zig, ...)") != null);
     try std.testing.expect(std.mem.find(u8, got, "main.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "2 directories, 22 files") != null);
     try std.testing.expect(got.len < fixture_tree_src.len);
