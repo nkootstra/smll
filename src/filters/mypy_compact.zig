@@ -42,6 +42,9 @@ fn scan(allocator: Allocator, input: []const u8, writer: *Writer, strip_buf: *st
             try writer.writeAll(line);
             try writer.writeByte('\n');
             kept.* += 1;
+            // The caret closes the diagnostic block; clear the state so a later
+            // stray all-^/~ line isn't carried along by residual in_diag.
+            in_diag = false;
         }
     }
 }
@@ -120,4 +123,21 @@ test "mypy --pretty keeps caret underline after error" {
     try std.testing.expect(std.mem.find(u8, got, ": error: Incompatible types") != null);
     try std.testing.expect(std.mem.find(u8, got, "^~~~~\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "x: int =") == null);
+}
+
+test "mypy stray caret-shaped line after the diagnostic block is dropped" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    // One diagnostic + its caret underline, then an unrelated all-tilde line.
+    // The caret consumes the in-diagnostic state, so the stray line must not
+    // be carried along by residual state.
+    const input =
+        "src/a.py:1:5: error: bad [misc]\n" ++
+        "    x = compute()\n" ++
+        "    ^^^^^^^^^^^^^\n" ++
+        "~~~~~~~\n";
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "^^^^^^^^^^^^^") != null);
+    try std.testing.expect(std.mem.find(u8, got, "~~~~~~~\n") == null);
 }
