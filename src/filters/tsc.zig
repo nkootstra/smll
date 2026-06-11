@@ -138,25 +138,32 @@ fn collect(
 /// `path:L:C TSnnnn: <message>` lines (boilerplate dropped).
 fn emitGrouped(allocator: Allocator, writer: *Writer, diags: []const Diag) !void {
     if (diags.len == 0) return;
-    const emitted = try allocator.alloc(bool, diags.len);
-    defer allocator.free(emitted);
-    @memset(emitted, false);
 
-    var group: std.ArrayList(usize) = .empty;
-    defer group.deinit(allocator);
+    // Bucket diagnostic indices by TS code in a single pass, preserving the
+    // first-appearance order of codes. O(N) — a per-code rescan would be
+    // O(N^2) when every diagnostic has a unique code (a large project with
+    // many unrelated errors), which is now unbounded after dropping the cap.
+    var groups: std.ArrayList(CodeGroup) = .empty;
+    defer {
+        for (groups.items) |*g| g.indices.deinit(allocator);
+        groups.deinit(allocator);
+    }
+    var index = std.StringHashMap(usize).init(allocator);
+    defer index.deinit();
 
     for (diags, 0..) |d, i| {
-        if (emitted[i]) continue;
-        group.clearRetainingCapacity();
-        for (diags, 0..) |e, j| {
-            if (std.mem.eql(u8, e.code, d.code)) {
-                try group.append(allocator, j);
-                emitted[j] = true;
-            }
+        const gop = try index.getOrPut(d.code);
+        if (!gop.found_existing) {
+            gop.value_ptr.* = groups.items.len;
+            try groups.append(allocator, .{ .code = d.code, .indices = .empty });
         }
-        const items = group.items;
+        try groups.items[gop.value_ptr.*].indices.append(allocator, i);
+    }
+
+    for (groups.items) |g| {
+        const items = g.indices.items;
         if (items.len >= 3 and messagesHomogeneous(diags, items)) {
-            try writer.writeAll(d.code);
+            try writer.writeAll(g.code);
             try writer.writeAll(" x");
             try ansi.writeDecimal(writer, items.len);
             try writer.writeAll(": ");
@@ -170,21 +177,24 @@ fn emitGrouped(allocator: Allocator, writer: *Writer, diags: []const Diag) !void
                 try writer.writeAll(" more)");
             }
             try writer.writeByte('\n');
-            if (d.msg.len > 0) {
-                try writer.writeAll(d.msg);
+            const rep = diags[items[0]].msg; // representative = first occurrence
+            if (rep.len > 0) {
+                try writer.writeAll(rep);
                 try writer.writeByte('\n');
             }
         } else {
             for (items) |gi| {
-                const g = diags[gi];
-                try writer.writeAll(g.loc);
+                const d = diags[gi];
+                try writer.writeAll(d.loc);
                 try writer.writeByte(' ');
-                try writer.writeAll(g.rest);
+                try writer.writeAll(d.rest);
                 try writer.writeByte('\n');
             }
         }
     }
 }
+
+const CodeGroup = struct { code: []const u8, indices: std.ArrayList(usize) };
 
 /// True when every diagnostic in `group` shares the same message prefix (first
 /// `msg_key_len` bytes), i.e. folding to one representative message is safe.
@@ -293,6 +303,25 @@ test "apply: >=3 same-code errors with identical messages fold to one line" {
     try std.testing.expect(std.mem.find(u8, got, "src/e.ts:5:5 TS2304: Cannot find name 'foo'.") != null);
     // Summary preserved.
     try std.testing.expect(std.mem.find(u8, got, "Found 5 errors in 5 files.") != null);
+}
+
+test "apply: exactly 2 same-code errors stay unfolded (below the >=3 threshold)" {
+    // Boundary guard: a code appearing exactly twice must keep full per-error
+    // lines, never fold — protects the `>= 3` threshold from drifting to 2.
+    const input =
+        "src/a.ts:1:1 - error TS2322: Type 'string' is not assignable to type 'number'.\n" ++
+        "src/b.ts:2:2 - error TS2322: Type 'string' is not assignable to type 'number'.\n" ++
+        "Found 2 errors in 2 files.\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    // No fold header at 2 occurrences.
+    try std.testing.expect(std.mem.find(u8, got, "TS2322 x2:") == null);
+    // Both errors keep their full per-error lines.
+    try std.testing.expect(std.mem.find(u8, got, "src/a.ts:1:1 TS2322: Type 'string' is not assignable") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/b.ts:2:2 TS2322: Type 'string' is not assignable") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Found 2 errors in 2 files.") != null);
 }
 
 test "apply: >=3 same-code errors with differing messages are NOT folded" {
