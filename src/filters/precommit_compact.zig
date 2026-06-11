@@ -32,7 +32,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     if (state.passed_count > 0) {
         try writer.writeAll("passed: ");
         try ansi.writeDecimal(writer, state.passed_count);
-        try writer.writeAll(" hooks\n");
+        try writer.writeAll(if (state.passed_count == 1) " hook\n" else " hooks\n");
     }
 }
 
@@ -140,8 +140,25 @@ test "pre-commit failure keeps failed hook only" {
     // Dot padding is stripped from the failed status line.
     try std.testing.expect(std.mem.find(u8, got, "Check Yaml Failed") != null);
     try std.testing.expect(std.mem.find(u8, got, "Check Yaml..") == null);
-    // Passed hooks are summarized as a count rather than dropped without trace.
-    try std.testing.expect(std.mem.find(u8, got, "passed: 1 hooks") != null);
+    // Passed hooks are summarized as a count rather than dropped without trace
+    // (singular noun for a count of one).
+    try std.testing.expect(std.mem.find(u8, got, "passed: 1 hook\n") != null);
+}
+
+test "pre-commit pluralizes the passed-hook count" {
+    const input =
+        \\Trim Trailing Whitespace.................................................Passed
+        \\Sort Imports.............................................................Passed
+        \\Check Yaml...............................................................Failed
+        \\- hook id: check-yaml
+        \\- exit code: 1
+        \\bad.yaml: could not determine a constructor
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expect(std.mem.find(u8, out.written(), "passed: 2 hooks\n") != null);
 }
 
 test "pre-commit diagnostic containing status word does not end failure block" {
