@@ -9,14 +9,15 @@ const Writer = std.Io.Writer;
 // `find -ls` emits columns: inode, blocks, mode, nlink, user, group,
 // size, month, day, time/year, path. All but the path are dropped.
 // Paths sharing a parent directory collapse to a single
-// "<dir>/ (N entries: ./dir/a, ./dir/b)" line when ≥3 share it;
-// lone files (1-2 per dir) are emitted individually. Directory-typed
+// "<dir>/ (N entries: a, b, c)" line when ≥3 share it — the examples are
+// basenames since the parent label already carries the prefix. Lone files
+// (1-2 per dir) are emitted individually (full path). Directory-typed
 // entries (mode starts with 'd') get the trailing slash in both forms.
 //
 // Contract:
 //   • Lossy — inode, mode bits, ownership, size, timestamps gone.
-//     Paths under a parent dir collapse to a count plus examples when
-//     ≥3 share it.
+//     Paths under a parent dir collapse to a count plus basename examples
+//     when ≥3 share it.
 //   • Lone paths (≤2 per parent) preserved verbatim.
 //   • Typical reduction ~95% on GNU/BSD `find -ls` output of a
 //     populated directory tree.
@@ -118,7 +119,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
             try writer.writeAll(" entries: ");
             for (entries.items[i .. i + 3], 0..) |entry, idx| {
                 if (idx > 0) try writer.writeAll(", ");
-                try writer.writeAll(entry.path);
+                // The parent label already supplies the directory prefix, so the
+                // examples only need to carry the basename.
+                try writer.writeAll(basename(entry.path));
                 if (entry.is_dir) try writer.writeByte('/');
             }
             try writer.writeByte(')');
@@ -192,7 +195,7 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
         var j = i + 1;
         while (j < entries.items.len and std.mem.eql(u8, entries.items[j].parent, parent)) : (j += 1) {}
         const count = j - i;
-        if (count >= 4) {
+        if (count >= 3) {
             if (!first) try writer.writeByte('\n');
             first = false;
             try writeParentLabel(writer, parent);
@@ -203,7 +206,9 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
             try writer.writeAll(": ");
             for (entries.items[i .. i + 3], 0..) |entry, idx| {
                 if (idx > 0) try writer.writeAll(", ");
-                try writer.writeAll(entry.path);
+                // The parent label already supplies the directory prefix, so the
+                // examples only need to carry the basename.
+                try writer.writeAll(basename(entry.path));
             }
             try writer.writeByte(')');
         } else {
@@ -235,6 +240,18 @@ fn parentDir(path: []const u8) []const u8 {
         return path[0..idx];
     }
     return ".";
+}
+
+/// Last path component. "./src/main.zig" → "main.zig", "README.md" →
+/// "README.md". Used for collapsed-group examples, where the parent label
+/// already carries the directory prefix. Falls back to the full path if the
+/// trailing component would be empty (a path ending in '/').
+fn basename(path: []const u8) []const u8 {
+    if (std.mem.findScalarLast(u8, path, '/')) |idx| {
+        const tail = path[idx + 1 ..];
+        if (tail.len > 0) return tail;
+    }
+    return path;
 }
 
 /// Skip 10 whitespace-separated fields (inode, blocks, mode, nlink,
@@ -343,7 +360,7 @@ test "apply: ≥3 entries in same parent collapse to count" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expectEqualStrings("./ (4 entries: ./a.txt, ./b.txt, ./c.txt)\n", out.written());
+    try std.testing.expectEqualStrings("./ (4 entries: a.txt, b.txt, c.txt)\n", out.written());
 }
 
 test "apply: small fixture reduces output and keeps paths" {
@@ -358,7 +375,7 @@ test "apply: small fixture reduces output and keeps paths" {
     // individually.
     try std.testing.expect(std.mem.find(u8, got, "./src/main.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "./src/filter.zig") != null);
-    try std.testing.expect(std.mem.find(u8, got, "./ (3 entries: ./README.md, ./src/, ./tests/)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "./ (3 entries: README.md, src/, tests/)") != null);
     try std.testing.expect(std.mem.find(u8, got, "user") == null);
 }
 
@@ -369,9 +386,9 @@ test "applyPlainEntries: groups parent directories and preserves small groups" {
     try applyPlainEntries(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
 
-    try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 entries: src/core/analyzer.zig, src/core/cache.zig, src/core/config.zig)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/filters/ (12 entries: src/filters/build_output.zig, src/filters/cargo_test.zig, src/filters/find_compact.zig)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (12 entries: tests/fixtures/build_output.txt, tests/fixtures/cargo_test_failing.txt, tests/fixtures/find_plain_many.txt)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 entries: analyzer.zig, cache.zig, config.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/filters/ (12 entries: build_output.zig, cargo_test.zig, find_compact.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (12 entries: build_output.txt, cargo_test_failing.txt, find_plain_many.txt)") != null);
     try std.testing.expect(std.mem.find(u8, got, "README.md\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "build.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "docs/audit.md\n") != null);
@@ -411,6 +428,19 @@ test "apply: large same-parent fixture collapses (≥95% reduction)" {
     try std.testing.expect(std.mem.find(u8, got, "file_1.zig") != null);
     const reduction = (buf.items.len - got.len) * 100 / buf.items.len;
     try std.testing.expect(reduction >= 95);
+}
+
+test "applyPlain: exactly 3 in a parent collapse (unified >=3 threshold) with basename examples" {
+    const input =
+        "pkg/a.zig\n" ++
+        "pkg/b.zig\n" ++
+        "pkg/c.zig\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyPlainEntries(std.testing.allocator, input, &.{}, &out.writer);
+    // Three sharing "pkg" now collapse (was >=4 before), and the examples are
+    // basenames since the parent label already supplies the prefix.
+    try std.testing.expectEqualStrings("pkg/ (3 entries: a.zig, b.zig, c.zig)\n", out.written());
 }
 
 test "parentDir basic cases" {

@@ -2055,7 +2055,7 @@ test "wrapper: plain find groups dense parent directories" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < find_plain_many_fixture.len);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 entries: src/core/analyzer.zig, src/core/cache.zig, src/core/config.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 entries: analyzer.zig, cache.zig, config.zig)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "tests/fixtures/ (12 entries:") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "README.md\n") != null);
     try std.testing.expectEqualStrings("", result.stderr);
@@ -2782,7 +2782,7 @@ test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
     // with examples; 2 entries in "./src" survive individually.
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "./src/filter.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries: ./README.md, ./src/, ./tests/)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries: README.md, src/, tests/)") != null);
     // Metadata gone.
     try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);
