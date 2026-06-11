@@ -136,34 +136,35 @@ fn collect(
 /// Emit diagnostics grouped by TS code in first-appearance order. A group of
 /// >=3 with homogeneous messages folds; everything else emits full per-error
 /// `path:L:C TSnnnn: <message>` lines (boilerplate dropped).
+///
+/// The `emitted` skip means the inner rescan runs once per *distinct* code, so
+/// the cost is O(U x N) where U is the number of distinct TS codes — bounded by
+/// TypeScript's fixed ~few-hundred diagnostic vocabulary regardless of N. That
+/// is effectively linear in N for real output; the apparent N^2 worst case (N
+/// distinct codes) is unreachable. We keep this index-free form deliberately: a
+/// StringHashMap(usize) here is a fresh monomorphization that pushes the
+/// ReleaseSmall x86_64 binary over the hard 320 KiB release cap.
 fn emitGrouped(allocator: Allocator, writer: *Writer, diags: []const Diag) !void {
     if (diags.len == 0) return;
+    const emitted = try allocator.alloc(bool, diags.len);
+    defer allocator.free(emitted);
+    @memset(emitted, false);
 
-    // Bucket diagnostic indices by TS code in a single pass, preserving the
-    // first-appearance order of codes. O(N) — a per-code rescan would be
-    // O(N^2) when every diagnostic has a unique code (a large project with
-    // many unrelated errors), which is now unbounded after dropping the cap.
-    var groups: std.ArrayList(CodeGroup) = .empty;
-    defer {
-        for (groups.items) |*g| g.indices.deinit(allocator);
-        groups.deinit(allocator);
-    }
-    var index = std.StringHashMap(usize).init(allocator);
-    defer index.deinit();
+    var group: std.ArrayList(usize) = .empty;
+    defer group.deinit(allocator);
 
     for (diags, 0..) |d, i| {
-        const gop = try index.getOrPut(d.code);
-        if (!gop.found_existing) {
-            gop.value_ptr.* = groups.items.len;
-            try groups.append(allocator, .{ .code = d.code, .indices = .empty });
+        if (emitted[i]) continue;
+        group.clearRetainingCapacity();
+        for (diags, 0..) |e, j| {
+            if (std.mem.eql(u8, e.code, d.code)) {
+                try group.append(allocator, j);
+                emitted[j] = true;
+            }
         }
-        try groups.items[gop.value_ptr.*].indices.append(allocator, i);
-    }
-
-    for (groups.items) |g| {
-        const items = g.indices.items;
+        const items = group.items;
         if (items.len >= 3 and messagesHomogeneous(diags, items)) {
-            try writer.writeAll(g.code);
+            try writer.writeAll(d.code);
             try writer.writeAll(" x");
             try ansi.writeDecimal(writer, items.len);
             try writer.writeAll(": ");
@@ -177,24 +178,21 @@ fn emitGrouped(allocator: Allocator, writer: *Writer, diags: []const Diag) !void
                 try writer.writeAll(" more)");
             }
             try writer.writeByte('\n');
-            const rep = diags[items[0]].msg; // representative = first occurrence
-            if (rep.len > 0) {
-                try writer.writeAll(rep);
+            if (d.msg.len > 0) { // representative = first occurrence
+                try writer.writeAll(d.msg);
                 try writer.writeByte('\n');
             }
         } else {
             for (items) |gi| {
-                const d = diags[gi];
-                try writer.writeAll(d.loc);
+                const g = diags[gi];
+                try writer.writeAll(g.loc);
                 try writer.writeByte(' ');
-                try writer.writeAll(d.rest);
+                try writer.writeAll(g.rest);
                 try writer.writeByte('\n');
             }
         }
     }
 }
-
-const CodeGroup = struct { code: []const u8, indices: std.ArrayList(usize) };
 
 /// True when every diagnostic in `group` shares the same message prefix (first
 /// `msg_key_len` bytes), i.e. folding to one representative message is safe.
