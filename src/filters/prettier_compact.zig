@@ -81,6 +81,9 @@ const WriteLine = struct { path: []const u8, changed: bool };
 // `--write` lines look like `src/a.ts 23ms` (rewritten) or
 // `src/a.ts 23ms (unchanged)` (already formatted).
 fn parseWriteLine(line: []const u8) ?WriteLine {
+    // Diagnostic tags are never write paths, even when the message ends in
+    // `<N>ms` — keep them out of the formatted sample so shouldKeep preserves them.
+    if (std.mem.startsWith(u8, line, "[warn]") or std.mem.startsWith(u8, line, "[error]")) return null;
     var rest = line;
     var changed = true;
     if (std.mem.endsWith(u8, rest, " (unchanged)")) {
@@ -143,6 +146,15 @@ test "stderr errors preserved" {
     defer out.deinit();
     try apply(std.testing.allocator, "", "[error] No files matching the pattern were found\n", &out.writer);
     try std.testing.expectEqualStrings("[error] No files matching the pattern were found\n", out.written());
+}
+
+test "warn line ending in ms is kept, not consumed as a write line" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    // A diagnostic that happens to end in `<N>ms` must not be misclassified as
+    // a `--write` path line and swallowed into the formatted sample.
+    try apply(std.testing.allocator, "[warn] parser timed out after 500ms\n", "", &out.writer);
+    try std.testing.expectEqualStrings("[warn] parser timed out after 500ms\n", out.written());
 }
 
 const write_fixture = @embedFile("fixture_prettier_write");
