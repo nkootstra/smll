@@ -152,7 +152,9 @@ const modules = [_]ModuleEntry{
     .{ .name = "maven_compact", .needs_ansi = true },
     .{ .name = "precommit_compact", .needs_ansi = true },
     .{ .name = "lint_compact", .needs_ansi = true },
-    .{ .name = "plan_compact", .needs_ansi = true },
+    .{ .name = "plan_compact", .needs_ansi = true, .fixtures = &.{
+        .{ .name = "fixture_tofu_plan_update", .path = "tests/fixtures/tofu_plan_update.txt" },
+    } },
     .{ .name = "json_compact" },
     .{ .name = "package_tree", .needs_ansi = true },
     .{ .name = "tool_compact", .needs_ansi = true },
