@@ -105,7 +105,7 @@ pub fn writeRefUpdateLine(line: []const u8, writer: anytype, sigil: u8) !void {
     var sha_b_end: usize = 0;
     while (sha_b_end < after_dot.len and after_dot[sha_b_end] != ' ') sha_b_end += 1;
     const sha_b = after_dot[0..sha_b_end];
-    const rest = std.mem.trim(u8, after_dot[sha_b_end..], " \t");
+    const rest = collapseSymmetricRef(std.mem.trim(u8, after_dot[sha_b_end..], " \t"));
     const a7 = sha_a[0..@min(sha_a.len, 7)];
     const b7 = sha_b[0..@min(sha_b.len, 7)];
     try writer.writeByte(sigil);
@@ -118,6 +118,17 @@ pub fn writeRefUpdateLine(line: []const u8, writer: anytype, sigil: u8) !void {
         try writer.writeAll(rest);
     }
     try writer.writeByte('\n');
+}
+
+/// Collapse a symmetric ref mapping "x -> x" to a single "x"; asymmetric
+/// mappings ("local -> remote", or anything with trailing text) pass through.
+fn collapseSymmetricRef(rest: []const u8) []const u8 {
+    const arrow = " -> ";
+    const idx = std.mem.find(u8, rest, arrow) orelse return rest;
+    const left = rest[0..idx];
+    const right = rest[idx + arrow.len ..];
+    if (std.mem.eql(u8, left, right)) return left;
+    return rest;
 }
 
 /// Write a compressed stat line "<path> |<N>\n" from a trimmed git stat line.

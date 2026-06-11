@@ -96,6 +96,9 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
     var subject_emitted = false;
     var in_body = false;
     var first_out = true;
+    // Slice into stdout from the Merge: line — no fixed-size copy, so full
+    // 40-char (--no-abbrev) parent SHAs can never be truncated mid-hash.
+    var merge_parents: ?[]const u8 = null;
 
     while (lines.next()) |line| {
         if (isCommitLine(line)) {
@@ -103,10 +106,16 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
             sha7_valid = true;
             subject_emitted = false;
             in_body = false;
+            merge_parents = null;
             continue;
         }
         if (!sha7_valid) continue;
         if (!subject_emitted) {
+            if (std.mem.startsWith(u8, line, "Merge: ")) {
+                // Stash merge parents — emit as a `p` row after the subject.
+                merge_parents = line["Merge: ".len..];
+                continue;
+            }
             if (!std.mem.startsWith(u8, line, "    ")) continue;
             const subject = std.mem.trim(u8, line[4..], " \t\r");
             if (subject.len == 0) continue;
@@ -114,6 +123,11 @@ pub fn applyCompactWithBody(allocator: Allocator, stdout: []const u8, stderr: []
             try writer.writeAll(&sha7);
             try writer.writeByte(' ');
             try writer.writeAll(subject);
+            if (merge_parents) |parents| {
+                try writer.writeByte('\n');
+                try writer.writeAll("p ");
+                try writer.writeAll(parents);
+            }
             first_out = false;
             subject_emitted = true;
             in_body = true;
@@ -440,8 +454,9 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
     var date_valid = false;
     var author_buf: [128]u8 = undefined;
     var author_len: usize = 0;
-    var merge_parents: [128]u8 = undefined; // "sha7 sha7 ..." from Merge: line
-    var merge_parents_len: usize = 0;
+    // Slice into the input from the Merge: line — never copied into a fixed
+    // buffer, so full 40-char (--no-abbrev) parent SHAs survive intact.
+    var merge_parents: ?[]const u8 = null;
     var c_line_emitted = false;
     var in_body = false;
 
@@ -456,7 +471,7 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
             sha7_valid = false;
             date_valid = false;
             author_len = 0;
-            merge_parents_len = 0;
+            merge_parents = null;
             c_line_emitted = false;
             in_body = false;
 
@@ -468,10 +483,8 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
         }
 
         if (std.mem.startsWith(u8, line, "Merge: ")) {
-            // Buffer merge parents — emit after c line
-            const parents = line["Merge: ".len..];
-            merge_parents_len = @min(parents.len, merge_parents.len);
-            @memcpy(merge_parents[0..merge_parents_len], parents[0..merge_parents_len]);
+            // Stash merge parents — emit after c line
+            merge_parents = line["Merge: ".len..];
             continue;
         }
 
@@ -498,10 +511,10 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
                     try writeCLine(writer, &sha7, &date_buf, date_valid, author_buf[0..author_len], &rle_state);
                     first_out = false;
                     c_line_emitted = true;
-                    if (merge_parents_len > 0) {
+                    if (merge_parents) |parents| {
                         try writer.writeByte('\n');
                         try writer.writeAll("p ");
-                        try writer.writeAll(merge_parents[0..merge_parents_len]);
+                        try writer.writeAll(parents);
                     }
                 }
                 in_body = true;
@@ -520,10 +533,10 @@ fn applyInner(input: []const u8, writer: *Writer) !void {
                 try writeCLine(writer, &sha7, &date_buf, date_valid, author_buf[0..author_len], &rle_state);
                 first_out = false;
                 c_line_emitted = true;
-                if (merge_parents_len > 0) {
+                if (merge_parents) |parents| {
                     try writer.writeByte('\n');
                     try writer.writeAll("p ");
-                    try writer.writeAll(merge_parents[0..merge_parents_len]);
+                    try writer.writeAll(parents);
                 }
             }
             in_body = true;
@@ -829,6 +842,45 @@ test "applyCompact: emits sha7 + subject, drops date/author/prose body" {
     const lossless = try applyToString(allocator, linear_fixture);
     defer allocator.free(lossless);
     try std.testing.expect(got.len < lossless.len);
+}
+
+test "applyCompactWithBody: keeps Merge parents as p sigil" {
+    // Real `git show` of a --no-ff merge commit (no diff section, so git_show
+    // routes here). The `Merge:` line must survive as a `p` sigil row.
+    const allocator = std.testing.allocator;
+    const input =
+        "commit e2e6c6be43374824f46accd736d23f6c4b837eb1\n" ++
+        "Merge: fafdbd2 e24b139\n" ++
+        "Author: Tester <t@t.t>\n" ++
+        "Date:   Wed Jun 10 23:31:28 2026 +0200\n" ++
+        "\n" ++
+        "    Merge branch 'feature'\n";
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyCompactWithBody(allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "e2e6c6b Merge branch 'feature'") != null);
+    try std.testing.expect(std.mem.find(u8, got, "p fafdbd2 e24b139") != null);
+}
+
+test "applyCompactWithBody: full --no-abbrev octopus merge parents are not truncated" {
+    // `git show --no-abbrev` (or core.abbrev=40) prints full 40-char parent
+    // SHAs. Four parents = 163 bytes, which overran the old 128-byte buffer and
+    // cut the final SHA mid-hash. Every parent must survive intact.
+    const allocator = std.testing.allocator;
+    const p1 = "1" ** 40;
+    const p2 = "2" ** 40;
+    const p3 = "3" ** 40;
+    const p4 = "4" ** 40;
+    const input =
+        "commit aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" ++
+        "Merge: " ++ p1 ++ " " ++ p2 ++ " " ++ p3 ++ " " ++ p4 ++ "\n" ++
+        "    octopus merge\n";
+    var out = Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try applyCompactWithBody(allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "p " ++ p1 ++ " " ++ p2 ++ " " ++ p3 ++ " " ++ p4) != null);
 }
 
 test "applyCompact: preserves important commit trailers inline" {

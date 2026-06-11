@@ -84,12 +84,22 @@ test "apply: everything up-to-date emits = up-to-date" {
     try std.testing.expectEqualStrings("= up-to-date\n", out);
 }
 
-test "apply: updated ref emits > sigil with sha pair" {
+test "apply: updated ref emits > sigil with sha pair (symmetric mapping collapsed)" {
     const allocator = std.testing.allocator;
     const stderr = "To github.com:foo/bar.git\n   abc1234..def5678  main -> main\n";
     const out = try applyToString(allocator, "", stderr);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "> abc1234..def5678 main -> main\n") != null);
+    // Symmetric `main -> main` collapses to a single `main`.
+    try std.testing.expect(std.mem.find(u8, out, "> abc1234..def5678 main\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "main -> main") == null);
+}
+
+test "apply: asymmetric ref mapping kept verbatim" {
+    const allocator = std.testing.allocator;
+    const stderr = "To github.com:foo/bar.git\n   abc1234..def5678  local -> remote\n";
+    const out = try applyToString(allocator, "", stderr);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "> abc1234..def5678 local -> remote\n") != null);
 }
 
 test "apply: deleted ref emits - deleted sigil" {

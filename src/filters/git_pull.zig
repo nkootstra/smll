@@ -35,6 +35,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         var updating_range: ?[]const u8 = null;
         var is_fast_forward = false;
         var is_merge = false;
+        var summary_line: ?[]const u8 = null;
 
         var lines = std.mem.splitScalar(u8, stdout, '\n');
         while (lines.next()) |line| {
@@ -47,6 +48,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
                 is_fast_forward = true;
             } else if (std.mem.startsWith(u8, line, "Merge made by")) {
                 is_merge = true;
+            } else if (std.mem.find(u8, line, " file") != null and
+                std.mem.find(u8, line, " changed") != null)
+            {
+                // Diffstat summary: " N file(s) changed, X insertion(+), Y deletion(-)"
+                summary_line = line;
             }
         }
 
@@ -67,6 +73,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
                 try writer.writeAll("@ merge-commit\n");
             }
         }
+
+        // Preserve the changed-files/insertions/deletions facts as the canonical
+        // git-family summary shape (same as git_merge's util.writeSummary).
+        if (summary_line) |s| try util.writeSummary(s, writer);
     }
 }
 
@@ -115,6 +125,15 @@ test "apply: fast-forward preserves SHA range" {
     const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
     defer allocator.free(out);
     try std.testing.expect(std.mem.find(u8, out, "43fe7da..2cee6f5") != null);
+}
+
+test "apply: fast-forward keeps diffstat summary" {
+    const allocator = std.testing.allocator;
+    const out = try applyToString(allocator, ff_stdout_fixture, ff_stderr_fixture);
+    defer allocator.free(out);
+    // The ` 1 file changed, 1 insertion(+)` diffstat line is preserved as the
+    // canonical git-family summary shape (matches git_merge's util.writeSummary).
+    try std.testing.expect(std.mem.find(u8, out, "+1/-0 files=1\n") != null);
 }
 
 test "apply: already up-to-date emits @ up-to-date" {

@@ -284,8 +284,8 @@ test "dirty fixture: v0.4 format — branch sigil, path sigils, no headers" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, dirty_fixture);
     defer result.deinit(allocator);
-    // Branch line
-    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main\n"));
+    // Branch line (upstream tracking ref preserved as =origin/main)
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "# main =origin/main\n"));
     // Unstaged modified paths
     try std.testing.expect(std.mem.find(u8, result.stdout, "M src/main.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "M src/pipeline.zig\n") != null);
@@ -303,7 +303,7 @@ test "clean fixture: v0.4 format — branch line only" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, clean_fixture);
     defer result.deinit(allocator);
-    try std.testing.expectEqualStrings("# main\n", result.stdout);
+    try std.testing.expectEqualStrings("# main =origin/main\n", result.stdout);
 }
 
 test "conflict fixture: v0.4 format — S sigil staged, UU sigil unmerged" {
@@ -1425,6 +1425,29 @@ test "dispatch: registered subcommand with both stdout and stderr — stderr not
 
     // Verify filter ran on stdout (output non-empty) AND stderr is empty.
     try std.testing.expect(result.stdout.len > 0);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "dispatch: git switch routes to checkout filter" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    // `git switch` confirmation lands on stderr, identical grammar to checkout.
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf "Switched to branch 'feature-x'\n" >&2
+    );
+
+    var result = try runSmllWrapperFakeGit(allocator, bin_path, &.{ "git", "switch", "feature-x" });
+    defer result.deinit(allocator);
+
+    // After routing: checkout filter compacts to `^ feature-x` on stdout and the
+    // child stderr is absorbed.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "^ feature-x\n") != null);
     try std.testing.expectEqualStrings("", result.stderr);
 }
 

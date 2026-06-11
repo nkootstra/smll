@@ -98,6 +98,7 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
     var branch_len: usize = 0;
     var ahead: ?[]const u8 = null;
     var behind: ?[]const u8 = null;
+    var upstream: ?[]const u8 = null;
 
     // Streaming directory grouping state.
     var run_key: []const u8 = "";
@@ -136,6 +137,10 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
                     continue;
                 } else if (std.mem.startsWith(u8, line, "Your branch is behind")) {
                     if (findAheadBehindCount(line, "by ")) |count| behind = count;
+                    continue;
+                } else if (std.mem.startsWith(u8, line, "Your branch is up to date with '")) {
+                    const after = line["Your branch is up to date with '".len..];
+                    if (std.mem.findScalar(u8, after, '\'')) |q| upstream = after[0..q];
                     continue;
                 } else if (std.mem.startsWith(u8, line, "Your branch and")) {
                     if (findDivergedCounts(line)) |counts| {
@@ -184,7 +189,7 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
         // Tab-indented content lines
         if (line.len > 0 and line[0] == '\t') {
             if (!branch_written) {
-                try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
+                try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind, upstream);
                 branch_written = true;
             }
 
@@ -252,7 +257,7 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
     try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
 
     if (!branch_written and branch_len > 0) {
-        try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind);
+        try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind, upstream);
     }
 }
 
@@ -400,7 +405,7 @@ fn writeSectionEntry(writer: *Writer, section: Section, content: []const u8) !vo
     try writer.writeByte('\n');
 }
 
-fn writeBranchLine(writer: *Writer, branch: []const u8, ahead: ?[]const u8, behind: ?[]const u8) !void {
+fn writeBranchLine(writer: *Writer, branch: []const u8, ahead: ?[]const u8, behind: ?[]const u8, upstream: ?[]const u8) !void {
     try writer.writeAll("# ");
     try writer.writeAll(branch);
     if (ahead) |a| {
@@ -410,6 +415,14 @@ fn writeBranchLine(writer: *Writer, branch: []const u8, ahead: ?[]const u8, behi
     if (behind) |b| {
         try writer.writeAll(" -");
         try writer.writeAll(b);
+    }
+    // Record the tracking upstream only when the branch is in sync — divergence
+    // is already conveyed by the +/- markers above.
+    if (ahead == null and behind == null) {
+        if (upstream) |u| {
+            try writer.writeAll(" =");
+            try writer.writeAll(u);
+        }
     }
     try writer.writeByte('\n');
 }
@@ -602,8 +615,8 @@ test "apply: output for dirty fixture has correct format" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, dirty_fixture);
     defer allocator.free(out);
-    // Branch line
-    try std.testing.expect(std.mem.startsWith(u8, out, "# main\n"));
+    // Branch line — dirty fixture tracks origin/main and is in sync.
+    try std.testing.expect(std.mem.startsWith(u8, out, "# main =origin/main\n"));
     // Unstaged modified paths
     try std.testing.expect(std.mem.find(u8, out, "M src/main.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "M src/pipeline.zig\n") != null);
@@ -616,7 +629,19 @@ test "apply: output for clean fixture is just branch line" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, clean_fixture);
     defer allocator.free(out);
-    try std.testing.expectEqualStrings("# main\n", out);
+    try std.testing.expectEqualStrings("# main =origin/main\n", out);
+}
+
+test "apply: up-to-date branch records upstream" {
+    const allocator = std.testing.allocator;
+    const input =
+        "On branch main\n" ++
+        "Your branch is up to date with 'origin/main'.\n" ++
+        "\n" ++
+        "nothing to commit, working tree clean\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expectEqualStrings("# main =origin/main\n", out);
 }
 
 test "apply: output for conflict fixture has UU sigil" {

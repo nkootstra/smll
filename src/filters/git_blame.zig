@@ -63,7 +63,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
 }
 
 /// Max source lines to show per commit block before summarizing.
-const BLOCK_MAX_LINES: usize = 1;
+const BLOCK_MAX_LINES: usize = 3;
 
 fn truncateBlocks(output: []const u8, w: *Writer) !void {
     var lines = std.mem.splitScalar(u8, output, '\n');
@@ -388,15 +388,38 @@ test "simple: fixture has 5 commits → 5 headers" {
     try std.testing.expectEqual(@as(usize, 5), header_count);
 }
 
-test "truncated: first code line per block preserved" {
+test "truncated: first code lines per block preserved" {
     const a = std.testing.allocator;
     const out = try str(a, fixture_simple, "");
     defer a.free(out);
     // First line of each block preserved
     try std.testing.expect(std.mem.find(u8, out, " fn init() {\n") != null);
     try std.testing.expect(std.mem.find(u8, out, "     configure_logging();") != null);
-    // Subsequent lines truncated
-    try std.testing.expect(std.mem.find(u8, out, "(+") != null);
+    // Simple fixture blocks are exactly 3 lines (== BLOCK_MAX_LINES): fully kept,
+    // so no truncation summary appears.
+    try std.testing.expect(std.mem.find(u8, out, "(+") == null);
+    // The large fixture has 10-line blocks → first 3 kept, remaining 7 summarised.
+    const out_large = try str(a, fixture_large, "");
+    defer a.free(out_large);
+    try std.testing.expect(std.mem.find(u8, out_large, "(+7)") != null);
+}
+
+test "truncated: keeps first 3 lines of a long block then summary" {
+    const a = std.testing.allocator;
+    const input =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  1) line 1\n" ++
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  2) line 2\n" ++
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  3) line 3\n" ++
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  4) line 4\n" ++
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa (Alice 2026-01-01 00:00:00 +0000  5) line 5\n";
+    const out = try str(a, input, "");
+    defer a.free(out);
+    try std.testing.expect(std.mem.find(u8, out, " line 1\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " line 2\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, " line 3\n") != null);
+    // 4th and 5th lines collapse into a (+2) summary.
+    try std.testing.expect(std.mem.find(u8, out, " line 4\n") == null);
+    try std.testing.expect(std.mem.find(u8, out, "(+2)\n") != null);
 }
 
 test "RLE: same author across SHA changes → author elided" {
