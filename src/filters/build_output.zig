@@ -97,7 +97,14 @@ const AssetSummary = struct {
 
     fn add(self: *AssetSummary, allocator: Allocator, line: []const u8, bytes: usize) !void {
         self.count += 1;
-        const compact = try compactSpaces(allocator, stripBuildPrefix(line));
+        // B12: drop the trailing `│ gzip: N kB` column. The uncompressed size
+        // (already parsed into `bytes` for ranking) is the actionable number;
+        // the gzip figure is rarely acted on and just widens each row.
+        const without_gzip = if (std.mem.indexOf(u8, line, "\xe2\x94\x82 gzip:")) |i|
+            std.mem.trimEnd(u8, line[0..i], " \t")
+        else
+            line;
+        const compact = try compactSpaces(allocator, stripBuildPrefix(without_gzip));
         errdefer allocator.free(compact);
 
         var idx: usize = 0;
@@ -345,6 +352,21 @@ test "apply: drops script-header lines and Vite progress" {
     try std.testing.expect(std.mem.find(u8, got, "computing gzip size") == null);
     try std.testing.expect(std.mem.find(u8, got, "modules transformed") != null);
     try std.testing.expect(std.mem.find(u8, got, "built in 1.2s") != null);
+}
+
+test "apply: asset rows drop the gzip column" {
+    const input =
+        "vite v5.4.2 building for production...\n" ++
+        "dist/assets/index-abc.js   1,234.56 kB \xe2\x94\x82 gzip: 345.67 kB\n" ++
+        "\xe2\x9c\x93 built in 1.23s\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    // Asset kept with its uncompressed size.
+    try std.testing.expect(std.mem.find(u8, got, "index-abc.js 1,234.56 kB") != null);
+    // B12: gzip column dropped.
+    try std.testing.expect(std.mem.find(u8, got, "gzip:") == null);
 }
 
 test "apply: vite_build fixture compacts but keeps signal" {

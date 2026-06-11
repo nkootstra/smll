@@ -46,7 +46,13 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
         }
 
         if (shouldKeep(line)) {
-            try appendLine(allocator, out, line);
+            // B13: strip the redundant `[INFO] ` prefix from the build-result
+            // line so `BUILD FAILURE` / `BUILD SUCCESS` reads as a clear verdict.
+            const emit = if (std.mem.startsWith(u8, line, "[INFO] BUILD "))
+                line["[INFO] ".len..]
+            else
+                line;
+            try appendLine(allocator, out, emit);
             state.error_context = if (std.mem.startsWith(u8, line, "[ERROR]")) 4 else 0;
             continue;
         }
@@ -105,5 +111,7 @@ test "maven failure keeps error and summary" {
     try std.testing.expect(std.mem.find(u8, got, "cannot find symbol") != null);
     try std.testing.expect(std.mem.find(u8, got, "symbol: method foo") != null);
     try std.testing.expect(std.mem.find(u8, got, "BUILD FAILURE") != null);
+    // B13: the `[INFO] ` prefix is stripped from the build-result verdict.
+    try std.testing.expect(std.mem.find(u8, got, "[INFO] BUILD") == null);
     try std.testing.expect(std.mem.find(u8, got, "Downloading") == null);
 }

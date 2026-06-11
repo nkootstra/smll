@@ -175,11 +175,13 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         // content here — but a bare FAIL/PASS marker terminates the test run).
         try out.appendSlice(allocator, pending.items);
         pending.clearRetainingCapacity();
-        if (std.mem.startsWith(u8, trimmed, "FAIL") or
+        // B8: keep the per-package `FAIL\t<pkg>\t<time>` summary, but drop the
+        // bare `FAIL` line and `exit status N` — both redundant with the
+        // `--- FAIL:` marker (kept above) and the propagated process exit code.
+        if (std.mem.startsWith(u8, trimmed, "FAIL\t") or
             std.mem.startsWith(u8, trimmed, "ok\t") or
             std.mem.startsWith(u8, trimmed, "ok  ") or
-            std.mem.startsWith(u8, trimmed, "PASS") or
-            std.mem.startsWith(u8, trimmed, "exit status"))
+            std.mem.startsWith(u8, trimmed, "PASS"))
         {
             try out.appendSlice(allocator, trimmed);
             try out.append(allocator, '\n');
@@ -323,5 +325,8 @@ test "apply: FAIL on own line counts as failure" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestA") != null);
     try std.testing.expect(std.mem.find(u8, got, "foo_test.go:5: boom") != null);
-    try std.testing.expect(std.mem.find(u8, got, "exit status 1") != null);
+    // B8: the bare `FAIL` line and `exit status N` are redundant with the
+    // `--- FAIL:` marker and the propagated exit code, so they're dropped.
+    try std.testing.expect(std.mem.find(u8, got, "exit status") == null);
+    try std.testing.expect(std.mem.find(u8, got, "\nFAIL\n") == null);
 }

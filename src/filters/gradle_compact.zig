@@ -96,7 +96,8 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.find(u8, line, " tests completed") != null) return true;
     if (std.mem.startsWith(u8, line, "There were failing tests.")) return true;
     if (std.mem.startsWith(u8, line, "BUILD FAILED") or std.mem.startsWith(u8, line, "BUILD SUCCESSFUL")) return true;
-    if (std.mem.find(u8, line, " actionable task") != null) return true;
+    // B13: `N actionable tasks: N executed` is pure bookkeeping — the BUILD
+    // verdict above already conveys the outcome, so it's dropped.
     if (std.mem.startsWith(u8, line, "See the report at:")) return true;
     if (std.mem.startsWith(u8, line, "file://")) return true;
     return false;
@@ -170,6 +171,8 @@ test "gradle build failure keeps cause and compiler diagnostics" {
     try std.testing.expect(std.mem.find(u8, got, "BUILD FAILED") != null);
     try std.testing.expect(std.mem.find(u8, got, "UP-TO-DATE") == null);
     try std.testing.expect(std.mem.find(u8, got, "--stacktrace") == null);
+    // B13: actionable-task bookkeeping is dropped.
+    try std.testing.expect(std.mem.find(u8, got, "actionable task") == null);
 }
 
 test "gradle test failure drops passed tests but keeps failing test signal" {

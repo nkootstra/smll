@@ -326,9 +326,9 @@ fn scanNpm(allocator: Allocator, input: []const u8, summary: *NpmSummary) !void 
             try appendLine(allocator, &summary.lines, trimmed);
             continue;
         }
-        if (std.mem.startsWith(u8, trimmed, "run `npm audit`")) {
-            try appendLine(allocator, &summary.lines, trimmed);
-        }
+        // B14: `run `npm audit` for details` is fixed boilerplate — the
+        // `found N vulnerabilities` line above already carries the fact and the
+        // command is well known. Dropped (not kept).
     }
 }
 
@@ -612,7 +612,9 @@ test "apply: fixture keeps WARN + summary, drops notice + funding noise" {
     try std.testing.expect(std.mem.find(u8, got, "deprecated x5: lodash.isequal, rimraf, inflight, glob, querystring") != null);
     try std.testing.expect(std.mem.find(u8, got, "added 847 packages") != null);
     try std.testing.expect(std.mem.find(u8, got, "found 2 vulnerabilities") != null);
-    try std.testing.expect(std.mem.find(u8, got, "run `npm audit` for details") != null);
+    // B14: the `run `npm audit` for details` boilerplate is dropped; the
+    // `found N vulnerabilities` fact above is what's actionable.
+    try std.testing.expect(std.mem.find(u8, got, "run `npm audit`") == null);
     // Dropped noise.
     try std.testing.expect(std.mem.find(u8, got, "npm WARN deprecated") == null);
     try std.testing.expect(std.mem.find(u8, got, "npm notice") == null);
