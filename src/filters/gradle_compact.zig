@@ -90,6 +90,7 @@ fn shouldKeep(line: []const u8) bool {
     if (std.mem.startsWith(u8, line, "Execution failed")) return true;
     if (std.mem.startsWith(u8, line, "> Compilation error")) return true;
     if (std.mem.startsWith(u8, line, "e: ") or std.mem.startsWith(u8, line, "w: ")) return true;
+    if (std.mem.startsWith(u8, line, "Note: ")) return true;
     if (isFailureHeader(line)) return true;
     if (isExceptionLine(line)) return true;
     if (std.mem.find(u8, line, " tests completed") != null) return true;
@@ -194,4 +195,21 @@ test "gradle test failure drops passed tests but keeps failing test signal" {
     try std.testing.expect(std.mem.find(u8, got, "CalculatorTest.kt:25") != null);
     try std.testing.expect(std.mem.find(u8, got, "5 tests completed, 2 failed") != null);
     try std.testing.expect(std.mem.find(u8, got, "testAddition PASSED") == null);
+}
+
+test "gradle keeps javac Note lines" {
+    const input =
+        \\> Task :app:compileJava
+        \\Note: /app/src/main/java/Foo.java uses unchecked or unsafe operations.
+        \\Note: Recompile with -Xlint:unchecked for details.
+        \\BUILD SUCCESSFUL in 3s
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "Note: /app/src/main/java/Foo.java uses unchecked") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Note: Recompile with -Xlint:unchecked") != null);
+    try std.testing.expect(std.mem.find(u8, got, "BUILD SUCCESSFUL") != null);
 }
