@@ -187,8 +187,11 @@ fn compressCode(input: []const u8, lang: Lang, writer: *Writer) !void {
                 continue;
             }
 
-            // Signature line: has opening brace or is a signature followed by {.
-            if (isSignature(trimmed, lang)) {
+            // Elision trigger: a function-like construct whose body we elide.
+            // Container declarations (struct/impl/class/...) are deliberately
+            // NOT triggers — they fall through to default-keep so their fields
+            // and inner method signatures survive (fact-preserving contract).
+            if (isElisionTrigger(trimmed, lang)) {
                 try writer.writeAll(line);
                 try writer.writeByte('\n');
                 if (opens > closes) {
@@ -285,43 +288,34 @@ fn isDocComment(trimmed: []const u8, lang: Lang) bool {
     };
 }
 
-fn isSignature(trimmed: []const u8, lang: Lang) bool {
+/// Function-like constructs whose *bodies* should be elided. Deliberately
+/// excludes container declarations (struct/enum/trait/impl/class/interface/
+/// type) — eliding those would destroy struct fields and inner method
+/// signatures, violating the fact-preserving contract. Inner functions still
+/// elide naturally: an indented `pub fn`/`func`/method inside a container is
+/// matched on its own trimmed line and enters in_body on its own.
+fn isElisionTrigger(trimmed: []const u8, lang: Lang) bool {
     return switch (lang) {
         .rust => std.mem.startsWith(u8, trimmed, "pub fn ") or
             std.mem.startsWith(u8, trimmed, "fn ") or
             std.mem.startsWith(u8, trimmed, "pub async fn ") or
-            std.mem.startsWith(u8, trimmed, "async fn ") or
-            std.mem.startsWith(u8, trimmed, "impl ") or
-            std.mem.startsWith(u8, trimmed, "pub struct ") or
-            std.mem.startsWith(u8, trimmed, "struct ") or
-            std.mem.startsWith(u8, trimmed, "pub enum ") or
-            std.mem.startsWith(u8, trimmed, "enum ") or
-            std.mem.startsWith(u8, trimmed, "pub trait ") or
-            std.mem.startsWith(u8, trimmed, "trait "),
+            std.mem.startsWith(u8, trimmed, "async fn "),
         .zig_lang => std.mem.startsWith(u8, trimmed, "pub fn ") or
             std.mem.startsWith(u8, trimmed, "fn ") or
-            std.mem.startsWith(u8, trimmed, "pub const ") or
-            std.mem.startsWith(u8, trimmed, "const ") or
-            std.mem.startsWith(u8, trimmed, "pub var ") or
             std.mem.startsWith(u8, trimmed, "test "),
-        .go => std.mem.startsWith(u8, trimmed, "func ") or
-            std.mem.startsWith(u8, trimmed, "type "),
+        .go => std.mem.startsWith(u8, trimmed, "func "),
+        // `export …` lines are caught earlier by isImportLine and kept
+        // verbatim, so only the non-exported function forms reach here.
         .typescript, .javascript => std.mem.startsWith(u8, trimmed, "function ") or
-            std.mem.startsWith(u8, trimmed, "async function ") or
-            std.mem.startsWith(u8, trimmed, "export function ") or
-            std.mem.startsWith(u8, trimmed, "export async function ") or
-            std.mem.startsWith(u8, trimmed, "export default function ") or
-            std.mem.startsWith(u8, trimmed, "class ") or
-            std.mem.startsWith(u8, trimmed, "export class ") or
-            std.mem.startsWith(u8, trimmed, "interface ") or
-            std.mem.startsWith(u8, trimmed, "export interface ") or
-            std.mem.startsWith(u8, trimmed, "type ") or
-            std.mem.startsWith(u8, trimmed, "export type "),
-        .java => std.mem.startsWith(u8, trimmed, "public ") or
+            std.mem.startsWith(u8, trimmed, "async function "),
+        // Java method: an access modifier with a parameter list, but not a
+        // class/interface declaration (those are containers we keep).
+        .java => (std.mem.startsWith(u8, trimmed, "public ") or
             std.mem.startsWith(u8, trimmed, "private ") or
-            std.mem.startsWith(u8, trimmed, "protected ") or
-            std.mem.startsWith(u8, trimmed, "class ") or
-            std.mem.startsWith(u8, trimmed, "interface "),
+            std.mem.startsWith(u8, trimmed, "protected ")) and
+            std.mem.indexOfScalar(u8, trimmed, '(') != null and
+            std.mem.indexOf(u8, trimmed, "class ") == null and
+            std.mem.indexOf(u8, trimmed, "interface ") == null,
         .c_cpp => std.mem.indexOf(u8, trimmed, "(") != null and
             (std.mem.endsWith(u8, trimmed, "{") or std.mem.endsWith(u8, trimmed, ")")),
         else => false,
@@ -456,4 +450,104 @@ test "apply: imports are preserved" {
     // All imports kept.
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "import std") != null);
     try std.testing.expect(std.mem.indexOf(u8, out.written(), "use std::io") != null);
+}
+
+fn applyToString(input: []const u8, file: []const u8) ![]u8 {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer, &.{ "cat", file });
+    return std.testing.allocator.dupe(u8, out.written());
+}
+
+test "apply: zig struct fields are kept, not elided as a body" {
+    const input =
+        \\pub const Config = struct {
+        \\    name: []const u8,
+        \\    retries: u32,
+        \\    verbose: bool,
+        \\
+        \\    pub fn init() Config {
+        \\        return .{ .name = "x", .retries = 3, .verbose = false };
+        \\    }
+        \\};
+        \\
+    ;
+    const result = try applyToString(input, "config.zig");
+    defer std.testing.allocator.free(result);
+    // Fields must survive (they are facts, not a function body).
+    try std.testing.expect(std.mem.indexOf(u8, result, "name: []const u8,") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "retries: u32,") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "verbose: bool,") != null);
+    // The inner method signature is kept; its body is elided.
+    try std.testing.expect(std.mem.indexOf(u8, result, "pub fn init() Config {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "return .{ .name") == null);
+}
+
+test "apply: rust impl keeps every method signature, elides bodies" {
+    const input =
+        \\impl Service {
+        \\    pub fn start(&self) -> Result<()> {
+        \\        self.connect();
+        \\        Ok(())
+        \\    }
+        \\
+        \\    pub fn stop(&self) {
+        \\        self.disconnect();
+        \\    }
+        \\}
+        \\
+    ;
+    const result = try applyToString(input, "service.rs");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "impl Service {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "pub fn start(&self) -> Result<()> {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "pub fn stop(&self) {") != null);
+    // Method bodies are elided.
+    try std.testing.expect(std.mem.indexOf(u8, result, "self.connect();") == null);
+}
+
+test "apply: go struct fields are kept" {
+    const input =
+        \\type User struct {
+        \\    ID    int
+        \\    Name  string
+        \\    Email string
+        \\}
+        \\
+        \\func (u User) Greet() string {
+        \\    return "hi " + u.Name
+        \\}
+        \\
+    ;
+    const result = try applyToString(input, "user.go");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "ID    int") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Name  string") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "Email string") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "func (u User) Greet() string {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "return \"hi \"") == null);
+}
+
+test "apply: ts class keeps field and method signatures" {
+    // Plain `class` (no `export ` short-circuit) is the case isSignature
+    // previously matched and over-elided.
+    const input =
+        \\class Greeter {
+        \\    greeting: string;
+        \\
+        \\    constructor(message: string) {
+        \\        this.greeting = message;
+        \\    }
+        \\
+        \\    greet(): string {
+        \\        return "Hello, " + this.greeting;
+        \\    }
+        \\}
+        \\
+    ;
+    const result = try applyToString(input, "greeter.ts");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "class Greeter {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "greeting: string;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "greet(): string {") != null);
 }
