@@ -4,7 +4,10 @@ const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
 // LOSSY compact filter for `pre-commit run`. Keeps failed hooks and their
-// diagnostic block. Drops environment setup chatter and passed hooks.
+// diagnostic block, collapsing the dot padding on status lines
+// (`Check Yaml....Failed` → `Check Yaml Failed`). Drops environment setup
+// chatter and passing hooks, but appends a `passed: N hooks` count so the
+// agent keeps the overall picture.
 
 pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "- hook id:") != null) return true;
@@ -24,10 +27,18 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         return;
     }
     try writer.writeAll(out.items);
+    // Surface the passed-hook count so the agent keeps the overall picture even
+    // though individual passing hooks are dropped.
+    if (state.passed_count > 0) {
+        try writer.writeAll("passed: ");
+        try ansi.writeDecimal(writer, state.passed_count);
+        try writer.writeAll(" hooks\n");
+    }
 }
 
 const ScanState = struct {
     in_failed_hook: bool = false,
+    passed_count: usize = 0,
 };
 
 const HookStatus = enum { passed, failed, skipped };
@@ -45,7 +56,8 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
 
         if (hookStatus(line)) |status| {
             state.in_failed_hook = status == .failed;
-            if (state.in_failed_hook) try appendLine(allocator, out, line);
+            if (status == .passed) state.passed_count += 1;
+            if (state.in_failed_hook) try appendDepaddedStatus(allocator, out, line, "Failed");
             continue;
         }
 
@@ -53,6 +65,19 @@ fn scan(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state:
             try appendLine(allocator, out, line);
         }
     }
+}
+
+/// Emit a hook status line with its dot padding collapsed to a single space:
+/// `Check Yaml...........Failed` → `Check Yaml Failed`.
+fn appendDepaddedStatus(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8, status: []const u8) !void {
+    const status_start = line.len - status.len;
+    var dot_start = status_start;
+    while (dot_start > 0 and line[dot_start - 1] == '.') : (dot_start -= 1) {}
+    const name = std.mem.trimEnd(u8, line[0..dot_start], " \t");
+    try out.appendSlice(allocator, name);
+    try out.append(allocator, ' ');
+    try out.appendSlice(allocator, status);
+    try out.append(allocator, '\n');
 }
 
 fn hookStatus(line: []const u8) ?HookStatus {
@@ -112,6 +137,11 @@ test "pre-commit failure keeps failed hook only" {
     try std.testing.expect(std.mem.find(u8, got, "bad.yaml") != null);
     try std.testing.expect(std.mem.find(u8, got, "Installing environment") == null);
     try std.testing.expect(std.mem.find(u8, got, "Trim Trailing") == null);
+    // Dot padding is stripped from the failed status line.
+    try std.testing.expect(std.mem.find(u8, got, "Check Yaml Failed") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Check Yaml..") == null);
+    // Passed hooks are summarized as a count rather than dropped without trace.
+    try std.testing.expect(std.mem.find(u8, got, "passed: 1 hooks") != null);
 }
 
 test "pre-commit diagnostic containing status word does not end failure block" {
