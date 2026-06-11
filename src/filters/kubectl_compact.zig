@@ -7,11 +7,13 @@ const Writer = std.Io.Writer;
 // Set SMLL_LOSSLESS=1 to bypass.
 //
 // Drops: READY, RESTARTS, AGE. Keeps: pod names + state sigil.
-// Healthy pod (STATUS=Running, READY a/a): bare name.
-// Unhealthy (anything else): name(STATUS) or name(x/y,STATUS) for partial-ready.
+// When the aggregate is "r" (every pod Running and full-ready) the per-pod
+// ready count is dropped entirely — bare names, since "r" already implies it.
+// In mixed output a healthy pod keeps name(a/a) so it is distinguishable from
+// the unhealthy name(x/y,STATUS) entries alongside it.
 //
 // Grammar:
-//   k <count> <agg>: name1 name2 name3(Pending) name4(CrashLoopBackOff) ...
+//   k <count> <agg> name1 name2 name3(0/1,Pending) ...   (agg "r": bare names)
 //
 // <agg>: "r" (all healthy) | "m" | "n"
 //
@@ -59,6 +61,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try ansi.writeDecimal(writer, count);
     try writer.writeAll(agg);
 
+    // When every pod is healthy (agg "r"), the aggregate already encodes that
+    // they are all Running and full-ready, so the per-pod `(a/a)` is pure noise.
+    const all_healthy = std.mem.eql(u8, agg, "r");
+
     // Pass 2: emit names with ready status for all pods.
     var pass2 = std.mem.splitScalar(u8, stdout, '\n');
     _ = pass2.next(); // skip header
@@ -68,6 +74,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
+        if (all_healthy) continue; // bare name; health is implied by the `r` aggregate
         const status = fieldAt(line, status_col);
         const ready = fieldAt(line, ready_col);
         if (!isHealthyRunning(line, ready_col, status_col)) {
@@ -159,8 +166,9 @@ test "apply: fixture all-running produces count + names" {
     try std.testing.expect(std.mem.find(u8, got, "api-server-6f8b9c4d7-x2k8m") != null);
     try std.testing.expect(std.mem.find(u8, got, "redis-master-0") != null);
     try std.testing.expect(std.mem.find(u8, got, "cert-manager-5dc8f9b-abcde") != null);
-    // No status annotations when all healthy.
-    try std.testing.expect(std.mem.find(u8, got, "(Running)") == null);
+    // The `r` aggregate already encodes that every pod is Running and full-ready,
+    // so per-pod ready/status annotations are dropped entirely — bare names only.
+    try std.testing.expect(std.mem.find(u8, got, "(") == null);
 }
 
 test "apply: mixed state annotates unhealthy pods" {
