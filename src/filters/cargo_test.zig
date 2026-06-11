@@ -77,6 +77,9 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
     var in_error_context = false;
     var after_remaining: usize = 0;
 
+    // B7: state for dropping the redundant trailing `failures:` name list.
+    var dropping_names = false;
+
     while (lines.next()) |raw| {
         if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
@@ -84,7 +87,21 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         if (trimmed.len == 0) {
             if (in_error_context) in_error_context = false;
             after_remaining = 0;
+            dropping_names = false;
             continue;
+        }
+
+        // B7: drop cargo failure-tail noise. The `note: run with RUST_BACKTRACE`
+        // hint is never actionable, and the `failures:` block just re-lists the
+        // test names already shown in the `---- NAME stdout ----` headers.
+        if (std.mem.startsWith(u8, trimmed, "note: run with")) continue;
+        if (std.mem.eql(u8, trimmed, "failures:")) {
+            dropping_names = true;
+            continue;
+        }
+        if (dropping_names) {
+            if (std.mem.startsWith(u8, line, "    ") or std.mem.startsWith(u8, line, "\t")) continue;
+            dropping_names = false;
         }
 
         if (shouldKeep(trimmed)) {
@@ -268,6 +285,41 @@ test "apply: keeps failure context" {
     try std.testing.expect(std.mem.find(u8, got, "---- tests::b stdout ----") != null);
     try std.testing.expect(std.mem.find(u8, got, "panicked at") != null);
     try std.testing.expect(std.mem.find(u8, got, "res 1p 1f") != null);
+}
+
+test "apply: drops backtrace hint and redundant failures name-list" {
+    const input =
+        \\running 2 tests
+        \\test tests::a ... ok
+        \\test tests::b ... FAILED
+        \\
+        \\failures:
+        \\
+        \\---- tests::b stdout ----
+        \\thread 'tests::b' panicked at src/lib.rs:10:5:
+        \\assertion failed
+        \\note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        \\
+        \\
+        \\failures:
+        \\    tests::b
+        \\
+        \\test result: FAILED. 1 passed; 1 failed; 0 ignored; finished in 0.00s
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    // Failure signal preserved.
+    try std.testing.expect(std.mem.find(u8, got, "---- tests::b stdout ----") != null);
+    try std.testing.expect(std.mem.find(u8, got, "panicked at") != null);
+    try std.testing.expect(std.mem.find(u8, got, "res 1p 1f") != null);
+    // B7: backtrace hint dropped (never actionable).
+    try std.testing.expect(std.mem.find(u8, got, "RUST_BACKTRACE") == null);
+    // B7: the redundant `failures:` name list is dropped — those names already
+    // appear in the `---- NAME stdout ----` block headers.
+    try std.testing.expect(std.mem.find(u8, got, "failures:") == null);
 }
 
 test "apply: strips ANSI from kept lines" {

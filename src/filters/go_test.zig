@@ -6,11 +6,13 @@ const Writer = std.Io.Writer;
 // LOSSY compact filter for `go test -v` — on by default (v0.6). Set
 // SMLL_LOSSLESS=1 to bypass.
 //
-// Keeps: `--- FAIL:` lines, error context under a FAIL, `FAIL`/`ok` package
-//        summary, final `exit status` + `PASS`/`FAIL` marker, benchmark
-//        result lines (`BenchmarkX-N  ...`), and fuzz final stats.
+// Keeps: `--- FAIL:` lines, error context under a FAIL, `FAIL\t<pkg>`/`ok\t<pkg>`
+//        package summaries, benchmark result lines (`BenchmarkX-N  ...`), and
+//        fuzz final stats.
 // Drops: `--- PASS:` per-test output, `=== RUN` markers (passing), blank-line
-//        padding between passing tests, intermediate fuzz progress lines.
+//        padding between passing tests, intermediate fuzz progress lines, and
+//        the redundant bare `PASS` / `FAIL` verdict markers + `exit status N`
+//        (the per-package summary and process exit code already convey them).
 //
 // If no failures AND no benchmark/fuzz output kept, emits "all tests passed\n".
 //
@@ -53,14 +55,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 }
 
 fn hasFailureMarker(s: []const u8) bool {
+    // B8 drops the bare `FAIL` line, so a kept failure is signalled by the
+    // `--- FAIL:` test marker or the `FAIL\t<pkg>` package summary — both of
+    // which survive. (A bare `FAIL` never reaches `s` anymore.)
     if (std.mem.find(u8, s, "--- FAIL:") != null) return true;
     if (std.mem.find(u8, s, "FAIL\t") != null) return true;
-    if (std.mem.startsWith(u8, s, "FAIL\n")) return true;
-    // "FAIL" on its own line (package-level)
-    var it = std.mem.splitScalar(u8, s, '\n');
-    while (it.next()) |line| {
-        if (std.mem.eql(u8, std.mem.trim(u8, line, " \t\r"), "FAIL")) return true;
-    }
     return false;
 }
 
@@ -175,11 +174,13 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         // content here — but a bare FAIL/PASS marker terminates the test run).
         try out.appendSlice(allocator, pending.items);
         pending.clearRetainingCapacity();
-        if (std.mem.startsWith(u8, trimmed, "FAIL") or
+        // B8: keep the per-package `FAIL\t<pkg>\t<time>` / `ok\t<pkg>` summary,
+        // but drop the bare `FAIL` / `PASS` verdict markers and `exit status N`.
+        // Each is redundant with the `--- FAIL:` marker (kept above), the
+        // package summary, and the propagated process exit code.
+        if (std.mem.startsWith(u8, trimmed, "FAIL\t") or
             std.mem.startsWith(u8, trimmed, "ok\t") or
-            std.mem.startsWith(u8, trimmed, "ok  ") or
-            std.mem.startsWith(u8, trimmed, "PASS") or
-            std.mem.startsWith(u8, trimmed, "exit status"))
+            std.mem.startsWith(u8, trimmed, "ok  "))
         {
             try out.appendSlice(allocator, trimmed);
             try out.append(allocator, '\n');
@@ -308,6 +309,24 @@ test "apply: mixed benchmarks + unit tests with failures" {
     try std.testing.expect(std.mem.find(u8, got, "1234 ns/op") != null);
 }
 
+test "apply: bare PASS marker dropped (redundant with ok summary)" {
+    // Symmetry with B8's bare-`FAIL` drop: the standalone `PASS` line is
+    // redundant with the `ok\t<pkg>` summary, so it is dropped too. Use a
+    // benchmark run so scratch is actually emitted (not folded to "all passed").
+    const input = "BenchmarkAdd-8\t1000000\t1234 ns/op\n" ++
+        "PASS\n" ++
+        "ok  \tgithub.com/example/math\t1.234s\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    // Benchmark result + package summary survive.
+    try std.testing.expect(std.mem.find(u8, got, "BenchmarkAdd-8") != null);
+    try std.testing.expect(std.mem.find(u8, got, "ok  \tgithub.com/example/math") != null);
+    // B8: the bare `PASS` verdict marker is dropped.
+    try std.testing.expect(std.mem.find(u8, got, "\nPASS\n") == null);
+}
+
 test "apply: FAIL on own line counts as failure" {
     const input =
         \\=== RUN   TestA
@@ -323,5 +342,8 @@ test "apply: FAIL on own line counts as failure" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "--- FAIL: TestA") != null);
     try std.testing.expect(std.mem.find(u8, got, "foo_test.go:5: boom") != null);
-    try std.testing.expect(std.mem.find(u8, got, "exit status 1") != null);
+    // B8: the bare `FAIL` line and `exit status N` are redundant with the
+    // `--- FAIL:` marker and the propagated exit code, so they're dropped.
+    try std.testing.expect(std.mem.find(u8, got, "exit status") == null);
+    try std.testing.expect(std.mem.find(u8, got, "\nFAIL\n") == null);
 }

@@ -57,7 +57,9 @@ fn scan(allocator: Allocator, input: []const u8, writer: *Writer, state: *ScanSt
                 try appendLine(writer, state.pendingFile());
                 state.emitted_pending = true;
             }
-            try appendLine(writer, trimmed);
+            // B11: ESLint's "stylish" formatter pads columns with runs of
+            // spaces for terminal alignment; collapse them to single spaces.
+            try appendCollapsed(writer, trimmed);
             state.emitted_any = true;
             continue;
         }
@@ -126,6 +128,23 @@ fn appendLine(writer: *Writer, line: []const u8) !void {
     try writer.writeByte('\n');
 }
 
+/// Write `line` collapsing every run of two-or-more spaces to a single space,
+/// then a trailing newline. Used for ESLint stylish diagnostics whose column
+/// alignment padding carries no information.
+fn appendCollapsed(writer: *Writer, line: []const u8) !void {
+    var i: usize = 0;
+    while (i < line.len) {
+        const c = line[i];
+        try writer.writeByte(c);
+        if (c == ' ') {
+            while (i < line.len and line[i] == ' ') i += 1;
+        } else {
+            i += 1;
+        }
+    }
+    try writer.writeByte('\n');
+}
+
 test "eslint stylish diagnostics keep file, diagnostics, and summary" {
     const input =
         "ESLint is running\n\n" ++
@@ -142,6 +161,21 @@ test "eslint stylish diagnostics keep file, diagnostics, and summary" {
     try std.testing.expect(std.mem.find(u8, got, "no-unused-vars") != null);
     try std.testing.expect(std.mem.find(u8, got, "2 problems") != null);
     try std.testing.expect(std.mem.find(u8, got, "ESLint is running") == null);
+}
+
+test "eslint stylish padding collapses to single spaces" {
+    const input =
+        "/repo/src/app.ts\n" ++
+        "  1:7   error    'unused' is assigned a value but never used  no-unused-vars\n" ++
+        "\xe2\x9c\x96 1 problem (1 error, 0 warnings)\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    // B11: alignment padding inside the diagnostic is collapsed.
+    try std.testing.expect(std.mem.find(u8, got, "1:7 error 'unused' is assigned a value but never used no-unused-vars") != null);
+    // No multi-space run survives anywhere in the output.
+    try std.testing.expect(std.mem.find(u8, got, "  ") == null);
 }
 
 test "compact path diagnostics are preserved" {

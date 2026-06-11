@@ -2564,7 +2564,8 @@ test "smoke: npm install keeps WARN + summary, drops notice (default)" {
     // Deprecation summary + install/audit summary survive.
     try std.testing.expect(std.mem.find(u8, result.stdout, "deprecated x5: lodash.isequal, rimraf, inflight, glob, querystring") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "added 847 packages") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "run `npm audit` for details") != null);
+    // B14: `run `npm audit` for details` boilerplate is dropped.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "run `npm audit`") == null);
     // Upgrade-nag "npm notice" + funding prompts drop.
     try std.testing.expect(std.mem.find(u8, result.stdout, "npm WARN deprecated") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "npm notice") == null);

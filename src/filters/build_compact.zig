@@ -133,6 +133,8 @@ fn processStream(
     var it = std.mem.splitScalar(u8, trimmed, '\n');
     while (it.next()) |raw| {
         const line = ansi.stripInto(strip_buf, allocator, raw) catch raw;
+        // B13: drop GNU make's recursive `Entering/Leaving directory` chatter.
+        if (isMakeDirNoise(line)) continue;
         const kind = classify(line);
         switch (kind) {
             .cargo_progress => cargo_count.* += 1,
@@ -145,6 +147,15 @@ fn processStream(
             },
         }
     }
+}
+
+/// GNU make prints `make[N]: Entering directory '…'` / `Leaving directory`
+/// around every recursive sub-make. It's pure navigation chatter with no
+/// build signal, so drop it.
+fn isMakeDirNoise(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, "make")) return false;
+    return std.mem.find(u8, line, ": Entering directory") != null or
+        std.mem.find(u8, line, ": Leaving directory") != null;
 }
 
 fn findZigSuccessSummary(input: []const u8) ?[]const u8 {
@@ -305,6 +316,23 @@ test "apply: failed zig build summary preserves evidence" {
     try std.testing.expect(std.mem.find(u8, got, "run test 191 pass, 3 fail") != null);
     try std.testing.expect(std.mem.find(u8, got, "stats record agent-visible") != null);
     try std.testing.expect(std.mem.find(u8, got, "Build Summary: 138/140") != null);
+}
+
+test "apply: drops make recursive directory chatter" {
+    const input =
+        \\make[1]: Entering directory '/home/user/project/src'
+        \\gcc -c foo.c
+        \\make[1]: Leaving directory '/home/user/project/src'
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    // B13: make directory navigation is dropped; real progress still collapses.
+    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (make)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Entering directory") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Leaving directory") == null);
 }
 
 test "apply: empty input yields empty output" {
