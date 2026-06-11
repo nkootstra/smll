@@ -3020,7 +3020,7 @@ test "smoke: ruff preserves diagnostics" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expectEqualStrings("src/a.py:1:8: F401 `os` imported but unused\nFound 1 error.\n", result.stdout);
+    try std.testing.expectEqualStrings("src/a.py\n  1:8 F401 `os` imported but unused\nFound 1 error.\n", result.stdout);
 }
 
 const pip_fixture =
