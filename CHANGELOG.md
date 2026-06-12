@@ -9,6 +9,14 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+### Added
+
+- `scripts/bench-pipe.sh` and a non-blocking `pipe-bench` CI job measure pipe
+  throughput (MB/s) over the whole `tests/fixtures/large/` corpus as a single
+  concatenated stream, so the number reflects scan speed rather than process
+  startup. A generous floor surfaces a CI annotation on an egregious regression
+  (e.g. an accidental O(n²) scan) without blocking merges.
+
 ### Changed
 
 - Pipe-mode dispatch now runs a single-pass pre-classifier before the

@@ -74,3 +74,24 @@ jobs:
           name: smll-linux
           path: zig-out/release/smll
           retention-days: 14
+
+  # Non-blocking pipe-throughput smoke alarm. continue-on-error keeps it off the
+  # merge gate: a floor trip surfaces a ::error:: annotation for a human to look
+  # at, but never blocks a PR. Catches egregious scan regressions (e.g. O(n^2)),
+  # not microbenchmark noise.
+  pipe-bench:
+    needs: test
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Set up Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.16.0
+          cache-size-limit: 512
+          cache-key: pipe-bench
+      - name: Confirm Zig version
+        run: bash scripts/check-zig-version.sh
+      - name: Benchmark pipe throughput
+        run: RUNS=25 WARMUP=5 bash scripts/bench-pipe.sh
