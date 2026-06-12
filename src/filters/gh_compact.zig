@@ -68,6 +68,14 @@ pub fn applyPrView(allocator: Allocator, stdout: []const u8, stderr: []const u8,
         off = nl + 1;
     }
 
+    // Real `gh pr view` always emits a `--` separator between the metadata block
+    // and the body. Without it (a malformed or future shape), bail to raw rather
+    // than risk emitting a header-only or empty result.
+    if (body_start == null) {
+        try writer.writeAll(stdout);
+        return;
+    }
+
     // Header: `#<number> <state> <title>` from whichever parts are present.
     var wrote_header = false;
     if (number.len > 0) {
@@ -135,9 +143,11 @@ pub fn applyPrChecks(allocator: Allocator, stdout: []const u8, stderr: []const u
     defer detail.deinit(allocator);
 
     // Track distinct states in first-seen order so the summary reads naturally.
-    var states: [16][]const u8 = undefined;
-    var counts: [16]usize = undefined;
-    var n_states: usize = 0;
+    // A growable list (not a fixed array) keeps the per-state counts summing to
+    // `total` no matter how many distinct states appear — no silent cap.
+    const Tally = struct { state: []const u8, count: usize };
+    var tallies: std.ArrayList(Tally) = .empty;
+    defer tallies.deinit(allocator);
     var total: usize = 0;
 
     var lines = std.mem.splitScalar(u8, stdout, '\n');
@@ -157,18 +167,14 @@ pub fn applyPrChecks(allocator: Allocator, stdout: []const u8, stderr: []const u
         total += 1;
 
         var found = false;
-        for (0..n_states) |i| {
-            if (std.mem.eql(u8, states[i], state)) {
-                counts[i] += 1;
+        for (tallies.items) |*t| {
+            if (std.mem.eql(u8, t.state, state)) {
+                t.count += 1;
                 found = true;
                 break;
             }
         }
-        if (!found and n_states < states.len) {
-            states[n_states] = state;
-            counts[n_states] = 1;
-            n_states += 1;
-        }
+        if (!found) try tallies.append(allocator, .{ .state = state, .count = 1 });
 
         // Keep non-passing checks verbatim (name + state + duration + url).
         if (!std.mem.eql(u8, state, "pass")) {
@@ -183,9 +189,9 @@ pub fn applyPrChecks(allocator: Allocator, stdout: []const u8, stderr: []const u
     }
 
     try writer.print("{d} checks:", .{total});
-    for (0..n_states) |i| {
+    for (tallies.items, 0..) |t, i| {
         try writer.writeAll(if (i == 0) " " else ", ");
-        try writer.print("{d} {s}", .{ counts[i], states[i] });
+        try writer.print("{d} {s}", .{ t.count, t.state });
     }
     try writer.writeByte('\n');
     try writer.writeAll(detail.items);
@@ -268,7 +274,11 @@ fn emitJobs(allocator: Allocator, items: []const []const u8, i: *usize, writer: 
     defer detail.deinit(allocator);
     var passed: usize = 0;
 
-    while (i.* < items.len and !isSectionHeader(items[i.*])) : (i.* += 1) {
+    // Stop at the next section header *or* the footer: a run with no ANNOTATIONS
+    // and no ARTIFACTS goes straight from JOBS to the footer, and those lines
+    // must not be mistaken for failed jobs (they belong to the outer loop, which
+    // drops the generic per-job hint).
+    while (i.* < items.len and !isSectionHeader(items[i.*]) and !isFooter(items[i.*])) : (i.* += 1) {
         const line = items[i.*];
         if (line.len == 0) continue;
         if (std.mem.startsWith(u8, line, "  ")) {
@@ -362,6 +372,9 @@ fn emitAnnotations(allocator: Allocator, items: []const []const u8, i: *usize, w
         }
         if (!found) {
             var locs: std.ArrayList([]const u8) = .empty;
+            // Owned by `locs` until `groups.append` succeeds; the groups defer
+            // only frees what made it into the list, so guard the gap.
+            errdefer locs.deinit(allocator);
             if (loc.len > 0) try locs.append(allocator, loc);
             try groups.append(allocator, .{ .msg = msg, .locs = locs });
         }
@@ -520,6 +533,25 @@ test "run view keeps the failing job, its failing steps, and error annotations" 
     try testing.expect(std.mem.indexOf(u8, got, "To see what failed") != null);
     // The four identical deprecation warnings collapse to a single grouped line.
     try testing.expectEqual(@as(usize, 1), std.mem.count(u8, got, "Node.js 20 actions are deprecated"));
+}
+
+test "run view routes the footer correctly when JOBS is followed straight by it" {
+    // A run with no ANNOTATIONS and no ARTIFACTS goes JOBS -> footer directly.
+    // The footer lines must not be consumed as failed jobs: the generic per-job
+    // hint is dropped and the run URL is kept.
+    const input =
+        "\n✓ main ci · 1\nTriggered via push about 4 minutes ago\n\n" ++
+        "JOBS\n✓ test (ubuntu-latest) in 23s (ID 1)\n✓ fmt-check in 12s (ID 2)\n\n" ++
+        "For more information about a job, try: gh run view --job=<job-id>\n" ++
+        "View this run on GitHub: https://github.com/nkootstra/smll/actions/runs/1\n";
+    var out = std.Io.Writer.Allocating.init(testing.allocator);
+    defer out.deinit();
+    try applyRunView(testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try testing.expect(std.mem.indexOf(u8, got, "JOBS\n✓ 2 passed\n") != null);
+    try testing.expect(std.mem.indexOf(u8, got, "View this run on GitHub: https://github.com/nkootstra/smll/actions/runs/1") != null);
+    // The generic hint is dropped, not emitted as a fake job row.
+    try testing.expect(std.mem.indexOf(u8, got, "For more information about a job") == null);
 }
 
 test "run view passes through input with no JOBS section unchanged" {
