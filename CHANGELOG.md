@@ -11,6 +11,15 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Added
 
+- Plain `ls` (no `-l`) now gets argv-gated normalization in wrapper mode
+  (`src/filters/ls_compact.zig` `applyPlain`). `-C`/`-x`/`-m` column and comma
+  layouts are split back to one name per line and re-sorted, so the result is
+  the same listing plain `ls` would have printed; `.`/`..` are dropped. A
+  single-directory listing is never collapsed — every name is shown. Only
+  multi-directory output (`ls a b`, `ls -R`) collapses each sub-listing of ≥3
+  entries to `dir/ (N entries: a, b, c)`, keeping the headerless top block of
+  `ls -R` in full. Fails safe: a blocked listing that parses to nothing passes
+  through raw, and `SMLL_LOSSLESS=1` bypasses it.
 - `gh pr view`, `gh pr checks`, and `gh run view` get purpose-built compaction
   in wrapper mode (new `src/filters/gh_compact.zig`, dispatched by argv so the
   shape is never guessed). `gh pr view` folds the `number`/`state`/`title`
