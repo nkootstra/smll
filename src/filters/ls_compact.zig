@@ -130,13 +130,21 @@ fn extractName(line: []const u8) ?[]const u8 {
 // (≥2 interior spaces, or a literal ", ") can mis-split.
 // ---------------------------------------------------------------------------
 
-/// True when argv requests a multi-column / comma layout (`-C`, `-x`, `-m`),
-/// possibly inside a combined short-flag cluster like `-xF`. Plain `ls`
-/// through a pipe is already one-per-line, so without one of these flags we
-/// never see columns; long-format (`-l`) output is routed by `matches`
-/// (content), not here. `--long` options are ignored (they take the slow path).
+/// True when argv requests a multi-column / comma layout: a short flag `-C`,
+/// `-x`, or `-m` (possibly in a cluster like `-xF`), or the long form
+/// `--format=across|commas|horizontal|vertical`. Plain `ls` through a pipe is
+/// already one-per-line, so without one of these we never see columns;
+/// long-format output (`-l`, `--format=long`/`verbose`) is routed by `matches`
+/// (content), not here. Other `--long` options take the non-columnar path.
 pub fn wantsColumns(argv: []const []const u8) bool {
     for (argv) |a| {
+        if (std.mem.startsWith(u8, a, "--format=")) {
+            const v = a["--format=".len..];
+            if (std.mem.eql(u8, v, "across") or std.mem.eql(u8, v, "commas") or
+                std.mem.eql(u8, v, "horizontal") or std.mem.eql(u8, v, "vertical"))
+                return true;
+            continue;
+        }
         if (a.len < 2 or a[0] != '-' or a[1] == '-') continue;
         for (a[1..]) |c| switch (c) {
             'C', 'x', 'm' => return true,
@@ -273,6 +281,11 @@ pub fn applyPlain(
 
 /// Single-directory listing → one name per line, `.`/`..` dropped. Never
 /// collapses; with `columnar_hint` each row is split back into its names.
+///
+/// Unlike `applyBlocks`, this never returns `error.ParsedNothing`: a flat
+/// listing has no structured format to misparse, so empty output can only mean
+/// every entry was a dropped `.`/`..` (a genuinely empty dir) — the correct
+/// result, not a parse failure. (`apply` for `ls -l` treats this case the same.)
 fn applyFlat(allocator: Allocator, stdout: []const u8, writer: *Writer, columnar_hint: bool) !void {
     var names: std.ArrayList([]const u8) = .empty;
     defer names.deinit(allocator);
@@ -516,10 +529,17 @@ test "wantsColumns: -C/-x/-m (incl. clusters) yes; long/one-col no" {
     try std.testing.expect(wantsColumns(&.{ "ls", "-x" }));
     try std.testing.expect(wantsColumns(&.{ "ls", "-m" }));
     try std.testing.expect(wantsColumns(&.{ "ls", "-xF" })); // cluster
+    // GNU long-form equivalents of -m/-x/-C.
+    try std.testing.expect(wantsColumns(&.{ "ls", "--format=commas" }));
+    try std.testing.expect(wantsColumns(&.{ "ls", "--format=across", "src" }));
+    try std.testing.expect(wantsColumns(&.{ "ls", "--format=horizontal" }));
+    try std.testing.expect(wantsColumns(&.{ "ls", "--format=vertical" }));
     try std.testing.expect(!wantsColumns(&.{ "ls", "-la" }));
     try std.testing.expect(!wantsColumns(&.{ "ls", "-1" }));
     try std.testing.expect(!wantsColumns(&.{ "ls", "src" }));
     try std.testing.expect(!wantsColumns(&.{ "ls", "--color=auto" }));
+    try std.testing.expect(!wantsColumns(&.{ "ls", "--format=long" }));
+    try std.testing.expect(!wantsColumns(&.{ "ls", "--format=single-column" }));
 }
 
 test "applyPlain: -C column-major split → sorted one name per line" {
