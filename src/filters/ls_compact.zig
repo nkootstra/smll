@@ -124,8 +124,10 @@ fn extractName(line: []const u8) ?[]const u8 {
 //   • multi-directory output (`ls a b`, `ls -R`) → collapse big sub-listings to
 //     `dir/ (N entries: a, b, c)` while keeping the structure.
 // `.`/`..` are dropped (zero information). A flat single-directory listing is
-// never collapsed — a directory the caller asked to see is shown in full, so
-// this path is lossless except for the explicitly-multi-directory collapse.
+// never collapsed — a directory the caller asked to see is shown in full. The
+// plain (non-`-C`/`-x`/`-m`) path is lossless apart from the explicit
+// multi-directory collapse; column reflow is heuristic and a pathological name
+// (≥2 interior spaces, or a literal ", ") can mis-split.
 // ---------------------------------------------------------------------------
 
 /// True when argv requests a multi-column / comma layout (`-C`, `-x`, `-m`),
@@ -171,16 +173,21 @@ fn looksLikeBlocks(stdout: []const u8) bool {
         }
         if (pending_blank) saw_interior_blank = true;
         pending_blank = false;
-        if (prev_blank and std.mem.endsWith(u8, line, ":")) saw_header = true;
+        // Require ≥1 char before the colon: a lone ":" is a (pathological)
+        // filename, not a `dir:` header.
+        if (prev_blank and line.len >= 2 and std.mem.endsWith(u8, line, ":")) saw_header = true;
         prev_blank = false;
         saw_content = true;
     }
     return saw_header and saw_interior_blank;
 }
 
-/// Split one columnar/comma row into names. Separators: tab, comma, or a run
-/// of ≥2 spaces (GNU space-padding). A single space is kept inside a name
-/// (`hello world`), so only genuine column gaps split. Empty tokens dropped.
+/// Split one columnar/comma row into names. Separators: tab, a run of ≥2
+/// spaces (GNU `-C`/`-x` padding), or ", "/trailing "," (GNU `-m`). A single
+/// space is kept inside a name (`hello world`) and a comma with no following
+/// space stays in the name (`RCS,v`), so only genuine column/list gaps split.
+/// Empty tokens dropped. Pathological names (≥2 interior spaces, or ", ") can
+/// still mis-split — column reflow is heuristic, not lossless.
 fn tokenizeInto(allocator: Allocator, line: []const u8, list: *std.ArrayList([]const u8)) !void {
     var i: usize = 0;
     var start: ?usize = null;
@@ -200,13 +207,27 @@ fn tokenizeInto(allocator: Allocator, line: []const u8, list: *std.ArrayList([]c
             i = j;
             continue;
         }
-        if (c == '\t' or c == ',') {
+        if (c == '\t') {
             if (start) |s| {
                 try appendToken(allocator, list, line[s..i]);
                 start = null;
             }
             i += 1;
             continue;
+        }
+        if (c == ',') {
+            // `ls -m` joins names with ", " and, at a wrap, ends a line with a
+            // bare ",". A comma NOT followed by a space (and not line-final) is
+            // part of the filename (`RCS,v`, `a,b`) — leave it attached.
+            const is_sep = (i + 1 == line.len) or line[i + 1] == ' ';
+            if (is_sep) {
+                if (start) |s| {
+                    try appendToken(allocator, list, line[s..i]);
+                    start = null;
+                }
+                i += 1;
+                continue;
+            }
         }
         if (start == null) start = i;
         i += 1;
@@ -263,8 +284,11 @@ fn applyFlat(allocator: Allocator, stdout: []const u8, writer: *Writer, columnar
         if (columnar_hint) {
             try tokenizeInto(allocator, line, &names);
         } else {
-            const t = std.mem.trimEnd(u8, line, " \t");
-            if (t.len != 0) try names.append(allocator, t);
+            // Non-columnar: plain `ls` through the pipe is already one name per
+            // line with no padding, so keep the line verbatim — trimming
+            // trailing spaces would corrupt a name that legitimately ends in
+            // one. (`line` is already stripped of a trailing `\r`.)
+            try names.append(allocator, line);
         }
     }
 
@@ -299,7 +323,7 @@ fn applyBlocks(allocator: Allocator, stdout: []const u8, writer: *Writer, column
             prev_blank = true;
             continue;
         }
-        if (prev_blank and std.mem.endsWith(u8, line, ":")) {
+        if (prev_blank and line.len >= 2 and std.mem.endsWith(u8, line, ":")) {
             if (columnar_hint) sortNames(entries.items);
             try flushSegment(writer, header, entries.items, &first);
             header = line[0 .. line.len - 1];
@@ -311,8 +335,7 @@ fn applyBlocks(allocator: Allocator, stdout: []const u8, writer: *Writer, column
         if (columnar_hint) {
             try tokenizeInto(allocator, line, &entries);
         } else {
-            const t = std.mem.trimEnd(u8, line, " \t");
-            if (t.len != 0) try entries.append(allocator, t);
+            try entries.append(allocator, line); // verbatim; see applyFlat
         }
     }
     if (columnar_hint) sortNames(entries.items);
@@ -327,6 +350,11 @@ fn flushSegment(writer: *Writer, header: ?[]const u8, entries: []const []const u
     for (entries) |e| {
         if (!isDotEntry(e)) real += 1;
     }
+    // Empty segment (an empty subdir under `ls -R`, or a dir with only `.`/`..`)
+    // emits nothing. The directory still appears as an entry in its parent's
+    // listing, so its existence is not lost — only the redundant empty
+    // expansion is dropped. (Emitting a marker here would also require buffering
+    // to preserve the "ParsedNothing ⟹ nothing written yet" fallback contract.)
     if (real == 0) return;
 
     const h = header orelse {
@@ -520,6 +548,37 @@ test "applyPlain: -m comma layout (wrapped) → one name per line" {
     try std.testing.expect(std.mem.find(u8, got, "filter_catalog.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "wrapper.zig\n") != null);
     try std.testing.expectEqual(@as(usize, 18), std.mem.count(u8, got, "\n"));
+}
+
+test "applyPlain: -m comma inside a filename is not split" {
+    // `ls -m` separates with ", "; a comma that is part of a name (RCS `,v`,
+    // archives like `a,b`) has no following space and must stay attached.
+    const input = "RCS,v, README, a,b\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyPlain(std.testing.allocator, input, &.{}, &out.writer, true);
+    try std.testing.expectEqualStrings("RCS,v\nREADME\na,b\n", out.written());
+}
+
+test "applyPlain: trailing space in a name is preserved (non-columnar)" {
+    // Plain `ls` through the pipe emits names verbatim; a name that ends in a
+    // space must not be silently trimmed.
+    const input = "weird name \nnormal\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyPlain(std.testing.allocator, input, &.{}, &out.writer, false);
+    try std.testing.expectEqualStrings("weird name \nnormal\n", out.written());
+}
+
+test "applyPlain: a lone ':' header is treated as a name, not a block header" {
+    // `ls : real` where `:` is a real directory: a lone ":" must not become an
+    // empty-named `/ (N entries: ...)` collapse. It stays an ordinary entry;
+    // the genuine `real:` header still collapses its (small) segment.
+    const input = ":\nfoo\nbar\nbaz\n\nreal:\nqux\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyPlain(std.testing.allocator, input, &.{}, &out.writer, false);
+    try std.testing.expectEqualStrings(":\nfoo\nbar\nbaz\nreal/qux\n", out.written());
 }
 
 test "applyPlain: flat non-columnar passthrough drops . and .." {
