@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const signals = @import("signals");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -23,6 +24,12 @@ const KEEP_NEEDLES = [_][]const u8{
     "---- ",
     "bench:", // cargo bench / cargo test --bench result lines
 };
+
+/// Superset gate for the pipe dispatcher: both match-paths contain "test", so a
+/// false gate guarantees `matches()` is false. See src/signals.zig.
+pub fn sigGate(s: signals.Signals) bool {
+    return s.cargoTest();
+}
 
 pub fn matches(input: []const u8) bool {
     // Quick scan for either the "running N tests" or "test result:" markers.
