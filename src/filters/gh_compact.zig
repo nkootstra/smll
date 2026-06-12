@@ -456,6 +456,24 @@ test "pr checks collapses an all-pass table to a one-line aggregate" {
     try testing.expectEqualStrings("8 checks: 8 pass\n", out.written());
 }
 
+test "pr checks keeps non-passing rows verbatim under the aggregate" {
+    // Real `gh pr checks` capture from this repo while a PR's CI was mid-run, so
+    // the detail path is exercised on genuine pass+pending data.
+    var out = std.Io.Writer.Allocating.init(testing.allocator);
+    defer out.deinit();
+    try applyPrChecks(testing.allocator, @embedFile("fixture_gh_pr_checks_pending"), "", &out.writer);
+    const got = out.written();
+    // pass is seen first, pending second; counts fold per state.
+    try testing.expect(std.mem.startsWith(u8, got, "6 checks: 3 pass, 3 pending\n"));
+    // Every pending row stays so the agent can click through to the live check.
+    try testing.expect(std.mem.indexOf(u8, got, "Greptile Review\tpending\t0\thttps://greptile.com/") != null);
+    try testing.expect(std.mem.indexOf(u8, got, "test (macos-latest)\tpending\t0\t") != null);
+    try testing.expect(std.mem.indexOf(u8, got, "test (ubuntu-latest)\tpending\t0\t") != null);
+    // Passing rows are folded away into the count.
+    try testing.expect(std.mem.indexOf(u8, got, "fmt-check\tpass") == null);
+    try testing.expect(std.mem.indexOf(u8, got, "Socket Security") == null);
+}
+
 test "pr checks passes through non-tabular input unchanged" {
     const raw = "no checks reported on this branch\n";
     var out = std.Io.Writer.Allocating.init(testing.allocator);

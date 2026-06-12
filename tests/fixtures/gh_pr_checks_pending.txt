@@ -1,0 +1,6 @@
+Socket Security: Pull Request Alerts	pass	1s	https://socket.dev	
+fmt-check	pass	11s	https://github.com/nkootstra/smll/actions/runs/27435981735/job/81097896224	
+Greptile Review	pending	0	https://greptile.com/	
+test (macos-latest)	pending	0	https://github.com/nkootstra/smll/actions/runs/27435981735/job/81097896267	
+test (ubuntu-latest)	pending	0	https://github.com/nkootstra/smll/actions/runs/27435981735/job/81097896212	
+Socket Security: Project Report	pass	8s	https://socket.dev/dashboard/org/nkootstra/sbom/40407918-a544-42a8-aea2-504b2248b369	

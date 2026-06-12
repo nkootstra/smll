@@ -165,6 +165,7 @@ const modules = [_]ModuleEntry{
     .{ .name = "gh_compact", .fixtures = &.{
         .{ .name = "fixture_gh_pr_view", .path = "tests/fixtures/gh_pr_view.txt" },
         .{ .name = "fixture_gh_pr_checks", .path = "tests/fixtures/gh_pr_checks.txt" },
+        .{ .name = "fixture_gh_pr_checks_pending", .path = "tests/fixtures/gh_pr_checks_pending.txt" },
         .{ .name = "fixture_gh_run_view", .path = "tests/fixtures/gh_run_view.txt" },
         .{ .name = "fixture_gh_run_view_failed", .path = "tests/fixtures/gh_run_view_failed.txt" },
     } },
