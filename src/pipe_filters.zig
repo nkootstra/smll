@@ -5,6 +5,24 @@ const du_compact = @import("du_compact");
 const find_compact = @import("find_compact");
 const generic_compact = @import("generic_compact");
 const git_log = @import("git_log");
+const git_status = @import("git_status");
+const git_branch = @import("git_branch");
+const git_reflog = @import("git_reflog");
+const git_show = @import("git_show");
+const git_diff = @import("git_diff");
+const git_commit = @import("git_commit");
+const git_merge = @import("git_merge");
+const git_blame = @import("git_blame");
+const cargo_test = @import("cargo_test");
+const jest = @import("jest");
+const tsc = @import("tsc");
+const go_test = @import("go_test");
+const pytest = @import("pytest");
+const kubectl_compact = @import("kubectl_compact");
+const docker_compact = @import("docker_compact");
+const npm_install = @import("npm_install");
+const tree = @import("tree");
+const ls_compact = @import("ls_compact");
 
 /// Pipe-mode wrapper for find_compact — detects `find -ls` tabular output.
 pub const FindCompactPipe = struct {
@@ -61,4 +79,22 @@ pub const GitLogCompact = struct {
     pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
         return git_log.applyCompact(allocator, input, stderr, writer);
     }
+};
+
+// The pipe-mode filter chain: first match wins, falling through to
+// GenericCompactPipe (the size-gated catch-all). Shared by stdin pipe mode
+// (src/main.zig) and the `sh -c` re-dispatch arm (src/wrapper.zig), which routes
+// a captured shell command's stdout through the same content-detection chain.
+//
+// git_branch is included because branch-list output is stable and identifiable
+// by its leading "  " / "* " prefix; it sits after git_status and before
+// git_show (the branch shape is distinct from both). git_checkout is NOT here
+// because its matches() always returns false (argv-only in wrapper mode).
+pub const Filters = .{
+    git_status,    git_branch,      git_reflog,         git_show,
+    GitLogCompact, git_diff,        git_commit,         git_merge,
+    git_blame,     cargo_test,      jest,               tsc,
+    go_test,       pytest,          kubectl_compact,    docker_compact,
+    npm_install,   tree,            ls_compact,         FindCompactPipe,
+    DuCompactPipe, CurlCompactPipe, GenericCompactPipe,
 };

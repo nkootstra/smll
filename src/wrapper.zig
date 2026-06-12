@@ -39,6 +39,8 @@ const json_compact = @import("json_compact");
 const package_tree = @import("package_tree");
 const generic_compact = @import("generic_compact");
 const cat_compact = @import("cat_compact");
+const pipeline = @import("pipeline.zig");
+const pipe_filters = @import("pipe_filters.zig");
 
 const CountingWriter = wrapper_io.CountingWriter;
 const applyFilter = wrapper_io.applyFilter;
@@ -830,6 +832,34 @@ fn runWrapperInner(
             writer,
             stderr_writer,
         );
+    }
+
+    // `sh -c "<cmd>"` (and bash/zsh): agents wrap arbitrary commands in a shell,
+    // which erases the outer-argv signal every bespoke arm above relies on. So
+    // route the captured stdout through the pipe-mode content-detection chain —
+    // the exact first-match-wins dispatcher stdin uses — and let the output's
+    // own shape pick a filter. A content filter only fires when the *combined*
+    // output still matches its grammar, so `cmd1 && cmd2` mixed output safely
+    // falls through to GenericCompactPipe (the chain's size-gated catch-all,
+    // identical to the generic fallback below). Interactive/login shells are
+    // skipped (both short `-i`/`-l` and the bash/zsh long forms `--interactive`/
+    // `--login`): their output is for humans and may mix in prompt, job-control,
+    // or profile-script (`~/.bash_profile`, `/etc/zprofile`) noise that could
+    // trip a filter. SMLL_LOSSLESS=1 is honored by the `!lossless` guard.
+    if (!lossless and
+        eqAny(cmd_basename, &.{ "sh", "bash", "zsh" }) and
+        hasArg(argv, "-c") and
+        !hasArg(argv, "-i") and
+        !hasArg(argv, "--interactive") and
+        !hasArg(argv, "-l") and
+        !hasArg(argv, "--login"))
+    {
+        // Fail open to raw stdout on any dispatch error — never drop output.
+        pipeline.dispatch(allocator, stdout_slice, writer, pipe_filters.Filters) catch {
+            try writer.writeAll(stdout_slice);
+        };
+        try stderr_writer.writeAll(stderr_slice);
+        return exit_code;
     }
 
     // Non-git outer command: size-gated generic compactor on stdout

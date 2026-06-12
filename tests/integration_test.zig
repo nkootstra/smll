@@ -536,6 +536,152 @@ test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+// Like runSmllWrapper but allows extra environment variables (e.g. SMLL_LOSSLESS)
+// without prepending to PATH (the shells/coreutils resolve from the inherited PATH).
+fn runSmllInnerEnv(
+    allocator: std.mem.Allocator,
+    inner_argv: []const []const u8,
+    extra_env: []const [2][]const u8,
+) !RunResult {
+    var full: std.ArrayList([]const u8) = .empty;
+    defer full.deinit(allocator);
+    try full.append(allocator, exe_path);
+    for (inner_argv) |a| try full.append(allocator, a);
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("SMLL_TEE", "0");
+    for (extra_env) |kv| try env.put(kv[0], kv[1]);
+
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = full.items,
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .environ_map = &env,
+    });
+    child.stdin.?.close(io);
+    child.stdin = null;
+    return try drainChild(allocator, io, &child);
+}
+
+// D10 helper: run `smll <shell> -c "cat <tmpfile>"` where the tmpfile holds
+// `data`. The shell emits `data` on stdout with no outer-argv signal, so the
+// re-dispatch arm must route it through the pipe-mode content chain.
+fn runShCat(
+    allocator: std.mem.Allocator,
+    shell: []const u8,
+    data: []const u8,
+    extra_env: []const [2][]const u8,
+) !RunResult {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup(); // runs after drainChild below has waited on the child
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "payload", .data = data });
+    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "payload", allocator);
+    defer allocator.free(path);
+    // Single-quote the path: tmpDir paths we generate never contain single
+    // quotes, so this stays robust even when the system tmp dir has spaces.
+    const script = try std.fmt.allocPrint(allocator, "cat '{s}'", .{path});
+    defer allocator.free(script);
+    return runSmllInnerEnv(allocator, &.{ shell, "-c", script }, extra_env);
+}
+
+test "wrapper: sh -c re-dispatches captured stdout through the pipe chain (parity with stdin)" {
+    // D10: a shell erases the outer-argv signal, so smll routes `sh -c`'s
+    // captured stdout through the SAME first-match-wins chain that stdin pipe
+    // mode uses. The exact-parity invariant: for any payload X,
+    //   `smll sh -c "cat X"`  ==  `cat X | smll`.
+    // Proven across real captured fixtures that hit different bespoke filters
+    // (git_status, ls, docker), and across both POSIX shells present in CI
+    // (sh + bash; zsh is not installed on ubuntu-latest).
+    const allocator = std.testing.allocator;
+    const shells = [_][]const u8{ "sh", "bash" };
+    const fixtures = [_][]const u8{ dirty_fixture, ls_la_fixture, docker_ps_fixture };
+
+    for (shells) |shell| {
+        for (fixtures) |fixture| {
+            var expected = try runSmll(allocator, fixture); // stdin pipe mode
+            defer expected.deinit(allocator);
+            var actual = try runShCat(allocator, shell, fixture, &.{});
+            defer actual.deinit(allocator);
+
+            try std.testing.expectEqualSlices(u8, expected.stdout, actual.stdout);
+            try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, actual.term);
+        }
+    }
+
+    // Sanity: the git_status fixture is genuinely compacted (a bespoke filter
+    // fired), not merely passed through — otherwise the parity above would be
+    // vacuous.
+    var compacted = try runShCat(allocator, "sh", dirty_fixture, &.{});
+    defer compacted.deinit(allocator);
+    try std.testing.expect(compacted.stdout.len < dirty_fixture.len);
+}
+
+test "wrapper: SMLL_LOSSLESS=1 sh -c passes through raw (no re-dispatch)" {
+    // The lossless escape hatch must bypass the re-dispatch arm entirely:
+    // stdout comes back byte-identical to the shell command's raw output.
+    const allocator = std.testing.allocator;
+    var result = try runShCat(allocator, "sh", dirty_fixture, &.{.{ "SMLL_LOSSLESS", "1" }});
+    defer result.deinit(allocator);
+    try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: bash --login -c bypasses re-dispatch (long-form login flag)" {
+    // The guard must skip login shells via the long form, not just `-l`:
+    // `bash --login -c "cat FIXTURE"` sources profile scripts whose stdout
+    // could trip a filter, so it must pass through raw rather than re-dispatch.
+    // Proof: the raw git-status fixture's "On branch main" header survives —
+    // re-dispatch would have rewritten it to the compacted "# main". A login
+    // shell may prepend profile output but can never remove that line, so this
+    // stays deterministic across runners. (zsh is absent on CI; bash carries
+    // the long-form login flag on both Linux and macOS.)
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "payload", .data = dirty_fixture });
+    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "payload", allocator);
+    defer allocator.free(path);
+    const script = try std.fmt.allocPrint(allocator, "cat '{s}'", .{path});
+    defer allocator.free(script);
+
+    var result = try runSmllInnerEnv(allocator, &.{ "bash", "--login", "-c", script }, &.{});
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "On branch main") != null);
+}
+
+test "wrapper: sh -c mixed-grammar output falls through to the generic catch-all" {
+    // `cmd1 && cmd2` style mixed output: no single filter's grammar matches the
+    // concatenation of two unlike real fixtures, so the chain falls through to
+    // GenericCompactPipe — exactly as `(cat A; cat B) | smll` would. Parity with
+    // stdin mode proves the combined stream is not hijacked by the first filter.
+    const allocator = std.testing.allocator;
+    const mixed = try std.mem.concat(allocator, u8, &.{ dirty_fixture, docker_ps_fixture });
+    defer allocator.free(mixed);
+
+    var expected = try runSmll(allocator, mixed);
+    defer expected.deinit(allocator);
+    var actual = try runShCat(allocator, "sh", mixed, &.{});
+    defer actual.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, expected.stdout, actual.stdout);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, actual.term);
+}
+
+test "wrapper: sh -c propagates the inner command's non-zero exit code" {
+    // The re-dispatch arm returns the child shell's exit status unchanged, and
+    // tiny output that no filter claims falls to the chain's catch-all, which
+    // passes it through verbatim (below the generic-compaction threshold).
+    const allocator = std.testing.allocator;
+    var result = try runSmllInnerEnv(allocator, &.{ "sh", "-c", "echo hi; exit 3" }, &.{});
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 3 }, result.term);
+    try std.testing.expectEqualSlices(u8, "hi\n", result.stdout);
+}
+
 fn expectHelpOutput(out: []const u8) !void {
     try std.testing.expect(std.mem.startsWith(u8, out, "Usage:"));
     try std.testing.expect(std.mem.find(u8, out, "Usage:") != null);
@@ -1010,14 +1156,18 @@ test "wrapper: large stderr does not deadlock while stdout is still open" {
 
 test "wrapper: non-zero exit still emits filtered stdout" {
     const allocator = std.testing.allocator;
-    // Child prints a git-status-like single-line header then exits 1.
-    // smll should still filter/emit stdout and propagate exit code 1.
+    // Child prints clean-git-status output then exits 1. Under D10 the shell's
+    // captured stdout is routed through the pipe content chain, so git_status
+    // compacts "On branch main / nothing to commit" down to the "# main" header
+    // — and the non-zero exit code is still propagated unchanged. (Before D10
+    // this fell to the generic catch-all and passed through verbatim; the new
+    // behavior is the stronger guarantee: stdout is filtered even on failure.)
     const script = "printf 'On branch main\\nnothing to commit, working tree clean\\n'; exit 1";
     var result = try runSmllWrapper(allocator, &.{ "/bin/sh", "-c", script });
     defer result.deinit(allocator);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
     try std.testing.expect(result.stdout.len > 0);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "On branch main") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "# main") != null);
 }
 
 test "large status fixture: smll output == git_status.apply byte-for-byte" {
