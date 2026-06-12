@@ -307,7 +307,9 @@ fn isElisionTrigger(trimmed: []const u8, lang: Lang) bool {
         // `export …` lines are caught earlier by isImportLine and kept
         // verbatim, so only the non-exported function forms reach here.
         .typescript, .javascript => std.mem.startsWith(u8, trimmed, "function ") or
-            std.mem.startsWith(u8, trimmed, "async function "),
+            std.mem.startsWith(u8, trimmed, "async function ") or
+            isTsArrowFunction(trimmed) or
+            isTsMethodShorthand(trimmed),
         // Java method: an access modifier with a parameter list, but not a
         // class/interface declaration (those are containers we keep).
         .java => (std.mem.startsWith(u8, trimmed, "public ") or
@@ -320,6 +322,74 @@ fn isElisionTrigger(trimmed: []const u8, lang: Lang) bool {
             (std.mem.endsWith(u8, trimmed, "{") or std.mem.endsWith(u8, trimmed, ")")),
         else => false,
     };
+}
+
+/// TS/JS arrow-function binding whose body opens on this line, e.g.
+/// `const X = (…) => {` or `const X = async (…) => {` (also bare class-property
+/// arrows `name = (…) => {`). Companion to A2: recovers the compression A2
+/// gives up by re-eliding genuine function bodies.
+///
+/// Requires an assignment (` = `) before the arrow so inline callbacks like
+/// `arr.map((x) => {` are left whole, and excludes `type X = (…) => { … }`
+/// object-returning type aliases (those members are facts, not a body).
+fn isTsArrowFunction(trimmed: []const u8) bool {
+    if (!std.mem.endsWith(u8, trimmed, "{")) return false;
+    const arrow = std.mem.indexOf(u8, trimmed, "=>") orelse return false;
+    if (std.mem.startsWith(u8, trimmed, "type ")) return false;
+    return std.mem.indexOf(u8, trimmed[0..arrow], " = ") != null;
+}
+
+/// TS/JS method shorthand whose body opens on this line, e.g. `greet(): string {`
+/// or `constructor(msg: string) {` inside a class body. The closing-paren
+/// requirement excludes object-literal openers (`config = {`) and multiline
+/// call args (`foo({`) — the cases where eliding would drop real fields — while
+/// the head check rejects control flow (`if (…) {`, `for (…) {`).
+fn isTsMethodShorthand(trimmed: []const u8) bool {
+    if (!std.mem.endsWith(u8, trimmed, "{")) return false;
+    if (std.mem.indexOf(u8, trimmed, "=>") != null) return false; // arrows handled above
+    const open = std.mem.indexOfScalar(u8, trimmed, '(') orelse return false;
+    if (open == 0) return false; // need a name before "("
+    if (std.mem.indexOfScalar(u8, trimmed, ')') == null) return false;
+    return isMethodHead(trimmed[0..open]);
+}
+
+/// The text before a method's `(` must be an identifier optionally prefixed by
+/// modifier keywords (`public`, `static`, `async`, `get`, `set`, …). Any
+/// control keyword or non-identifier token disqualifies it.
+fn isMethodHead(head_raw: []const u8) bool {
+    const head = std.mem.trim(u8, head_raw, " \t");
+    if (head.len == 0) return false;
+    var it = std.mem.tokenizeScalar(u8, head, ' ');
+    var saw_token = false;
+    while (it.next()) |tok| {
+        saw_token = true;
+        if (!isIdentLikeToken(tok)) return false;
+        if (isControlKeyword(tok)) return false;
+    }
+    return saw_token;
+}
+
+fn isIdentLikeToken(tok: []const u8) bool {
+    var i: usize = 0;
+    if (tok.len > 0 and tok[0] == '*') i = 1; // generator marker (`*gen`)
+    if (i >= tok.len) return false;
+    for (tok[i..]) |c| {
+        if (!(std.ascii.isAlphanumeric(c) or c == '_' or c == '$')) return false;
+    }
+    return true;
+}
+
+fn isControlKeyword(tok: []const u8) bool {
+    const kws = [_][]const u8{
+        "if",       "else",   "for",       "while",  "switch",
+        "catch",    "do",     "with",      "return", "case",
+        "function", "class",  "interface", "enum",   "namespace",
+        "type",     "new",    "typeof",    "await",  "yield",
+        "throw",    "delete", "void",      "in",     "of",
+        "import",   "export",
+    };
+    for (kws) |kw| if (std.mem.eql(u8, tok, kw)) return true;
+    return false;
 }
 
 fn isPythonSignature(trimmed: []const u8) bool {
@@ -526,6 +596,111 @@ test "apply: go struct fields are kept" {
     try std.testing.expect(std.mem.indexOf(u8, result, "Email string") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "func (u User) Greet() string {") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "return \"hi \"") == null);
+}
+
+test "apply: ts arrow function binding body is elided" {
+    const input =
+        \\const handler = (req, res) => {
+        \\    const x = compute(req);
+        \\    res.send(x);
+        \\};
+        \\
+    ;
+    const result = try applyToString(input, "handler.ts");
+    defer std.testing.allocator.free(result);
+    // Signature kept, body elided.
+    try std.testing.expect(std.mem.indexOf(u8, result, "const handler = (req, res) => {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "// ... (") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "res.send(x);") == null);
+}
+
+test "apply: ts async arrow binding body is elided" {
+    const input =
+        \\const load = async (id) => {
+        \\    const row = await db.find(id);
+        \\    return row;
+        \\};
+        \\
+    ;
+    const result = try applyToString(input, "load.ts");
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "const load = async (id) => {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "await db.find") == null);
+}
+
+test "apply: ts class method shorthand bodies are elided" {
+    const input =
+        \\class Greeter {
+        \\    greeting: string;
+        \\
+        \\    constructor(message: string) {
+        \\        this.greeting = message;
+        \\    }
+        \\
+        \\    greet(): string {
+        \\        return "Hello, " + this.greeting;
+        \\    }
+        \\}
+        \\
+    ;
+    const result = try applyToString(input, "greeter.ts");
+    defer std.testing.allocator.free(result);
+    // Signatures + field survive; method bodies elide.
+    try std.testing.expect(std.mem.indexOf(u8, result, "class Greeter {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "greeting: string;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "constructor(message: string) {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "greet(): string {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "this.greeting = message;") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "return \"Hello, \"") == null);
+}
+
+test "apply: ts object literal fields are NOT elided (no paren → not a method)" {
+    const input =
+        \\const config = {
+        \\    name: "x",
+        \\    retries: 3,
+        \\    nested: {
+        \\        deep: true,
+        \\    },
+        \\};
+        \\
+    ;
+    const result = try applyToString(input, "config.ts");
+    defer std.testing.allocator.free(result);
+    // Object fields are facts — must all survive.
+    try std.testing.expect(std.mem.indexOf(u8, result, "name: \"x\",") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "retries: 3,") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "deep: true,") != null);
+}
+
+test "apply: ts object-returning type alias is NOT elided" {
+    const input =
+        \\type Handler = (req: Req) => {
+        \\    status: number;
+        \\    body: string;
+        \\};
+        \\
+    ;
+    const result = try applyToString(input, "types.ts");
+    defer std.testing.allocator.free(result);
+    // The object type's members are facts, not a function body.
+    try std.testing.expect(std.mem.indexOf(u8, result, "status: number;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "body: string;") != null);
+}
+
+test "apply: ts top-level control flow is not mistaken for a method" {
+    // Defensive: a visible `if (…) {` must never be treated as a method head.
+    try std.testing.expect(!isTsMethodShorthand("if (cond) {"));
+    try std.testing.expect(!isTsMethodShorthand("for (let i = 0; i < n; i++) {"));
+    try std.testing.expect(!isTsMethodShorthand("} else if (x) {"));
+    try std.testing.expect(!isTsMethodShorthand("switch (kind) {"));
+    // Object-arg call openers (no closing paren on the line) are not methods.
+    try std.testing.expect(!isTsMethodShorthand("configure({"));
+    try std.testing.expect(!isTsMethodShorthand("const config = {"));
+    // Genuine method shorthands.
+    try std.testing.expect(isTsMethodShorthand("greet(): string {"));
+    try std.testing.expect(isTsMethodShorthand("constructor(message: string) {"));
+    try std.testing.expect(isTsMethodShorthand("async load(id: number): Promise<Row> {"));
 }
 
 test "apply: ts class keeps field and method signatures" {
