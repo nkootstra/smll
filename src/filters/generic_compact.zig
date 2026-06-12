@@ -322,7 +322,15 @@ fn appendOutputLine(
 ) !void {
     if (total_count > 1) {
         const fmt_line = try fmtLine(allocator, line, total_count);
-        try fmt_owned.append(allocator, fmt_line);
+        {
+            // fmt_line is untracked until fmt_owned takes ownership. The errdefer
+            // is scoped to *only* this block: it frees fmt_line if the tracking
+            // append fails, and discharges on normal exit. It must not cover the
+            // output_lines.append below — once fmt_owned owns fmt_line, the defer
+            // in apply() frees it, so freeing here too would be a double free.
+            errdefer allocator.free(fmt_line);
+            try fmt_owned.append(allocator, fmt_line);
+        }
         try output_lines.append(allocator, fmt_line);
     } else {
         try output_lines.append(allocator, line);
@@ -618,6 +626,32 @@ test "apply: borrowed unique lines, owned RLE line, and interior blank coexist" 
     defer out.deinit();
     try apply(std.testing.allocator, input, &out.writer);
     try std.testing.expectEqualStrings("x\n\na ×2\nb\n", out.written());
+}
+
+test "appendOutputLine: owned path leaks nothing when any allocation fails" {
+    // Targets the owned-allocation path directly via checkAllAllocationFailures,
+    // which injects an OOM at every allocation index in turn and asserts the
+    // callee both propagates error.OutOfMemory and leaks nothing. total_count > 1
+    // forces fmtLine -> fmt_owned.append, where fmt_line is briefly untracked; a
+    // missing or mis-scoped errdefer would surface here as a leak (no guard) or a
+    // double free (guard covering output_lines.append too).
+    //
+    // We drive appendOutputLine rather than apply() on purpose: apply() falls
+    // open on OOM via `ansi.stripInto(...) catch raw`, so it does not propagate
+    // error.OutOfMemory at every index and is incompatible with this harness.
+    const Helper = struct {
+        fn run(allocator: Allocator) !void {
+            var output_lines: std.ArrayList([]const u8) = .empty;
+            defer output_lines.deinit(allocator);
+            var fmt_owned: std.ArrayList([]u8) = .empty;
+            defer {
+                for (fmt_owned.items) |s| allocator.free(s);
+                fmt_owned.deinit(allocator);
+            }
+            try appendOutputLine(allocator, &output_lines, &fmt_owned, "repeated line", 3);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Helper.run, .{});
 }
 
 test "apply: full pipeline fuses passes" {
