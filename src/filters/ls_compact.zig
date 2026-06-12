@@ -65,6 +65,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var lines = std.mem.splitScalar(u8, stdout, '\n');
     var first = true;
     var had_content_lines = false;
+    var parsed_any = false;
     while (lines.next()) |line| {
         if (line.len == 0) continue;
         if (isTotalLine(line)) {
@@ -76,6 +77,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
         const name = extractName(line) orelse continue;
         if (name.len == 0) continue;
+        parsed_any = true;
+        // `.` and `..` always denote the current/parent directory — zero
+        // information for an agent reading a listing. Drop them.
+        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
         if (!first) try writer.writeByte('\n');
         first = false;
         try writer.writeAll(name);
@@ -84,8 +89,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     // Safety net: if we saw content lines (total or mode-prefixed) but
     // extracted zero filenames, the parser likely failed on an unexpected
     // format (eza/exa/lsd, non-English locale). Signal the caller to fall
-    // back to raw passthrough instead of returning empty output.
-    if (first and had_content_lines) return error.ParsedNothing;
+    // back to raw passthrough instead of returning empty output. A directory
+    // whose only entries are `.`/`..` parses fine (parsed_any) and correctly
+    // yields empty output — that is not a parse failure.
+    if (!parsed_any and had_content_lines) return error.ParsedNothing;
     if (!first) try writer.writeByte('\n');
 }
 
@@ -132,10 +139,47 @@ test "apply: fixture produces filename list" {
     try std.testing.expect(std.mem.find(u8, got, "main.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "pipeline.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "filters/") != null);
-    try std.testing.expect(std.mem.find(u8, got, "./") != null);
+    // `.` and `..` entries are dropped (zero information).
+    try std.testing.expect(std.mem.find(u8, got, "./") == null);
+    try std.testing.expect(std.mem.find(u8, got, "../") == null);
     // Ensure metadata stripped
     try std.testing.expect(std.mem.find(u8, got, "nielskootstra") == null);
     try std.testing.expect(std.mem.find(u8, got, "total") == null);
+}
+
+test "apply: . and .. entries dropped (zero information)" {
+    // `.` and `..` always refer to the current/parent dir — no information for
+    // an agent reading a listing. Drop them; keep real entries.
+    const input = "total 64\n" ++
+        "drwxr-xr-x  6 u s 192 Apr 19 08:25 .\n" ++
+        "drwxr-xr-x 13 u s 416 Apr 19 08:19 ..\n" ++
+        "drwxr-xr-x 22 u s 704 Apr 19 08:21 filters\n" ++
+        "-rw-r--r--  1 u s 132 Apr 19 08:25 main.zig\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expectEqualStrings("filters/\nmain.zig\n", out.written());
+}
+
+test "apply: empty dir (only . and ..) yields empty output, not ParsedNothing" {
+    // An empty directory's `ls -la` lists only `.`/`..`. After dropping both,
+    // empty output is correct — it must NOT be mistaken for a parse failure.
+    const input = "total 0\n" ++
+        "drwxr-xr-x 2 u s 64 Apr 1 00:00 .\n" ++
+        "drwxr-xr-x 3 u s 96 Apr 1 00:00 ..\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expectEqualStrings("", out.written());
+}
+
+test "apply: dir literally named '...' is preserved" {
+    // Only exact `.` and `..` are dropped; a dir named "..." is a real entry.
+    const input = "drwxr-xr-x 1 u s 0 Apr 1 00:00 ...\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    try std.testing.expectEqualStrings(".../\n", out.written());
 }
 
 test "apply: filename with spaces preserved" {
