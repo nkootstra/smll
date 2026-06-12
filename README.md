@@ -222,7 +222,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 320 KiB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 336 KiB (Linux x86_64
 release). No network calls, no telemetry. The only local state smll writes is
 under `~/.smll/`: cumulative stats, append-only command history, and optional
 tee logs for failed commands.

@@ -9,6 +9,13 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+### Changed
+
+- Raised the CI release size cap from 320 KiB to 336 KiB (344,064 bytes) to
+  make room for the in-progress runner/test output compaction work. Documented
+  that the gate measures a native x86_64 build, which runs slightly larger than
+  a cross-compiled one.
+
 ## [1.6.0] — 2026-06-07
 
 ### Added
