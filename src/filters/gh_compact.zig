@@ -22,14 +22,18 @@ const Writer = std.Io.Writer;
 //     to a count, failed jobs keep their failing steps) and de-duplicates the
 //     ANNOTATIONS section, where GitHub repeats the same multi-hundred-byte
 //     deprecation warning once per job. Identical annotations collapse to one
-//     line listing the affected jobs; error annotations are always kept.
+//     line that keeps the full message and lists every affected job. This
+//     applies to errors too: an error is never dropped, but if the identical
+//     error text fires in N jobs it collapses to one line listing all N jobs
+//     (the message and every location are preserved — only the verbatim
+//     repetition is removed).
 
 const Sigil = struct {
     const pass = "✓";
     const fail = "X";
-    const skip = "-";
-    const running = "*";
     const warn = "!";
+    // "-" (skip) and "*" (running) steps/jobs are kept verbatim by the catch-all
+    // non-pass branch, so they don't need named constants in the filter logic.
 };
 
 // ── gh pr view ──────────────────────────────────────────────────────────────

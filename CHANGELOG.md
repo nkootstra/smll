@@ -21,8 +21,10 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   `gh run view` collapses passing jobs to a count, keeps failing jobs with their
   failing steps, and de-duplicates the ANNOTATIONS section — GitHub repeats the
   same multi-hundred-byte Node-deprecation warning once per job, which now
-  collapses to a single line listing the affected jobs while error annotations
-  are always kept. Every handler fails safe: any input that does not match the
+  collapses to a single line that keeps the full message and lists every
+  affected job. Errors are never dropped — identical error text across N jobs
+  collapses the same way, preserving the message and all N locations. Every
+  handler fails safe: any input that does not match the
   expected non-TTY `gh` grammar passes through raw, and `SMLL_LOSSLESS=1`
   bypasses all three.
 - `smll sh -c "<cmd>"` (and `bash`/`zsh`) now route the wrapped command's
