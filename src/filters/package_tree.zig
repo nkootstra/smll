@@ -19,8 +19,12 @@ const p_endt = "\xe2\x94\x94\xe2\x94\x80\xe2\x94\xac ";
 const p_mid2 = "\xe2\x94\x9c\xe2\x94\x80 ";
 const p_end2 = "\xe2\x94\x94\xe2\x94\x80 ";
 
-// Mutually-exclusive prefixes (the byte after "├─"/"└─" differs: a third box
-// glyph for npm vs. a space for yarn), so membership tests never collide.
+// No 2-char needle is a substring of any 3-char needle (the byte after "├─"/
+// "└─" is 0x20 for yarn vs. 0xe2 — a third box glyph — for npm), so neither
+// `startsWith` in directPackage nor `find` in containsTreePackageMarker ever
+// cross-matches a yarn connector against an npm one. A `│  └─ ` continuation
+// line still contains `└─ ` as an interior match — that is intended: it marks a
+// transitive row.
 const all_prefixes = [_][]const u8{ p_mid3, p_end3, p_midt, p_endt, p_mid2, p_end2 };
 
 pub fn matches(input: []const u8) bool {
@@ -43,6 +47,13 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     // pnpm prints direct deps as a flat `name version` list under a
     // `dependencies:` header and ALL box-drawn rows are transitive. npm / yarn /
     // bun instead mark direct deps with a column-0 box connector.
+    //
+    // Single-root by design: workspace/`--recursive` output repeats the root +
+    // section blocks per package. We keep the first root and aggregate every
+    // section's direct deps under it (a blank line ends a section, not the
+    // listing), which is a faithful superset count rather than per-package
+    // attribution. That is acceptable for the "how many deps" signal this
+    // filter provides; `SMLL_LOSSLESS=1` yields the full per-package tree.
     const pnpm = isPnpmList(stdout);
     var in_section = false;
 
@@ -59,7 +70,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
 
         if (pnpm) {
             if (std.mem.startsWith(u8, line, "Legend:")) continue;
-            if (std.mem.endsWith(u8, line, "dependencies:")) {
+            // Any pnpm section header: dependencies / devDependencies /
+            // optionalDependencies / peerDependencies all share this suffix.
+            // A flat dep row is `name version` (a space, no trailing colon), so
+            // the suffix never collides with a real dependency line.
+            if (std.mem.endsWith(u8, line, "ependencies:")) {
                 in_section = true;
                 continue;
             }
@@ -263,6 +278,30 @@ test "yarn list: two-char connectors at column 0 are direct" {
     try std.testing.expect(std.mem.find(u8, got, "yarn list v1.22.22") != null);
     try std.testing.expect(std.mem.find(u8, got, "deps +8: ansi-styles@4.3.0, chalk@4.1.2, color-convert@2.0.1, color-name@1.1.4, debug@4.3.4, has-flag@4.0.0, ms@2.1.2, supports-color@7.2.0") != null);
     try std.testing.expect(std.mem.find(u8, got, "nested rows x6") != null);
+}
+
+test "pnpm devDependencies/optionalDependencies sections are kept" {
+    // Regression: the section gate must recognize the camelCase headers, not
+    // just lowercase `dependencies:`. A dev-only project must not report zero
+    // deps. Captured from real `pnpm list` on a devDeps+optionalDeps project.
+    const input =
+        "Legend: production dependency, optional only, dev only\n" ++
+        "\n" ++
+        "devonly-app@1.0.0 /repo (PRIVATE)\n" ++
+        "\n" ++
+        "devDependencies:\n" ++
+        "typescript 5.4.5\n" ++
+        "\n" ++
+        "optionalDependencies:\n" ++
+        "fsevents 2.3.3\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    const got = out.written();
+    try std.testing.expectEqualStrings(
+        "devonly-app@1.0.0 /repo (PRIVATE)\ndeps +2: typescript@5.4.5, fsevents@2.3.3\n",
+        got,
+    );
 }
 
 test "matches fires on each ecosystem and ignores plain text" {
