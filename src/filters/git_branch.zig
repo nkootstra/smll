@@ -34,18 +34,43 @@ pub fn matches(input: []const u8) bool {
 }
 
 pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !void {
-    _ = a;
     _ = stderr;
     // Branch list lands on stdout.
     const input = stdout;
     if (input.len == 0) return;
+
+    // `git branch -a` lists a local branch and then a `remotes/origin/<same>`
+    // tracking copy on a second line — pure duplication. When present, collapse
+    // each duplicate onto its local entry with a `=o` marker. This only engages
+    // when the input actually contains `remotes/` rows, so plain `git branch`
+    // output takes the streaming path below untouched.
+    const has_remotes = std.mem.find(u8, input, "remotes/") != null;
+    var local_set = std.StringHashMap(void).init(a);
+    defer local_set.deinit();
+    var origin_set = std.StringHashMap(void).init(a);
+    defer origin_set.deinit();
+    if (has_remotes) try scanBranchSets(input, &local_set, &origin_set);
 
     var it = std.mem.splitScalar(u8, input, '\n');
     while (it.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r");
         if (line.len == 0) continue;
 
-        if (try writeVerboseBranchLine(w, line)) {
+        // Decide the `=o` marker (or drop the line entirely) for `-a` output.
+        var marker: []const u8 = "";
+        if (has_remotes) {
+            if (firstBranchToken(line)) |tok| {
+                if (originName(tok)) |rn| {
+                    // remotes/origin/X duplicating a local branch → drop this
+                    // line; the local entry below carries the `=o` marker.
+                    if (!std.mem.eql(u8, rn, "HEAD") and local_set.contains(rn)) continue;
+                } else if (!isRemoteToken(tok) and origin_set.contains(tok)) {
+                    marker = " =o";
+                }
+            }
+        }
+
+        if (try writeVerboseBranchLine(w, line, marker)) {
             continue;
         } else if (std.mem.startsWith(u8, line, "* ")) {
             // Current branch: strip one leading space to save a byte → "* <name>"
@@ -53,6 +78,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
             //  We preserve verbatim to stay R2-lossless without any decode step.)
             try w.writeAll("* ");
             try w.writeAll(line[2..]);
+            try w.writeAll(marker);
             try w.writeByte('\n');
         } else if (line.len >= 2 and line[0] == ' ' and line[1] == ' ') {
             // Other branch: two-space indent → single space (saves 1 B per branch).
@@ -60,6 +86,7 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
             // start with "  " (two spaces), so re-matching returns false.
             try w.writeByte(' ');
             try w.writeAll(std.mem.trimStart(u8, line, " "));
+            try w.writeAll(marker);
             try w.writeByte('\n');
         } else {
             // Unknown line shape — pass through verbatim.
@@ -69,7 +96,55 @@ pub fn apply(a: Allocator, stdout: []const u8, stderr: []const u8, w: *Writer) !
     }
 }
 
-fn writeVerboseBranchLine(w: *Writer, line: []const u8) !bool {
+/// `remotes/origin/<name>` → `<name>`; null for any other token.
+fn originName(token: []const u8) ?[]const u8 {
+    const prefix = "remotes/origin/";
+    if (std.mem.startsWith(u8, token, prefix)) return token[prefix.len..];
+    return null;
+}
+
+/// Any remote-tracking row (`remotes/<remote>/...`), origin or otherwise.
+fn isRemoteToken(token: []const u8) bool {
+    return std.mem.startsWith(u8, token, "remotes/");
+}
+
+/// The branch-name token (first whitespace-delimited field after the sigil or
+/// indent). Handles `* name`, `  name`, and the already-compacted ` name`.
+fn firstBranchToken(line: []const u8) ?[]const u8 {
+    var rest: []const u8 = undefined;
+    if (std.mem.startsWith(u8, line, "* ")) {
+        rest = line[2..];
+    } else if (line.len >= 1 and line[0] == ' ') {
+        rest = std.mem.trimStart(u8, line, " ");
+    } else {
+        return null;
+    }
+    if (rest.len == 0) return null;
+    const end = std.mem.indexOfScalar(u8, rest, ' ') orelse rest.len;
+    return rest[0..end];
+}
+
+/// Pre-scan for `-a` collapse: record local branch names and the names that
+/// appear as `remotes/origin/<name>` (excluding the `HEAD` pointer row).
+fn scanBranchSets(
+    input: []const u8,
+    local_set: *std.StringHashMap(void),
+    origin_set: *std.StringHashMap(void),
+) !void {
+    var it = std.mem.splitScalar(u8, input, '\n');
+    while (it.next()) |raw| {
+        const line = std.mem.trimEnd(u8, raw, "\r");
+        if (line.len == 0) continue;
+        const tok = firstBranchToken(line) orelse continue;
+        if (originName(tok)) |rn| {
+            if (!std.mem.eql(u8, rn, "HEAD")) try origin_set.put(rn, {});
+        } else if (!isRemoteToken(tok)) {
+            try local_set.put(tok, {});
+        }
+    }
+}
+
+fn writeVerboseBranchLine(w: *Writer, line: []const u8, marker: []const u8) !bool {
     const current = std.mem.startsWith(u8, line, "* ");
     if (!current and !std.mem.startsWith(u8, line, "  ")) return false;
 
@@ -89,6 +164,7 @@ fn writeVerboseBranchLine(w: *Writer, line: []const u8) !bool {
         try w.writeByte(' ');
         try writeCompactVerboseTail(w, tail);
     }
+    try w.writeAll(marker);
     try w.writeByte('\n');
     return true;
 }
@@ -269,6 +345,62 @@ test "apply: single-branch repo passthrough (raw < 50 B → smll ≤ raw)" {
     const out = try str(a, input);
     defer a.free(out);
     try std.testing.expect(out.len <= input.len);
+}
+
+test "apply: -a collapses remotes/origin/X onto local X with =o marker" {
+    const a = std.testing.allocator;
+    const input =
+        "* main\n" ++
+        "  feature\n" ++
+        "  remotes/origin/main\n" ++
+        "  remotes/origin/feature\n" ++
+        "  remotes/origin/release-1\n" ++
+        "  remotes/origin/HEAD -> origin/main\n";
+    const out = try str(a, input);
+    defer a.free(out);
+    // Local branches that also exist as remotes/origin/X get a `=o` marker and
+    // the duplicate remote line is dropped. Remote-only branches and the HEAD
+    // pointer are kept (single-space indent).
+    try std.testing.expectEqualStrings(
+        "* main =o\n" ++
+            " feature =o\n" ++
+            " remotes/origin/release-1\n" ++
+            " remotes/origin/HEAD -> origin/main\n",
+        out,
+    );
+}
+
+test "apply: -a keeps non-origin remotes and does not mark unrelated locals" {
+    const a = std.testing.allocator;
+    const input =
+        "* main\n" ++
+        "  dev\n" ++
+        "  remotes/origin/main\n" ++
+        "  remotes/upstream/main\n";
+    const out = try str(a, input);
+    defer a.free(out);
+    // origin/main collapses onto main (=o). upstream/main is a different remote
+    // → kept verbatim. `dev` has no origin twin → no marker.
+    try std.testing.expectEqualStrings(
+        "* main =o\n" ++
+            " dev\n" ++
+            " remotes/upstream/main\n",
+        out,
+    );
+}
+
+test "pipe-mode idempotence: -a collapsed output is stable" {
+    const a = std.testing.allocator;
+    const input =
+        "* main\n" ++
+        "  feature\n" ++
+        "  remotes/origin/main\n" ++
+        "  remotes/origin/release-1\n";
+    const once = try str(a, input);
+    defer a.free(once);
+    const twice = try str(a, once);
+    defer a.free(twice);
+    try std.testing.expectEqualStrings(once, twice);
 }
 
 test "apply: empty input produces empty output" {
