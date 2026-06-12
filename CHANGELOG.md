@@ -11,6 +11,10 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Changed
 
+- Columnar tables now mark a repeated column value with a `~` sigil instead of a
+  bare blank gap, so an agent can tell "same as the row above" apart from a
+  genuinely empty field (and a trailing repeated column no longer leaves a
+  dangling space).
 - Raised the CI release size cap from 320 KiB to 336 KiB (344,064 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
