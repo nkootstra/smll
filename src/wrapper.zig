@@ -841,14 +841,18 @@ fn runWrapperInner(
     // own shape pick a filter. A content filter only fires when the *combined*
     // output still matches its grammar, so `cmd1 && cmd2` mixed output safely
     // falls through to GenericCompactPipe (the chain's size-gated catch-all,
-    // identical to the generic fallback below). Interactive/login shells
-    // (`-i`/`-l`) are skipped: their output is for humans and may carry prompt
-    // or job-control noise. SMLL_LOSSLESS=1 is honored by the `!lossless` guard.
+    // identical to the generic fallback below). Interactive/login shells are
+    // skipped (both short `-i`/`-l` and the bash/zsh long forms `--interactive`/
+    // `--login`): their output is for humans and may mix in prompt, job-control,
+    // or profile-script (`~/.bash_profile`, `/etc/zprofile`) noise that could
+    // trip a filter. SMLL_LOSSLESS=1 is honored by the `!lossless` guard.
     if (!lossless and
         eqAny(cmd_basename, &.{ "sh", "bash", "zsh" }) and
         hasArg(argv, "-c") and
         !hasArg(argv, "-i") and
-        !hasArg(argv, "-l"))
+        !hasArg(argv, "--interactive") and
+        !hasArg(argv, "-l") and
+        !hasArg(argv, "--login"))
     {
         // Fail open to raw stdout on any dispatch error — never drop output.
         pipeline.dispatch(allocator, stdout_slice, writer, pipe_filters.Filters) catch {

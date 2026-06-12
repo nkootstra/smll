@@ -580,7 +580,9 @@ fn runShCat(
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "payload", .data = data });
     const path = try tmp.dir.realPathFileAlloc(std.testing.io, "payload", allocator);
     defer allocator.free(path);
-    const script = try std.fmt.allocPrint(allocator, "cat {s}", .{path});
+    // Single-quote the path: tmpDir paths we generate never contain single
+    // quotes, so this stays robust even when the system tmp dir has spaces.
+    const script = try std.fmt.allocPrint(allocator, "cat '{s}'", .{path});
     defer allocator.free(script);
     return runSmllInnerEnv(allocator, &.{ shell, "-c", script }, extra_env);
 }
@@ -625,6 +627,30 @@ test "wrapper: SMLL_LOSSLESS=1 sh -c passes through raw (no re-dispatch)" {
     defer result.deinit(allocator);
     try std.testing.expectEqualSlices(u8, dirty_fixture, result.stdout);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: bash --login -c bypasses re-dispatch (long-form login flag)" {
+    // The guard must skip login shells via the long form, not just `-l`:
+    // `bash --login -c "cat FIXTURE"` sources profile scripts whose stdout
+    // could trip a filter, so it must pass through raw rather than re-dispatch.
+    // Proof: the raw git-status fixture's "On branch main" header survives —
+    // re-dispatch would have rewritten it to the compacted "# main". A login
+    // shell may prepend profile output but can never remove that line, so this
+    // stays deterministic across runners. (zsh is absent on CI; bash carries
+    // the long-form login flag on both Linux and macOS.)
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "payload", .data = dirty_fixture });
+    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "payload", allocator);
+    defer allocator.free(path);
+    const script = try std.fmt.allocPrint(allocator, "cat '{s}'", .{path});
+    defer allocator.free(script);
+
+    var result = try runSmllInnerEnv(allocator, &.{ "bash", "--login", "-c", script }, &.{});
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "On branch main") != null);
 }
 
 test "wrapper: sh -c mixed-grammar output falls through to the generic catch-all" {
