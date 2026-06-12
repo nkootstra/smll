@@ -1,0 +1,7 @@
+Legend: production dependency, optional only, dev only
+
+demo-app@1.0.0 /private/repo (PRIVATE)
+
+dependencies:
+chalk 4.1.2
+debug 4.3.4

@@ -1,0 +1,16 @@
+yarn list v1.22.22
+├─ ansi-styles@4.3.0
+│  └─ color-convert@^2.0.1
+├─ chalk@4.1.2
+│  ├─ ansi-styles@^4.1.0
+│  └─ supports-color@^7.1.0
+├─ color-convert@2.0.1
+│  └─ color-name@~1.1.4
+├─ color-name@1.1.4
+├─ debug@4.3.4
+│  └─ ms@2.1.2
+├─ has-flag@4.0.0
+├─ ms@2.1.2
+└─ supports-color@7.2.0
+   └─ has-flag@^4.0.0
+Done in 0.03s.

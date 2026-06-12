@@ -1,0 +1,13 @@
+Legend: production dependency, optional only, dev only
+
+demo-app@1.0.0 /private/repo (PRIVATE)
+
+dependencies:
+chalk 4.1.2
+├─┬ ansi-styles 4.3.0
+│ └─┬ color-convert 2.0.1
+│   └── color-name 1.1.4
+└─┬ supports-color 7.2.0
+  └── has-flag 4.0.0
+debug 4.3.4
+└── ms 2.1.2
