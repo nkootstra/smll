@@ -11,7 +11,8 @@ const Writer = std.Io.Writer;
 // Algorithm (one-way encode; decode is approximate and unused in product):
 //   1. Parse each line into fields, splitting on runs of ≥2 spaces.
 //   2. Rejoin fields with a single space (discards visual column alignment).
-//   3. In command-specific mode, per-column RLE elides repeated fields.
+//   3. In command-specific mode, per-column RLE replaces a field that repeats
+//      the row above with a '~' sigil (distinguishable from an empty field).
 //
 // Contract:
 //   • Byte content is altered (padding collapsed).  Not lossless.
@@ -137,7 +138,11 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
                 f.len > 0 and
                 std.mem.eql(u8, f, prev_fields.items[field_idx]))
             {
-                // Elided field: emit nothing (gap between spaces signals "same")
+                // Elided field: emit the '~' sigil so an agent can tell "same
+                // as the row above" apart from a genuinely empty field. A bare
+                // gap was ambiguous and, for a trailing column, left a dangling
+                // space.
+                try writer.writeByte('~');
             } else {
                 if (truncate_last_field and field_idx == cur_fields.items.len - 1) {
                     try writeTruncatedLastField(writer, f);
@@ -343,7 +348,7 @@ test "encode: preamble passthrough then RLE" {
         \\
         \\H1 H2
         \\foo bar
-        \\ baz
+        \\~ baz
         \\
     , out);
 }
@@ -354,7 +359,19 @@ test "encode: repeated column elided" {
     const input = "H1   H2\nfoo   bar\nfoo   baz\n";
     const out = try applyToString(a, input);
     defer a.free(out);
-    try std.testing.expectEqualStrings("H1 H2\nfoo bar\n baz\n", out);
+    try std.testing.expectEqualStrings("H1 H2\nfoo bar\n~ baz\n", out);
+}
+
+test "encode: every elided field emits ~ sigil, not a blank gap" {
+    const a = std.testing.allocator;
+    // cols 0 and 2 repeat across the two data rows; col 1 differs. Each elided
+    // position must carry '~' so an agent can distinguish "same as the row
+    // above" from a genuinely empty field — and so a trailing elided column
+    // never leaves a dangling space.
+    const input = "C0   C1   C2\nfoo   bar   baz\nfoo   qux   baz\n";
+    const out = try applyToString(a, input);
+    defer a.free(out);
+    try std.testing.expectEqualStrings("C0 C1 C2\nfoo bar baz\n~ qux ~\n", out);
 }
 
 test "encode: docker ps compresses" {
