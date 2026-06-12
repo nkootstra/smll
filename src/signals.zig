@@ -27,6 +27,11 @@ const std = @import("std");
 
 /// Bit position of each needle. Named so the gate accessors are self-documenting
 /// and a reorder of `needles` without updating its gate fails to compile.
+///
+/// Capacity is 32 needles: the tag is `u5` and presence is packed into
+/// `Signals.bits` (`u32`). Adding a 33rd needle would overflow both — widen the
+/// tag to `u6` and `Signals.bits` to `u64` (and the shift casts below) to grow.
+/// The comptime assert under `needles` guards the current ceiling.
 const Bit = enum(u5) {
     // cargo_test
     cargo_test,
@@ -95,6 +100,12 @@ const needles = blk: {
     break :blk table;
 };
 
+comptime {
+    // Presence is packed into a u32 (see Signals.bits); the all-needles mask
+    // and the shift casts assume <= 32 entries. See the note on `Bit`.
+    std.debug.assert(needles.len <= 32);
+}
+
 inline fn mask(comptime bits: []const Bit) u32 {
     comptime var m: u32 = 0;
     inline for (bits) |b| m |= @as(u32, 1) << @intFromEnum(b);
@@ -148,9 +159,11 @@ const first_byte_mask = blk: {
 /// inputs that reach the first gated filter in the dispatch order; cheap inputs
 /// claimed by an earlier filter never pay for it.
 pub fn compute(input: []const u8) Signals {
+    // Every needle present; once `found` saturates, no later byte can change it.
+    const all: u32 = (@as(u32, 1) << needles.len) - 1;
     var found: u32 = 0;
     var i: usize = 0;
-    while (i < input.len) : (i += 1) {
+    scan: while (i < input.len) : (i += 1) {
         // Candidate needles starting at this byte that we have not found yet.
         var cand = first_byte_mask[input[i]] & ~found;
         while (cand != 0) {
@@ -158,6 +171,10 @@ pub fn compute(input: []const u8) Signals {
             cand &= cand - 1; // clear lowest set bit
             if (std.mem.startsWith(u8, input[i..], needles[n])) {
                 found |= @as(u32, 1) << n;
+                // Checked only on a match (rare), so the negative large-stream
+                // hot path pays nothing; saturating exit for the unusual case
+                // of an early input carrying every needle.
+                if (found == all) break :scan;
             }
         }
     }
@@ -180,6 +197,24 @@ test "compute finds a needle regardless of offset (whole-input scan)" {
     @memcpy(buf[buf.len - tail.len ..], tail);
     const sig = compute(&buf);
     try std.testing.expect(sig.goTest()); // needle sits ~9 KiB in, still detected
+}
+
+test "compute saturates and early-exits when every needle is present" {
+    // Concatenate all needles (each on its own line so adjacency can't hide one)
+    // — this drives the `found == all` saturating break in compute().
+    var buf: [1024]u8 = undefined;
+    var len: usize = 0;
+    for (needles) |n| {
+        @memcpy(buf[len .. len + n.len], n);
+        len += n.len;
+        buf[len] = '\n';
+        len += 1;
+    }
+    const sig = compute(buf[0..len]);
+    const all: u32 = (@as(u32, 1) << needles.len) - 1;
+    try std.testing.expectEqual(all, sig.bits);
+    try std.testing.expect(sig.cargoTest() and sig.jest() and sig.tsc() and
+        sig.goTest() and sig.pytest() and sig.npmInstall());
 }
 
 test "compute reports nothing on unrelated text" {
