@@ -165,10 +165,16 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
     var emitted_bodies = std.StringHashMap(void).init(allocator);
     defer emitted_bodies.deinit();
 
+    // output_lines holds borrowed views. A unique line (count <= 1) points
+    // directly into clean_lines memory, which lives for the whole function, so
+    // it needs no allocation. Only collapsed `<line> ×N` lines are freshly
+    // allocated; those are owned by fmt_owned and freed there.
     var output_lines: std.ArrayList([]const u8) = .empty;
+    defer output_lines.deinit(allocator);
+    var fmt_owned: std.ArrayList([]u8) = .empty;
     defer {
-        for (output_lines.items) |s| allocator.free(s);
-        output_lines.deinit(allocator);
+        for (fmt_owned.items) |s| allocator.free(s);
+        fmt_owned.deinit(allocator);
     }
 
     var prev_body: []const u8 = "";
@@ -192,12 +198,10 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
 
         if (run_count > 0) {
             const total_count = body_map.get(prev_body).?.count;
-            const fmt_line = try fmtLine(allocator, prev_line, total_count);
             if (pending_blank and output_lines.items.len > 0) {
-                const blank = try allocator.dupe(u8, "");
-                try output_lines.append(allocator, blank);
+                try output_lines.append(allocator, "");
             }
-            try output_lines.append(allocator, fmt_line);
+            try appendOutputLine(allocator, &output_lines, &fmt_owned, prev_line, total_count);
         }
 
         const freq = body_map.get(body).?.count;
@@ -221,8 +225,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
 
     if (run_count > 0) {
         const total_count = body_map.get(prev_body).?.count;
-        const fmt_line = try fmtLine(allocator, prev_line, total_count);
-        try output_lines.append(allocator, fmt_line);
+        try appendOutputLine(allocator, &output_lines, &fmt_owned, prev_line, total_count);
     }
 
     // Phase 3: Block-pattern collapse. Detect repeating blocks of K lines
@@ -306,33 +309,58 @@ fn emitTruncated(writer: *Writer, line: []const u8) !void {
     }
 }
 
-fn fmtLine(allocator: Allocator, line: []const u8, total_count: usize) ![]u8 {
+/// Append one logical output line. Unique lines (count <= 1) are borrowed
+/// directly from `line` — no allocation, since `line` outlives the output
+/// pass. Only collapsed runs (count > 1) allocate a `<line> ×N` string, owned
+/// by `fmt_owned` so it is freed exactly once.
+fn appendOutputLine(
+    allocator: Allocator,
+    output_lines: *std.ArrayList([]const u8),
+    fmt_owned: *std.ArrayList([]u8),
+    line: []const u8,
+    total_count: usize,
+) !void {
     if (total_count > 1) {
-        var buf: std.ArrayList(u8) = .empty;
-        errdefer buf.deinit(allocator);
-        // For high-repetition lines (>50x), truncate to 64 chars since
-        // the count already tells the story.
-        const max_len = if (total_count > 50) @min(line.len, 64) else line.len;
-        try buf.appendSlice(allocator, line[0..max_len]);
-        if (max_len < line.len) {
-            try buf.appendSlice(allocator, "...");
+        const fmt_line = try fmtLine(allocator, line, total_count);
+        {
+            // fmt_line is untracked until fmt_owned takes ownership. The errdefer
+            // is scoped to *only* this block: it frees fmt_line if the tracking
+            // append fails, and discharges on normal exit. It must not cover the
+            // output_lines.append below — once fmt_owned owns fmt_line, the defer
+            // in apply() frees it, so freeing here too would be a double free.
+            errdefer allocator.free(fmt_line);
+            try fmt_owned.append(allocator, fmt_line);
         }
-        try buf.appendSlice(allocator, " \xc3\x97");
-        var tmp: [20]u8 = undefined;
-        var n = total_count;
-        var ti: usize = tmp.len;
-        if (n == 0) {
-            ti -= 1;
-            tmp[ti] = '0';
-        } else while (n > 0) {
-            ti -= 1;
-            tmp[ti] = @intCast('0' + n % 10);
-            n /= 10;
-        }
-        try buf.appendSlice(allocator, tmp[ti..]);
-        return try buf.toOwnedSlice(allocator);
+        try output_lines.append(allocator, fmt_line);
+    } else {
+        try output_lines.append(allocator, line);
     }
-    return try allocator.dupe(u8, line);
+}
+
+/// Format a collapsed run as `<line> ×N`. Caller guarantees total_count > 1;
+/// unique lines are emitted borrowed (see appendOutputLine) so they never
+/// reach here.
+fn fmtLine(allocator: Allocator, line: []const u8, total_count: usize) ![]u8 {
+    var buf: std.ArrayList(u8) = .empty;
+    errdefer buf.deinit(allocator);
+    // For high-repetition lines (>50x), truncate to 64 chars since
+    // the count already tells the story.
+    const max_len = if (total_count > 50) @min(line.len, 64) else line.len;
+    try buf.appendSlice(allocator, line[0..max_len]);
+    if (max_len < line.len) {
+        try buf.appendSlice(allocator, "...");
+    }
+    try buf.appendSlice(allocator, " \xc3\x97");
+    var tmp: [20]u8 = undefined;
+    var n = total_count;
+    var ti: usize = tmp.len;
+    while (n > 0) {
+        ti -= 1;
+        tmp[ti] = @intCast('0' + n % 10);
+        n /= 10;
+    }
+    try buf.appendSlice(allocator, tmp[ti..]);
+    return try buf.toOwnedSlice(allocator);
 }
 
 /// Extract the leading "word" prefix of a line for block-pattern detection.
@@ -584,6 +612,46 @@ test "apply: distinct lines passthrough with ANSI stripped" {
     defer out.deinit();
     try apply(std.testing.allocator, input, &out.writer);
     try std.testing.expectEqualStrings("alpha\nbeta\ngamma\n", out.written());
+}
+
+test "apply: borrowed unique lines, owned RLE line, and interior blank coexist" {
+    // Exercises every output-line ownership path in one pass so the leak-
+    // checking allocator validates the borrowed/owned split:
+    //   • "x" and "b" are unique → borrowed directly from input (no alloc)
+    //   • "a ×2" is a collapsed run → freshly allocated and owned
+    //   • the blank between the "a" run and "b" → borrowed "" (previously a
+    //     pointless dupe of an empty string)
+    const input = "x\na\na\n\nb\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &out.writer);
+    try std.testing.expectEqualStrings("x\n\na ×2\nb\n", out.written());
+}
+
+test "appendOutputLine: owned path leaks nothing when any allocation fails" {
+    // Targets the owned-allocation path directly via checkAllAllocationFailures,
+    // which injects an OOM at every allocation index in turn and asserts the
+    // callee both propagates error.OutOfMemory and leaks nothing. total_count > 1
+    // forces fmtLine -> fmt_owned.append, where fmt_line is briefly untracked; a
+    // missing or mis-scoped errdefer would surface here as a leak (no guard) or a
+    // double free (guard covering output_lines.append too).
+    //
+    // We drive appendOutputLine rather than apply() on purpose: apply() falls
+    // open on OOM via `ansi.stripInto(...) catch raw`, so it does not propagate
+    // error.OutOfMemory at every index and is incompatible with this harness.
+    const Helper = struct {
+        fn run(allocator: Allocator) !void {
+            var output_lines: std.ArrayList([]const u8) = .empty;
+            defer output_lines.deinit(allocator);
+            var fmt_owned: std.ArrayList([]u8) = .empty;
+            defer {
+                for (fmt_owned.items) |s| allocator.free(s);
+                fmt_owned.deinit(allocator);
+            }
+            try appendOutputLine(allocator, &output_lines, &fmt_owned, "repeated line", 3);
+        }
+    };
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, Helper.run, .{});
 }
 
 test "apply: full pipeline fuses passes" {

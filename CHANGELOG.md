@@ -11,6 +11,10 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Changed
 
+- Generic compactor no longer allocates a per-line copy for every output line:
+  unique (non-repeated) lines are now emitted as borrowed slices, and only the
+  collapsed `×N` run lines are allocated. Output is byte-for-byte unchanged; the
+  hot path for unknown commands over 4 KiB just does far less heap work.
 - Columnar tables now mark a repeated column value with a `~` sigil instead of a
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
