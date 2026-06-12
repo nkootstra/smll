@@ -1,0 +1,4 @@
+filter_catalog.zig, filters, history.zig, main.zig, pipe_filters.zig, 
+pipeline.zig, setup_hooks.zig, setup_io.zig, setup_json.zig, setup.zig, 
+signals.zig, stats.zig, tee.zig, util.zig, wrapper_git.zig, wrapper_io.zig, 
+wrapper_util.zig, wrapper.zig

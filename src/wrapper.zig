@@ -732,7 +732,20 @@ fn runWrapperInner(
     // Set SMLL_LOSSLESS=1 for raw passthrough.
     if (std.mem.eql(u8, cmd_basename, "ls")) {
         if (!lossless and ls_compact.matches(stdout_slice)) {
+            // Long format (`ls -l`/`-la`): filenames-only summary.
             ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
+                if (err == error.ParsedNothing) {
+                    try writeWithFallback(allocator, stdout_slice, writer);
+                } else {
+                    passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+                    return 1;
+                }
+            };
+        } else if (!lossless) {
+            // Plain `ls` (no `-l`): one-name-per-line normalization, `.`/`..`
+            // dropped, multi-directory listings collapsed per dir. Argv proves
+            // the source, so `-C`/`-x`/`-m` column splitting is safe here.
+            ls_compact.applyPlain(allocator, stdout_slice, stderr_slice, writer, ls_compact.wantsColumns(argv)) catch |err| {
                 if (err == error.ParsedNothing) {
                     try writeWithFallback(allocator, stdout_slice, writer);
                 } else {

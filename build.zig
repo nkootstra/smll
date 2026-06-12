@@ -136,6 +136,10 @@ const modules = [_]ModuleEntry{
     } },
     .{ .name = "ls_compact", .fixtures = &.{
         .{ .name = "fixture_ls_la", .path = "tests/fixtures/ls_la.txt" },
+        .{ .name = "fixture_ls_columns", .path = "tests/fixtures/ls_columns.txt" },
+        .{ .name = "fixture_ls_comma", .path = "tests/fixtures/ls_comma.txt" },
+        .{ .name = "fixture_ls_multi_dir", .path = "tests/fixtures/ls_multi_dir.txt" },
+        .{ .name = "fixture_ls_recursive", .path = "tests/fixtures/ls_recursive.txt" },
     } },
     .{ .name = "find_compact", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_find_ls", .path = "tests/fixtures/find_ls.txt" },
