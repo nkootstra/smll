@@ -199,13 +199,6 @@ fn writeDecimal(writer: *Writer, value: usize) !void {
     try writer.writeAll(s);
 }
 
-fn run(input: []const u8) ![]const u8 {
-    var out = Writer.Allocating.init(std.testing.allocator);
-    errdefer out.deinit();
-    try apply(std.testing.allocator, input, "", &out.writer);
-    return out.written();
-}
-
 test "package tree keeps direct deps and transitive count" {
     const input =
         \\example-app@1.0.0 /repo node_modules (5)
@@ -306,7 +299,9 @@ test "pnpm devDependencies/optionalDependencies sections are kept" {
 
 test "matches fires on each ecosystem and ignores plain text" {
     try std.testing.expect(matches(@embedFile("fixture_npm_ls")));
+    try std.testing.expect(matches(@embedFile("fixture_npm_ls_all"))); // 3-char connectors
     try std.testing.expect(matches(@embedFile("fixture_pnpm_list"))); // box-less, header only
-    try std.testing.expect(matches(@embedFile("fixture_yarn_list")));
+    try std.testing.expect(matches(@embedFile("fixture_pnpm_list_deep")));
+    try std.testing.expect(matches(@embedFile("fixture_yarn_list"))); // 2-char connectors
     try std.testing.expect(!matches("just some text\nwith no tree\n"));
 }
