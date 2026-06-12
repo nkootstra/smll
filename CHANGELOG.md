@@ -11,6 +11,20 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Added
 
+- `gh pr view`, `gh pr checks`, and `gh run view` get purpose-built compaction
+  in wrapper mode (new `src/filters/gh_compact.zig`, dispatched by argv so the
+  shape is never guessed). `gh pr view` folds the `number`/`state`/`title`
+  metadata block into a one-line header, keeps the remaining non-empty fields,
+  and prints the body verbatim (the generic keep-filter used to drop the title,
+  state, and number entirely). `gh pr checks` collapses passing checks into a
+  count and keeps every non-passing row so the failure URL stays clickable.
+  `gh run view` collapses passing jobs to a count, keeps failing jobs with their
+  failing steps, and de-duplicates the ANNOTATIONS section — GitHub repeats the
+  same multi-hundred-byte Node-deprecation warning once per job, which now
+  collapses to a single line listing the affected jobs while error annotations
+  are always kept. Every handler fails safe: any input that does not match the
+  expected non-TTY `gh` grammar passes through raw, and `SMLL_LOSSLESS=1`
+  bypasses all three.
 - `smll sh -c "<cmd>"` (and `bash`/`zsh`) now route the wrapped command's
   captured stdout through the pipe-mode content-detection chain — the same
   first-match-wins dispatcher stdin uses — so a shell-wrapped `git status`,

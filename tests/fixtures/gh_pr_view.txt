@@ -1,0 +1,47 @@
+title:	feat(wrapper): re-dispatch `sh -c` stdout through the pipe filter chain (D10)
+state:	MERGED
+author:	nkootstra (Niels Kootstra)
+labels:	
+assignees:	
+reviewers:	greptile-apps (Commented)
+projects:	
+milestone:	
+number:	67
+url:	https://github.com/nkootstra/smll/pull/67
+additions:	231
+deletions:	25
+auto-merge:	disabled
+--
+## What
+
+Agents routinely wrap commands in a shell — `smll sh -c "git status"`, `smll bash -c "ls -la"` — which erased the outer-argv signal every bespoke wrapper arm depends on, so the captured stdout fell straight to the generic catch-all instead of getting its purpose-built compaction.
+
+This routes `sh`/`bash`/`zsh` `-c` invocations' captured stdout through the **pipe-mode content-detection chain** — the same first-match-wins dispatcher stdin already uses — so a shell-wrapped `git status`, `ls`, test run, etc. gets the same compaction it would as a direct wrapper or a pipe.
+
+## How
+
+- **Extract** the pipe filter chain into `src/pipe_filters.zig` so pipe mode (`src/main.zig`) and the new shell re-dispatch arm (`src/wrapper.zig`) share **one** definition — no drift between the two paths.
+- **Re-dispatch** only for non-interactive, non-login `-c` shells. `-i`/`-l` shells and `SMLL_LOSSLESS=1` pass through raw. Dispatch errors **fail open** to raw stdout — output is never dropped.
+- A content filter fires only when the *combined* output still matches its grammar, so mixed `cmd1 && cmd2` output falls through to the generic compactor.
+
+## Invariant
+
+`smll sh -c "cat FIXTURE"` is byte-identical to `cat FIXTURE | smll` — both route through the shared `pipe_filters.Filters` chain.
+
+## Tests
+
+New integration coverage:
+- byte-parity between `smll <shell> -c "cat FIXTURE"` and `cat FIXTURE | smll` across `{sh, bash}` × `{dirty, ls -la, docker ps}` fixtures
+- `SMLL_LOSSLESS=1 sh -c` passes through raw
+- mixed-grammar (`dirty ++ docker ps`) falls through to the generic catch-all
+- non-zero inner exit code propagates while filtered stdout is still emitted
+
+`zig build test --summary all` → **967/967 passed**, `zig fmt --check` clean.
+
+## Size
+
+x86_64-linux cross release: **330,608 B** (+232 B over baseline; reuses the existing pipe chain, no new filter). **13,456 B** under the 344,064 B cap.
+
+## Scope note
+
+Explicit `smll sh -c "…"` only. Auto-wrapping bare `sh`/`bash`/`zsh` is deliberately **out of scope** — `isStreamingCommand` can't see inside a `-c` string, so auto-wrapping would capture-and-buffer long-running `sh -c "npm run dev"` / `tail -f`. Safe shell streaming detection belongs to the streaming-mode work (Batch E).

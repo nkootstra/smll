@@ -1,0 +1,41 @@
+
+X perf/runner-noise ci nkootstra/smll#57 · 27368462904
+Triggered via pull_request about 23 hours ago
+
+JOBS
+✓ test (ubuntu-latest) in 40s (ID 80874098296)
+✓ test (macos-latest) in 1m0s (ID 80874098333)
+✓ fmt-check in 13s (ID 80874098475)
+X size-gate in 20s (ID 80874302421)
+  ✓ Set up job
+  ✓ Run actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+  ✓ Set up Zig
+  ✓ Build release
+  X Enforce release size cap
+  - Upload release artifact
+  ✓ Post Set up Zig
+  ✓ Post Run actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+  ✓ Complete job
+
+ANNOTATIONS
+! Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5, mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29. Actions will be forced to run with Node.js 24 by default starting June 16th, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+test (ubuntu-latest): .github#2
+
+! Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5, mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29. Actions will be forced to run with Node.js 24 by default starting June 16th, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+test (macos-latest): .github#2
+
+! Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5, mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29. Actions will be forced to run with Node.js 24 by default starting June 16th, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+fmt-check: .github#2
+
+! Node.js 20 actions are deprecated. The following actions are running on Node.js 20 and may not work as expected: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5, mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29. Actions will be forced to run with Node.js 24 by default starting June 16th, 2026. Node.js 20 will be removed from the runner on September 16th, 2026. Please check if updated versions of these actions are available that support Node.js 24. To opt into Node.js 24 now, set the FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true environment variable on the runner or in your workflow file. Once Node.js 24 becomes the default, you can temporarily opt out by setting ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+size-gate: .github#2
+
+X Process completed with exit code 1.
+size-gate: .github#17
+
+X binary size 328152 exceeds release cap 327680
+size-gate: .github#16
+
+
+To see what failed, try: gh run view 27368462904 --log-failed
+View this run on GitHub: https://github.com/nkootstra/smll/actions/runs/27368462904

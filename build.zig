@@ -162,6 +162,12 @@ const modules = [_]ModuleEntry{
     .{ .name = "json_compact" },
     .{ .name = "package_tree", .needs_ansi = true },
     .{ .name = "tool_compact", .needs_ansi = true },
+    .{ .name = "gh_compact", .fixtures = &.{
+        .{ .name = "fixture_gh_pr_view", .path = "tests/fixtures/gh_pr_view.txt" },
+        .{ .name = "fixture_gh_pr_checks", .path = "tests/fixtures/gh_pr_checks.txt" },
+        .{ .name = "fixture_gh_run_view", .path = "tests/fixtures/gh_run_view.txt" },
+        .{ .name = "fixture_gh_run_view_failed", .path = "tests/fixtures/gh_run_view_failed.txt" },
+    } },
     .{ .name = "curl_compact", .needs_ansi = true },
     .{ .name = "kubectl_compact", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_kubectl_pods", .path = "tests/fixtures/kubectl_pods.txt" },

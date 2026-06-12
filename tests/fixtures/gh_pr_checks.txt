@@ -1,0 +1,8 @@
+Greptile Review	pass	3m32s	https://greptile.com/	
+Socket Security: Project Report	pass	10s	https://socket.dev/dashboard/org/nkootstra/sbom/01784d29-5b06-4e62-bbc5-2a37b4172580	
+Socket Security: Pull Request Alerts	pass	3s	https://socket.dev	
+fmt-check	pass	15s	https://github.com/nkootstra/smll/actions/runs/27433944970/job/81091008346	
+pipe-bench	pass	29s	https://github.com/nkootstra/smll/actions/runs/27433944970/job/81091381515	
+size-gate	pass	21s	https://github.com/nkootstra/smll/actions/runs/27433944970/job/81091381485	
+test (macos-latest)	pass	51s	https://github.com/nkootstra/smll/actions/runs/27433944970/job/81091008342	
+test (ubuntu-latest)	pass	2m6s	https://github.com/nkootstra/smll/actions/runs/27433944970/job/81091008272	

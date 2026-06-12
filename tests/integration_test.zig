@@ -3291,6 +3291,13 @@ const gh_pr_checks_fixture =
     "deploy\tpending\t0s\n" ++
     "preview\tcancel\t0s\n";
 
+const gh_pr_checks_compact =
+    "5 checks: 1 pass, 1 fail, 1 skipping, 1 pending, 1 cancel\n" ++
+    "lint\tfail\t32s\n" ++
+    "docs\tskipping\t0s\n" ++
+    "deploy\tpending\t0s\n" ++
+    "preview\tcancel\t0s\n";
+
 const gh_pr_state_all_fixture =
     "22\tAdd --version flag\tfeat/version-flag\tMERGED\t2026-05-03T10:06:20Z\n" ++
     "21\tFix agent retry loops on commands with no output\tclaude/fix-git-output-loop\tMERGED\t2026-05-03T04:49:11Z\n" ++
@@ -3317,21 +3324,24 @@ const gh_release_list_compact =
     "smll 1.2.3\t\tv1.2.3\t2026-04-29\n" ++
     "smll 1.2.2\t\tv1.2.2\t2026-04-28\t\n";
 
-test "smoke: gh keeps checks and urls" {
+test "smoke: gh generic output keeps checks and urls" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_fixture);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "pr", "checks" }, &.{});
+    // `gh status` is not one of the bespoke shapes (pr view / pr checks / run
+    // view), so it exercises the generic keep-filter: noise drops, the status
+    // line and url stay.
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "status" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualStrings("✓ build passed\nhttps://github.com/o/r/pull/1\n", result.stdout);
 }
 
-test "smoke: gh pr checks keeps status rows without urls" {
+test "smoke: gh pr checks aggregates and keeps non-passing rows" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3341,8 +3351,10 @@ test "smoke: gh pr checks keeps status rows without urls" {
     var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "pr", "checks" }, &.{});
     defer result.deinit(allocator);
 
+    // Passing checks collapse into the count; every non-passing check keeps its
+    // row so the agent can click through to the failure.
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expectEqualStrings(gh_pr_checks_fixture, result.stdout);
+    try std.testing.expectEqualStrings(gh_pr_checks_compact, result.stdout);
 }
 
 test "smoke: gh pr list keeps tab-separated state rows" {
