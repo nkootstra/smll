@@ -60,13 +60,19 @@ runs = int(sys.argv[2])
 warmup = int(sys.argv[3])
 fixtures = sys.argv[4:]
 
+def run_once(data):
+    # check=True so a non-zero exit (crash, OOM, assertion) aborts the bench
+    # with CalledProcessError instead of being timed as fast "throughput" — a
+    # crash-fast binary must not slip under the floor.
+    subprocess.run([binary], input=data, stdout=subprocess.DEVNULL, check=True)
+
 def median_ns(data):
     for _ in range(warmup):
-        subprocess.run([binary], input=data, stdout=subprocess.DEVNULL)
+        run_once(data)
     samples = []
     for _ in range(runs):
         t0 = time.monotonic_ns()
-        subprocess.run([binary], input=data, stdout=subprocess.DEVNULL)
+        run_once(data)
         samples.append(time.monotonic_ns() - t0)
     samples.sort()
     return samples[len(samples) // 2]
@@ -75,7 +81,8 @@ print("| fixture | bytes | median ms |", file=sys.stderr)
 print("|---|---:|---:|", file=sys.stderr)
 combined = bytearray()
 for path in fixtures:
-    data = open(path, "rb").read()
+    with open(path, "rb") as fh:
+        data = fh.read()
     combined += data
     name = path.rsplit("/", 1)[-1]
     print(f"| {name} | {len(data)} | {median_ns(data)/1e6:.2f} |", file=sys.stderr)
