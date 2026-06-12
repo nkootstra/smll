@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const signals = @import("signals");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -53,6 +54,13 @@ const KEEP_PREFIXES = [_][]const u8{
     "No security vulnerability", // composer advisory
     "Your requirements could not be resolved", // composer error opener
 };
+
+/// Superset gate for the pipe dispatcher: every npm/pnpm/bun/yarn/composer
+/// match-path needs one of the install-summary needles, so a false gate
+/// guarantees `matches()` is false. See src/signals.zig.
+pub fn sigGate(s: signals.Signals) bool {
+    return s.npmInstall();
+}
 
 pub fn matches(input: []const u8) bool {
     // npm summary signals

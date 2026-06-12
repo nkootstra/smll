@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const signals = @import("signals");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -25,6 +26,13 @@ const Writer = std.Io.Writer;
 // If no "error TS" lines present, emits "no type errors\n".
 //
 // Detection: input contains "error TS" OR ends with "Found " + "error" summary.
+
+/// Superset gate for the pipe dispatcher: every match-path needs "error TS" or
+/// "Found ", so a false gate guarantees `matches()` is false. See
+/// src/signals.zig.
+pub fn sigGate(s: signals.Signals) bool {
+    return s.tsc();
+}
 
 pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "error TS") != null) return true;

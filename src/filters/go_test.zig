@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const signals = @import("signals");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -18,6 +19,13 @@ const Writer = std.Io.Writer;
 //
 // Detection: stdout contains "=== RUN" or "--- FAIL:" or "--- PASS:" or
 //            "FAIL\t" / "ok  \t" package lines or "Benchmark" prefix.
+
+/// Superset gate for the pipe dispatcher: every match-path needs one of
+/// "=== ", "--- ", "Benchmark", "ok  \t", "FAIL\t", so a false gate guarantees
+/// `matches()` is false. See src/signals.zig.
+pub fn sigGate(s: signals.Signals) bool {
+    return s.goTest();
+}
 
 pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "=== RUN") != null) return true;

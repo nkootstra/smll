@@ -11,6 +11,17 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Changed
 
+- Pipe-mode dispatch now runs a single-pass pre-classifier before the
+  test-runner and package-manager filters (`cargo test`, `jest`/`vitest`,
+  `tsc`, `go test`, `pytest`, npm/pnpm/bun/yarn/composer). Each of those filters
+  probes several substrings, so an unrelated large stream (e.g. a 500 KiB
+  `journalctl` dump) used to pay for many full scans before falling through to
+  the generic compactor. The classifier scans the whole input once, records
+  which needles are present, and lets each filter skip its `matches()` when its
+  needles are absent. Routing is provably unchanged — every gate is a superset
+  of its filter's `matches()`, pinned by a property test over real fixtures —
+  and the scan covers the entire input, so a summary line appearing late in a
+  large output is still detected.
 - Generic compactor no longer allocates a per-line copy for every output line:
   unique (non-repeated) lines are now emitted as borrowed slices, and only the
   collapsed `×N` run lines are allocated. Output is byte-for-byte unchanged; the

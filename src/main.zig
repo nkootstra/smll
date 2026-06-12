@@ -31,6 +31,7 @@ const jest = @import("jest");
 const tsc = @import("tsc");
 const go_test = @import("go_test");
 const npm_install = @import("npm_install");
+const signals = @import("signals");
 const setup = @import("setup.zig");
 
 // git_branch is included in Filters because it pipe-matches (branch list output
@@ -50,6 +51,84 @@ test {
     _ = wrapper;
     _ = wrapper_git;
     _ = wrapper_util;
+}
+
+// --- signals pre-classifier safety net ---------------------------------------
+//
+// The pipe dispatcher (src/pipeline.zig) skips a gated filter's `matches()`
+// whenever its `sigGate` is false. That is only sound if every gate is a
+// SUPERSET of its `matches()` — i.e. `matches(x) ⟹ sigGate(compute(x))`. These
+// tests pin that invariant against real captured output so a future edit to a
+// filter's `matches()` (a new detection path whose needle isn't in the gate)
+// fails the build instead of silently misrouting an agent's pipe output.
+
+test "signals gate is a superset of matches for every gated filter (real fixtures)" {
+    const MatchFn = *const fn ([]const u8) bool;
+    const GateFn = *const fn (signals.Signals) bool;
+    const Gated = struct { matches: MatchFn, gate: GateFn };
+    const gated = [_]Gated{
+        .{ .matches = cargo_test.matches, .gate = cargo_test.sigGate },
+        .{ .matches = jest.matches, .gate = jest.sigGate },
+        .{ .matches = tsc.matches, .gate = tsc.sigGate },
+        .{ .matches = go_test.matches, .gate = go_test.sigGate },
+        .{ .matches = pytest.matches, .gate = pytest.sigGate },
+        .{ .matches = npm_install.matches, .gate = npm_install.sigGate },
+    };
+    const corpus = [_][]const u8{
+        @embedFile("sigfix_cargo_test"),    @embedFile("sigfix_jest"),
+        @embedFile("sigfix_tsc"),           @embedFile("sigfix_go_test"),
+        @embedFile("sigfix_pytest"),        @embedFile("sigfix_npm"),
+        @embedFile("sigfix_pnpm"),          @embedFile("sigfix_pnpm9"),
+        @embedFile("sigfix_bun"),           @embedFile("sigfix_yarn"),
+        @embedFile("sigfix_composer"),      @embedFile("sigfix_journalctl"),
+        @embedFile("sigfix_ps_auxww"),      @embedFile("sigfix_pip"),
+        @embedFile("sigfix_cargo_verbose"),
+    };
+    for (corpus) |data| {
+        const sig = signals.compute(data);
+        for (gated) |g| {
+            // matches ⟹ gate. A false gate must forbid a match, or the
+            // dispatcher would skip a filter that would have claimed the input.
+            if (g.matches(data)) try std.testing.expect(g.gate(sig));
+        }
+    }
+}
+
+test "signals gate accepts each real positive fixture's target filter" {
+    inline for (.{
+        .{ cargo_test, @embedFile("sigfix_cargo_test") },
+        .{ jest, @embedFile("sigfix_jest") },
+        .{ tsc, @embedFile("sigfix_tsc") },
+        .{ go_test, @embedFile("sigfix_go_test") },
+        .{ pytest, @embedFile("sigfix_pytest") },
+        .{ npm_install, @embedFile("sigfix_npm") },
+        .{ npm_install, @embedFile("sigfix_pnpm") },
+        .{ npm_install, @embedFile("sigfix_pnpm9") },
+        .{ npm_install, @embedFile("sigfix_bun") },
+        .{ npm_install, @embedFile("sigfix_yarn") },
+        .{ npm_install, @embedFile("sigfix_composer") },
+    }) |pair| {
+        const F = pair[0];
+        const data = pair[1];
+        try std.testing.expect(F.matches(data)); // real positive still detected
+        try std.testing.expect(F.sigGate(signals.compute(data))); // and not gated out
+    }
+}
+
+test "large generic streams route past every gated filter unchanged" {
+    inline for (.{
+        @embedFile("sigfix_journalctl"), @embedFile("sigfix_ps_auxww"),
+        @embedFile("sigfix_pip"),        @embedFile("sigfix_cargo_verbose"),
+    }) |data| {
+        // None of the gated filters claim a generic stream, so dispatch falls
+        // through to the generic compactor exactly as before the gate existed.
+        try std.testing.expect(!cargo_test.matches(data));
+        try std.testing.expect(!jest.matches(data));
+        try std.testing.expect(!tsc.matches(data));
+        try std.testing.expect(!go_test.matches(data));
+        try std.testing.expect(!pytest.matches(data));
+        try std.testing.expect(!npm_install.matches(data));
+    }
 }
 
 const FindCompactPipe = pipe_filters.FindCompactPipe;

@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const signals = @import("signals");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -35,6 +36,12 @@ const KEEP_NEEDLES = [_][]const u8{
     ">   ",
     "E   ",
 };
+
+/// Superset gate for the pipe dispatcher: every match-path contains "Test", so a
+/// false gate guarantees `matches()` is false. See src/signals.zig.
+pub fn sigGate(s: signals.Signals) bool {
+    return s.jest();
+}
 
 pub fn matches(input: []const u8) bool {
     if (std.mem.find(u8, input, "Test Suites:") != null) return true;

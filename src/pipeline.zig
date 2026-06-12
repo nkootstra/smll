@@ -1,4 +1,5 @@
 const std = @import("std");
+const signals = @import("signals");
 const Allocator = std.mem.Allocator;
 const Reader = std.Io.Reader;
 const Writer = std.Io.Writer;
@@ -82,15 +83,37 @@ pub fn dispatch(
 ) !void {
     const MatchFn = *const fn ([]const u8) bool;
     const ApplyFn = *const fn (Allocator, []const u8, []const u8, *Writer) anyerror!void;
-    const Entry = struct { match: MatchFn, apply: ApplyFn };
+    const GateFn = *const fn (signals.Signals) bool;
+    // `gate` is a cheap superset pre-check derived from a single whole-input
+    // scan (see src/signals.zig): when it returns false, the paired `match()`
+    // is provably false and is skipped. Filters without a `sigGate` decl get a
+    // null gate and always run `match()` — the safe default for filters whose
+    // detection isn't needle-based.
+    const Entry = struct { match: MatchFn, apply: ApplyFn, gate: ?GateFn };
     const table = comptime blk: {
         var t: [Filters.len]Entry = undefined;
         for (0..Filters.len) |i| {
-            t[i] = .{ .match = Filters[i].matches, .apply = Filters[i].apply };
+            t[i] = .{
+                .match = Filters[i].matches,
+                .apply = Filters[i].apply,
+                .gate = if (@hasDecl(Filters[i], "sigGate")) Filters[i].sigGate else null,
+            };
         }
         break :blk t;
     };
+    // Computed lazily on first gated filter so inputs claimed by an earlier
+    // ungated filter (the wrapper hot path's git_* family) never pay for the
+    // scan. Computed at most once per dispatch.
+    var sig: ?signals.Signals = null;
     for (&table) |entry| {
+        if (entry.gate) |gate| {
+            const s = sig orelse blk: {
+                const computed = signals.compute(input);
+                sig = computed;
+                break :blk computed;
+            };
+            if (!gate(s)) continue;
+        }
         if (entry.match(input)) {
             try entry.apply(allocator, input, &.{}, writer);
             return;

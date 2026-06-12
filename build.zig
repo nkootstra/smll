@@ -167,16 +167,21 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_kubectl_pods", .path = "tests/fixtures/kubectl_pods.txt" },
     } },
 
+    // Pipe-mode pre-classifier. Shared by every runner/package filter below
+    // (via extra_deps) and by the dispatcher in src/pipeline.zig (via the
+    // exe/release top-level import). One module instance, compiled once.
+    .{ .name = "signals", .path = "src/signals.zig" },
+
     // Test-runner filters.
-    .{ .name = "cargo_test", .needs_ansi = true },
-    .{ .name = "pytest", .needs_ansi = true },
-    .{ .name = "jest", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "cargo_test", .needs_ansi = true, .extra_deps = &.{"signals"} },
+    .{ .name = "pytest", .needs_ansi = true, .extra_deps = &.{"signals"} },
+    .{ .name = "jest", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_jest_failing", .path = "tests/fixtures/jest_failing.txt" },
     } },
-    .{ .name = "tsc", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "tsc", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_tsc_errors", .path = "tests/fixtures/tsc_errors.txt" },
     } },
-    .{ .name = "go_test", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "go_test", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_go_test_v", .path = "tests/fixtures/go_test_v.txt" },
     } },
 
@@ -184,7 +189,7 @@ const modules = [_]ModuleEntry{
     .{ .name = "docker_logs", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_docker_logs", .path = "tests/fixtures/docker_logs.txt" },
     } },
-    .{ .name = "npm_install", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "npm_install", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_npm_install", .path = "tests/fixtures/npm_install.txt" },
         .{ .name = "fixture_pnpm_install", .path = "tests/fixtures/pnpm_install.txt" },
         .{ .name = "fixture_pnpm9_install", .path = "tests/fixtures/pnpm9_install.txt" },
@@ -286,6 +291,29 @@ pub fn build(b: *std.Build) void {
     exe_mod.addAnonymousImport("fixture_git_log_graph", .{
         .root_source_file = b.path("tests/fixtures/git_log_graph.txt"),
     });
+    // Real captured fixtures for the signals-gate superset property test in
+    // main.zig. Referenced only under `test`, so they enter the exe test binary
+    // but never the release build (separate module).
+    const signals_property_fixtures = [_]Fixture{
+        .{ .name = "sigfix_cargo_test", .path = "tests/fixtures/cargo_test_failing.txt" },
+        .{ .name = "sigfix_jest", .path = "tests/fixtures/jest_failing.txt" },
+        .{ .name = "sigfix_tsc", .path = "tests/fixtures/tsc_errors.txt" },
+        .{ .name = "sigfix_go_test", .path = "tests/fixtures/go_test_v.txt" },
+        .{ .name = "sigfix_pytest", .path = "tests/fixtures/pytest_failing.txt" },
+        .{ .name = "sigfix_npm", .path = "tests/fixtures/npm_install.txt" },
+        .{ .name = "sigfix_pnpm", .path = "tests/fixtures/pnpm_install.txt" },
+        .{ .name = "sigfix_pnpm9", .path = "tests/fixtures/pnpm9_install.txt" },
+        .{ .name = "sigfix_bun", .path = "tests/fixtures/bun_install.txt" },
+        .{ .name = "sigfix_yarn", .path = "tests/fixtures/yarn_install.txt" },
+        .{ .name = "sigfix_composer", .path = "tests/fixtures/composer_require.txt" },
+        .{ .name = "sigfix_journalctl", .path = "tests/fixtures/large/generic_journalctl.txt" },
+        .{ .name = "sigfix_ps_auxww", .path = "tests/fixtures/large/generic_ps_auxww.txt" },
+        .{ .name = "sigfix_pip", .path = "tests/fixtures/large/generic_pip_install.txt" },
+        .{ .name = "sigfix_cargo_verbose", .path = "tests/fixtures/large/generic_cargo_build_verbose.txt" },
+    };
+    for (signals_property_fixtures) |f| {
+        exe_mod.addAnonymousImport(f.name, .{ .root_source_file = b.path(f.path) });
+    }
 
     const util_mod = b.createModule(.{
         .root_source_file = b.path("src/util.zig"),
