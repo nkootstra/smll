@@ -329,9 +329,12 @@ fn isElisionTrigger(trimmed: []const u8, lang: Lang) bool {
 /// arrows `name = (…) => {`). Companion to A2: recovers the compression A2
 /// gives up by re-eliding genuine function bodies.
 ///
-/// Requires an assignment (` = `) before the arrow so inline callbacks like
-/// `arr.map((x) => {` are left whole, and excludes `type X = (…) => { … }`
-/// object-returning type aliases (those members are facts, not a body).
+/// Requires an assignment (` = `) before the arrow so UNBOUND inline callbacks
+/// like `arr.map((x) => {` are left whole, and excludes `type X = (…) => { … }`
+/// object-returning type aliases (those members are facts, not a body). A
+/// BOUND callback such as `const total = items.reduce((acc, v) => {` does carry
+/// an assignment, so its body is elided — intentional, since a bound callback
+/// body is an implementation body like any other.
 fn isTsArrowFunction(trimmed: []const u8) bool {
     if (!std.mem.endsWith(u8, trimmed, "{")) return false;
     const arrow = std.mem.indexOf(u8, trimmed, "=>") orelse return false;
@@ -355,7 +358,10 @@ fn isTsMethodShorthand(trimmed: []const u8) bool {
 
 /// The text before a method's `(` must be an identifier optionally prefixed by
 /// modifier keywords (`public`, `static`, `async`, `get`, `set`, …). Any
-/// control keyword or non-identifier token disqualifies it.
+/// control keyword or non-identifier token disqualifies it. A generic method
+/// head (`fetchData<T>`) contains `<`/`>`, which `isIdentLikeToken` rejects, so
+/// generic methods are conservatively out of scope: their body is kept verbatim
+/// (no fact loss, just missed compression) rather than risk a bad elision.
 fn isMethodHead(head_raw: []const u8) bool {
     const head = std.mem.trim(u8, head_raw, " \t");
     if (head.len == 0) return false;
@@ -686,6 +692,49 @@ test "apply: ts object-returning type alias is NOT elided" {
     // The object type's members are facts, not a function body.
     try std.testing.expect(std.mem.indexOf(u8, result, "status: number;") != null);
     try std.testing.expect(std.mem.indexOf(u8, result, "body: string;") != null);
+}
+
+test "apply: ts bound higher-order callback body is intentionally elided" {
+    // `const total = items.reduce((acc, v) => { … })` binds the arrow to a name,
+    // so the ` = ` guard fires and the reducer body — an implementation body — is
+    // elided. Only UNBOUND inline callbacks (`arr.map((x) => {` with no leading
+    // assignment) are left whole. Pin the intent so it can't silently regress.
+    const input =
+        \\const total = items.reduce((acc, v) => {
+        \\    acc.count += 1;
+        \\    acc.sum += v.amount;
+        \\    return acc;
+        \\}, seed);
+        \\
+    ;
+    const result = try applyToString(input, "totals.ts");
+    defer std.testing.allocator.free(result);
+    // Signature line survives; the reducer body elides.
+    try std.testing.expect(std.mem.indexOf(u8, result, "const total = items.reduce((acc, v) => {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "acc.count += 1;") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "acc.sum += v.amount;") == null);
+}
+
+test "apply: ts generic method is conservatively NOT elided (out of scope)" {
+    // A generic method head (`fetchData<T>`) carries `<`/`>`, which
+    // `isIdentLikeToken` rejects, so the body is kept verbatim. This is a
+    // deliberate conservative limitation (no fact loss, just missed
+    // compression); pin it so the scope is explicit and any future broadening
+    // is a conscious change rather than an accident.
+    const input =
+        \\class Repo {
+        \\    fetchData<T>(url: string): Promise<T> {
+        \\        const res = doFetch(url);
+        \\        return res as T;
+        \\    }
+        \\}
+        \\
+    ;
+    const result = try applyToString(input, "repo.ts");
+    defer std.testing.allocator.free(result);
+    // Generic method head and its body both survive (not elided).
+    try std.testing.expect(std.mem.indexOf(u8, result, "fetchData<T>(url: string): Promise<T> {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "const res = doFetch(url);") != null);
 }
 
 test "apply: ts top-level control flow is not mistaken for a method" {
