@@ -11,6 +11,15 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Added
 
+- `smll sh -c "<cmd>"` (and `bash`/`zsh`) now route the wrapped command's
+  captured stdout through the pipe-mode content-detection chain — the same
+  first-match-wins dispatcher stdin uses — so a shell-wrapped `git status`,
+  `ls`, test run, etc. gets the same compaction it would as a direct wrapper or
+  pipe. A content filter only fires when the combined output still matches its
+  grammar, so mixed `cmd1 && cmd2` output falls through to the generic
+  compactor. Interactive/login shells (`-i`/`-l`) and `SMLL_LOSSLESS=1` are left
+  untouched. (The pipe filter chain moved to `src/pipe_filters.zig` so pipe mode
+  and the shell re-dispatch share one definition.)
 - `scripts/bench-pipe.sh` and a non-blocking `pipe-bench` CI job measure pipe
   throughput (MB/s) over the whole `tests/fixtures/large/` corpus as a single
   concatenated stream, so the number reflects scan speed rather than process

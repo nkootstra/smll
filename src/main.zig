@@ -13,18 +13,6 @@ const stats = @import("stats.zig");
 const wrapper = @import("wrapper.zig");
 const wrapper_git = @import("wrapper_git.zig");
 const wrapper_util = @import("wrapper_util.zig");
-const git_status = @import("git_status");
-const git_diff = @import("git_diff");
-const git_show = @import("git_show");
-const git_commit = @import("git_commit");
-const git_merge = @import("git_merge");
-const git_branch = @import("git_branch");
-const git_reflog = @import("git_reflog");
-const git_blame = @import("git_blame");
-const tree = @import("tree");
-const docker_compact = @import("docker_compact");
-const ls_compact = @import("ls_compact");
-const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
 const jest = @import("jest");
@@ -34,11 +22,9 @@ const npm_install = @import("npm_install");
 const signals = @import("signals");
 const setup = @import("setup.zig");
 
-// git_branch is included in Filters because it pipe-matches (branch list output
-// is stable and identifiable by leading "  " or "* " prefix). It is positioned
-// after git_status and before git_show — the branch output shape is distinct from
-// both. git_checkout is NOT in Filters because its matches() always returns false.
-const Filters = .{ git_status, git_branch, git_reflog, git_show, GitLogCompact, git_diff, git_commit, git_merge, git_blame, cargo_test, jest, tsc, go_test, pytest, kubectl_compact, docker_compact, npm_install, tree, ls_compact, FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe };
+// The pipe-mode filter chain lives in pipe_filters.zig so both stdin pipe mode
+// (here) and wrapper.zig's `sh -c` re-dispatch share one definition.
+const Filters = pipe_filters.Filters;
 
 // rg filter is wrapper-mode only (`smll rg --files src/`). Its output grammar
 // overlaps too many non-rg tools in pipe mode (diff stats, generic listings),
@@ -131,11 +117,6 @@ test "large generic streams route past every gated filter unchanged" {
     }
 }
 
-const FindCompactPipe = pipe_filters.FindCompactPipe;
-const DuCompactPipe = pipe_filters.DuCompactPipe;
-const CurlCompactPipe = pipe_filters.CurlCompactPipe;
-const GenericCompactPipe = pipe_filters.GenericCompactPipe;
-const GitLogCompact = pipe_filters.GitLogCompact;
 const envFlagOn = wrapper_util.envFlagOn;
 
 const help_text =
