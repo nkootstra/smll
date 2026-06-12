@@ -19,6 +19,7 @@ const pip_compact = @import("pip_compact");
 const prettier_compact = @import("prettier_compact");
 const dotnet_compact = @import("dotnet_compact");
 const tool_compact = @import("tool_compact");
+const gh_compact = @import("gh_compact");
 const curl_compact = @import("curl_compact");
 const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
@@ -482,15 +483,30 @@ fn runWrapperInner(
     }
 
     if (std.mem.eql(u8, cmd_basename, "gh")) {
+        // Sub-shape dispatch keyed on argv: `gh pr view`, `gh pr checks`, and
+        // `gh run view` get bespoke handlers; everything else keeps the generic
+        // table / keep-filter path. `gh pr checks` exits non-zero on a failing
+        // check but writes to stdout (empty stderr), so it still compacts.
+        const is_pr = std.mem.eql(u8, arg1, "pr");
+        const is_run = std.mem.eql(u8, arg1, "run");
         if (exit_code != 0 and stderr_slice.len > 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-        } else if (!lossless) {
+        } else if (lossless) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (is_pr and std.mem.eql(u8, arg2, "view")) {
+            if (!applyFilter(gh_compact.applyPrView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else if (is_pr and std.mem.eql(u8, arg2, "checks")) {
+            if (!applyFilter(gh_compact.applyPrChecks, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else if (is_run and std.mem.eql(u8, arg2, "view")) {
+            if (!applyFilter(gh_compact.applyRunView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else {
             if (!try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
                 if (!applyFilter(tool_compact.applyGh, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             }
             try stderr_writer.writeAll(stderr_slice);
-        } else {
-            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
         return exit_code;
     }
