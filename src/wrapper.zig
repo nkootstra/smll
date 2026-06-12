@@ -390,6 +390,19 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    // `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` print the same
+    // shape: root context plus a (possibly deep) dependency tree. Route the
+    // `ls`/`list` subcommand through the same direct-deps + transitive-count
+    // summary. Argv-gated so install/add output is never touched here.
+    if (!lossless and
+        ((eqAny(cmd_basename, &.{ "npm", "pnpm" }) and eqAny(arg1, &.{ "ls", "list" })) or
+            (std.mem.eql(u8, cmd_basename, "yarn") and std.mem.eql(u8, arg1, "list"))) and
+        package_tree.matches(stdout_slice))
+    {
+        if (!applyFilter(package_tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        return exit_code;
+    }
+
     // tree wrapper: matches Unicode box-drawing and ASCII `|--` / `` `-- ``
     // tree output. `bun` can emit other tree-shaped output; route it through
     // tree when the package-tree filter above did not match.

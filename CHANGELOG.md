@@ -11,6 +11,16 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Added
 
+- The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
+  covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
+  to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
+  grammar — root context, `deps +N: …` for direct dependencies, and a
+  `nested rows xM` transitive count. npm/yarn/bun direct deps are detected by a
+  column-0 box connector (yarn v1's two-char `├─`/`└─` are handled alongside the
+  three-char `├──`/`└──`/`├─┬`/`└─┬`), so indented transitive rows are never
+  miscounted as direct. pnpm's flat `dependencies:` list is parsed as direct
+  deps (`name version` → `name@version`) with every box-drawn row treated as
+  transitive. `SMLL_LOSSLESS=1` bypasses it.
 - Plain `ls` (no `-l`) now gets argv-gated normalization in wrapper mode
   (`src/filters/ls_compact.zig` `applyPlain`). `-C`/`-x`/`-m` column and comma
   layouts are split back to one name per line and re-sorted, so the result is

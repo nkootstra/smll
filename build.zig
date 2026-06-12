@@ -164,7 +164,13 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_tofu_plan_update", .path = "tests/fixtures/tofu_plan_update.txt" },
     } },
     .{ .name = "json_compact" },
-    .{ .name = "package_tree", .needs_ansi = true },
+    .{ .name = "package_tree", .needs_ansi = true, .fixtures = &.{
+        .{ .name = "fixture_npm_ls", .path = "tests/fixtures/npm_ls.txt" },
+        .{ .name = "fixture_npm_ls_all", .path = "tests/fixtures/npm_ls_all.txt" },
+        .{ .name = "fixture_pnpm_list", .path = "tests/fixtures/pnpm_list.txt" },
+        .{ .name = "fixture_pnpm_list_deep", .path = "tests/fixtures/pnpm_list_deep.txt" },
+        .{ .name = "fixture_yarn_list", .path = "tests/fixtures/yarn_list.txt" },
+    } },
     .{ .name = "tool_compact", .needs_ansi = true },
     .{ .name = "gh_compact", .fixtures = &.{
         .{ .name = "fixture_gh_pr_view", .path = "tests/fixtures/gh_pr_view.txt" },
