@@ -43,6 +43,14 @@ If release/size behavior is affected, also run:
 zig build release
 ```
 
+The size gate enforces a **344,064 byte (336 KiB)** cap on the Linux x86_64
+release binary (`.github/workflows/ci.yml`). CI measures a **native** x86_64
+build. Cross-compiling from another host (`zig build release
+-Dtarget=x86_64-linux`) produces the right target but runs ~600–700 bytes
+**smaller** than CI's native build — so a local cross figure that just squeaks
+under the cap can still fail the gate. Treat the local cross size as a lower
+bound (add ~700 bytes of margin), or rely on CI as the source of truth.
+
 Rationale: local green should match CI expectations.
 
 ## Test and Bug-Fix Policy
