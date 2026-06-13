@@ -2182,6 +2182,118 @@ test "wrapper: SMLL_STREAM filters tsc watch frames" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "wrapper: jest watch stays raw unless SMLL_STREAM is enabled" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "jest",
+        \\#!/bin/sh
+        \\printf '\033[2J\033[HFAIL  src/math.test.ts\n'
+        \\printf 'Test Suites: 1 failed, 1 total\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "jest", "--watch" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "\x1b[2J\x1b[HFAIL  src/math.test.ts\n" ++
+            "Test Suites: 1 failed, 1 total\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters jest watch frames" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "jest",
+        \\#!/bin/sh
+        \\printf '\033[2J\033[HFAIL  src/math.test.ts\n'
+        \\printf '● math › adds\n'
+        \\printf 'Expected: 1\n'
+        \\printf 'Received: 2\n'
+        \\printf 'Test Suites: 1 failed, 1 total\n'
+        \\printf 'Tests:       1 failed, 1 total\n'
+        \\printf '\033[2J\033[HFAIL  src/math.test.ts\n'
+        \\printf '● math › adds\n'
+        \\printf 'Expected: 1\n'
+        \\printf 'Received: 2\n'
+        \\printf 'Test Suites: 1 failed, 1 total\n'
+        \\printf 'Tests:       1 failed, 1 total\n'
+        \\printf '\033[2J\033[HPASS  src/math.test.ts\n'
+        \\printf 'Test Suites: 1 passed, 1 total\n'
+        \\printf 'Tests:       1 passed, 1 total\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "jest", "--watch" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "FAIL  src/math.test.ts\n" ++
+            "● math › adds\n" ++
+            "Expected: 1\n" ++
+            "Received: 2\n" ++
+            "Test Suites: 1 failed, 1 total\n" ++
+            "Tests:       1 failed, 1 total\n" ++
+            "all tests passed\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters vitest short watch frames" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "vitest",
+        \\#!/bin/sh
+        \\printf '\033[H\033[2JFAIL  src/math.test.ts > math > adds\n'
+        \\printf 'Error: expected 1 to equal 2\n'
+        \\printf 'Test Files  1 failed (1)\n'
+        \\printf 'Tests  1 failed (1)\n'
+        \\printf '\033[H\033[2JFAIL  src/math.test.ts > math > adds\n'
+        \\printf 'Error: expected 1 to equal 3\n'
+        \\printf 'Test Files  1 failed (1)\n'
+        \\printf 'Tests  1 failed (1)\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "vitest", "-w" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "FAIL  src/math.test.ts > math > adds\n" ++
+            "Error: expected 1 to equal 2\n" ++
+            "Test Files  1 failed (1)\n" ++
+            "Tests  1 failed (1)\n" ++
+            "FAIL  src/math.test.ts > math > adds\n" ++
+            "Error: expected 1 to equal 3\n" ++
+            "Test Files  1 failed (1)\n" ++
+            "Tests  1 failed (1)\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
 test "wrapper: raw non-verbose curl with no output does not append hint" {
     const allocator = std.testing.allocator;
 
