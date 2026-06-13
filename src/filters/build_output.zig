@@ -4,8 +4,8 @@ const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
 // LOSSY compact filter for JS bundler/build output — Vite, Next.js, Nuxt
-// (and Nuxt's Vite-driven phases). On by default. Set SMLL_LOSSLESS=1 to
-// bypass.
+// (and Nuxt's Vite-driven phases), and webpack. On by default. Set
+// SMLL_LOSSLESS=1 to bypass.
 //
 // Keeps everything by default (errors, warnings, route tables, asset
 // sizes, build summaries) and explicitly drops known noise: node
@@ -13,7 +13,7 @@ const Writer = std.Io.Writer;
 // "rendering chunks", "computing gzip size"), Next.js "Creating an
 // optimized production build" prelude, npm-script header lines
 // (`> name@version build` and `> tool subcmd`), Nuxt `ℹ`-prefixed Vite
-// progress mirrors.
+// progress mirrors, webpack module build rows.
 
 const DROP_PREFIXES = [_][]const u8{
     "(node:", // node deprecation warning header
@@ -45,6 +45,9 @@ pub fn matches(input: []const u8) bool {
     // Nuxt build banner
     if (std.mem.find(u8, input, "Nuxt ") != null and
         std.mem.find(u8, input, "with Nitro") != null) return true;
+    // Webpack build banner
+    if (std.mem.find(u8, input, "webpack ") != null and
+        std.mem.find(u8, input, " compiled ") != null) return true;
     // Shared finalizers
     if (std.mem.find(u8, input, "modules transformed") != null) return true;
     if (std.mem.find(u8, input, "\xe2\x9c\x93 built in ") != null) return true; // ✓ built in
@@ -169,6 +172,7 @@ fn scanAndKeep(
         }
         const body = std.mem.trimStart(u8, trimmed, " \t");
         if (shouldDrop(body)) continue;
+        if (isWebpackBuiltModuleLine(body)) continue;
         if (assetSizeBytes(body)) |bytes| {
             try assets.add(allocator, body, bytes);
             continue;
@@ -191,6 +195,12 @@ fn shouldDrop(line: []const u8) bool {
 }
 
 fn assetSizeBytes(line: []const u8) ?usize {
+    if (viteAssetSizeBytes(line)) |bytes| return bytes;
+    if (webpackAssetSizeBytes(line)) |bytes| return bytes;
+    return null;
+}
+
+fn viteAssetSizeBytes(line: []const u8) ?usize {
     const marker = std.mem.indexOf(u8, line, "\xe2\x94\x82 gzip:") orelse return null; // │ gzip:
     const before = stripBuildPrefix(std.mem.trim(u8, line[0..marker], " \t\r"));
     var tokens = std.mem.tokenizeAny(u8, before, " \t");
@@ -204,8 +214,25 @@ fn assetSizeBytes(line: []const u8) ?usize {
     return parseSizeBytes(prev, cur);
 }
 
+fn webpackAssetSizeBytes(line: []const u8) ?usize {
+    if (!std.mem.startsWith(u8, line, "asset ")) return null;
+    var tokens = std.mem.tokenizeAny(u8, line, " \t");
+    _ = tokens.next() orelse return null; // asset
+    _ = tokens.next() orelse return null; // filename
+    const number = tokens.next() orelse return null;
+    const unit = tokens.next() orelse return null;
+    return parseSizeBytes(number, unit);
+}
+
+fn isWebpackBuiltModuleLine(line: []const u8) bool {
+    return std.mem.find(u8, line, "[built]") != null and
+        std.mem.find(u8, line, "[code generated]") != null;
+}
+
 fn parseSizeBytes(number: []const u8, unit: []const u8) ?usize {
     const multiplier: u64 = if (std.ascii.eqlIgnoreCase(unit, "B"))
+        1
+    else if (std.ascii.eqlIgnoreCase(unit, "byte") or std.ascii.eqlIgnoreCase(unit, "bytes"))
         1
     else if (std.ascii.eqlIgnoreCase(unit, "kB") or std.ascii.eqlIgnoreCase(unit, "KB"))
         1024
@@ -295,6 +322,10 @@ test "matches: nuxt + nitro banner" {
     try std.testing.expect(matches("Nuxt 3.13.0 with Nitro 2.9.7\n"));
 }
 
+test "matches: webpack compiled banner" {
+    try std.testing.expect(matches("webpack 5.107.2 compiled successfully in 124 ms\n"));
+}
+
 test "matches: modules transformed signal" {
     try std.testing.expect(matches("\xe2\x9c\x93 1248 modules transformed.\n"));
 }
@@ -367,6 +398,18 @@ test "apply: asset rows drop the gzip column" {
     try std.testing.expect(std.mem.find(u8, got, "index-abc.js 1,234.56 kB") != null);
     // B12: gzip column dropped.
     try std.testing.expect(std.mem.find(u8, got, "gzip:") == null);
+}
+
+test "apply: webpack fixture summarizes assets and drops built module rows" {
+    const input = @embedFile("fixture_webpack_build");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "webpack 5.107.2 compiled successfully") != null);
+    try std.testing.expect(std.mem.find(u8, got, "assets x1; largest:") != null);
+    try std.testing.expect(std.mem.find(u8, got, "asset bundle.js 49 bytes") != null);
+    try std.testing.expect(std.mem.find(u8, got, "[built] [code generated]") == null);
 }
 
 test "apply: vite_build fixture compacts but keeps signal" {

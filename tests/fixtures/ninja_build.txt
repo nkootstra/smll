@@ -1,0 +1,6 @@
+[1/2] CC main.o
+main.c:1:22: warning: unused variable 'unused' [-Wunused-variable]
+    1 | int main(void) { int unused = 1; return 0; }
+      |                      ^~~~~~
+1 warning generated.
+[2/2] LINK app
