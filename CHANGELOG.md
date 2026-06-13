@@ -42,6 +42,9 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   clear-screen render frames are compacted with the existing Jest/Vitest
   failure filter, identical re-renders are suppressed, and passing transitions
   emit `all tests passed`.
+- `SMLL_STREAM=1` now supports `gh run watch`: repeated job table redraws are
+  reduced to job state transitions such as `build: queued->running`, while
+  already-completed run messages pass through raw.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
@@ -113,7 +116,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
   dangling space).
-- Raised the CI release size cap from 320 KiB to 352 KiB (360,448 bytes) to
+- Raised the CI release size cap from 320 KiB to 356 KiB (364,544 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
   a cross-compiled one.

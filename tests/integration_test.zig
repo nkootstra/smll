@@ -2294,6 +2294,160 @@ test "wrapper: SMLL_STREAM filters vitest short watch frames" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "wrapper: gh run watch stays raw unless SMLL_STREAM is enabled" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "gh",
+        \\#!/bin/sh
+        \\if [ "$1" = "run" ] && [ "$2" = "watch" ]; then
+        \\  cat <<'EOF'
+        \\Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+        \\
+        \\* main ci · 1
+        \\Triggered via push less than a minute ago
+        \\
+        \\JOBS
+        \\* build (ID 10)
+        \\* test (ID 11)
+        \\EOF
+        \\  exit 0
+        \\fi
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "gh", "run", "watch", "1" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "Refreshing run status every 3 seconds. Press Ctrl+C to quit.\n" ++
+            "\n" ++
+            "* main ci · 1\n" ++
+            "Triggered via push less than a minute ago\n" ++
+            "\n" ++
+            "JOBS\n" ++
+            "* build (ID 10)\n" ++
+            "* test (ID 11)\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters gh run watch transitions" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "gh",
+        \\#!/bin/sh
+        \\if [ "$1" = "run" ] && [ "$2" = "watch" ]; then
+        \\  cat <<'EOF'
+        \\Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+        \\
+        \\* main ci · 1
+        \\Triggered via push less than a minute ago
+        \\
+        \\JOBS
+        \\* build (ID 10)
+        \\* test (ID 11)
+        \\Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+        \\
+        \\* main ci · 1
+        \\Triggered via push less than a minute ago
+        \\
+        \\JOBS
+        \\* build (ID 10)
+        \\  ✓ Set up job
+        \\  * Run build
+        \\* test (ID 11)
+        \\Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+        \\
+        \\* main ci · 1
+        \\Triggered via push less than a minute ago
+        \\
+        \\JOBS
+        \\* build (ID 10)
+        \\  ✓ Set up job
+        \\  * Run build
+        \\* test (ID 11)
+        \\Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+        \\
+        \\* main ci · 1
+        \\Triggered via push less than a minute ago
+        \\
+        \\JOBS
+        \\✓ build in 20s (ID 10)
+        \\* test (ID 11)
+        \\  * Run tests
+        \\Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+        \\
+        \\X main ci · 1
+        \\Triggered via push less than a minute ago
+        \\
+        \\JOBS
+        \\✓ build in 20s (ID 10)
+        \\X test in 30s (ID 11)
+        \\  ✓ Set up job
+        \\  X Run tests
+        \\EOF
+        \\  exit 1
+        \\fi
+        \\exit 2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "gh", "run", "watch", "1" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "build: queued\n" ++
+            "test: queued\n" ++
+            "build: queued->running\n" ++
+            "build: running->passed\n" ++
+            "test: queued->running\n" ++
+            "test: running->failed\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM passes through completed gh run watch message" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "gh",
+        \\#!/bin/sh
+        \\if [ "$1" = "run" ] && [ "$2" = "watch" ]; then
+        \\  printf "Run ci (1) has already completed with 'success'\n"
+        \\  exit 0
+        \\fi
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "gh", "run", "watch", "1" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("Run ci (1) has already completed with 'success'\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
 test "wrapper: raw non-verbose curl with no output does not append hint" {
     const allocator = std.testing.allocator;
 
