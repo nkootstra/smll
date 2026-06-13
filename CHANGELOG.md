@@ -29,10 +29,12 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   using the completed step count while preserving compiler warnings/errors, and
   direct `webpack` builds now
   reuse the JS build-output compactor for asset summaries and compiled banners.
-- `SMLL_STREAM=1` now enables opt-in streaming compaction for
-  `docker logs -f` / `docker compose logs -f`: first occurrences are emitted
-  immediately, repeated payloads are summarized on flush, and default streaming
-  behavior remains raw unless explicitly enabled.
+- `SMLL_STREAM=1` now enables opt-in streaming compaction for follow-mode logs:
+  `docker logs -f`, `docker compose logs -f`, `kubectl logs -f`, `tail -f`,
+  and `journalctl -f`. First occurrences are emitted immediately, repeated
+  payloads are summarized on flush, default streaming behavior remains raw
+  unless explicitly enabled, and space-separated `YYYY-MM-DD HH:MM:SS`
+  timestamps now dedupe correctly.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same

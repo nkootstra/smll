@@ -83,7 +83,7 @@ const StreamSide = struct {
     }
 };
 
-pub fn runDockerLogs(
+pub fn runFollowLogs(
     allocator: std.mem.Allocator,
     io: std.Io,
     argv: []const []const u8,
@@ -145,7 +145,7 @@ pub fn runDockerLogs(
             .signal, .stopped, .unknown => 1,
         },
         .input_bytes = input_bytes,
-        .filter_name = "stream:docker_logs",
+        .filter_name = if (isDockerInvocation(argv)) "stream:docker_logs" else "stream:logs",
     };
 }
 
@@ -169,4 +169,10 @@ fn isComposeInvocation(argv: []const []const u8) bool {
     const cmd = if (std.mem.findScalarLast(u8, argv[0], '/')) |idx| argv[0][idx + 1 ..] else argv[0];
     if (std.mem.eql(u8, cmd, "docker-compose")) return true;
     return std.mem.eql(u8, cmd, "docker") and argv.len >= 3 and std.mem.eql(u8, argv[1], "compose");
+}
+
+fn isDockerInvocation(argv: []const []const u8) bool {
+    if (argv.len == 0) return false;
+    const cmd = if (std.mem.findScalarLast(u8, argv[0], '/')) |idx| argv[0][idx + 1 ..] else argv[0];
+    return std.mem.eql(u8, cmd, "docker") or std.mem.eql(u8, cmd, "docker-compose");
 }

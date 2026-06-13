@@ -125,7 +125,9 @@ fn hasFollowArg(argv: []const []const u8) bool {
             std.mem.eql(u8, arg, "-f")) return true;
         if (std.mem.startsWith(u8, arg, "--follow=")) {
             const value = arg["--follow=".len..];
-            if (std.mem.eql(u8, value, "1") or std.ascii.eqlIgnoreCase(value, "true")) return true;
+            if (!(std.mem.eql(u8, value, "0") or
+                std.ascii.eqlIgnoreCase(value, "false") or
+                std.ascii.eqlIgnoreCase(value, "no"))) return true;
         }
     }
     return false;
@@ -140,6 +142,15 @@ pub fn isDockerLogsFollow(cmd_basename: []const u8, argv: []const []const u8) bo
     return std.mem.eql(u8, cmd_basename, "docker-compose") and argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
 }
 
+pub fn isFollowLogsCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
+    if (isDockerLogsFollow(cmd_basename, argv)) return true;
+    if (!hasFollowArg(argv)) return false;
+    if (std.mem.eql(u8, cmd_basename, "kubectl")) {
+        return argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
+    }
+    return eqAny(cmd_basename, &.{ "tail", "journalctl" });
+}
+
 fn isKnownJsRunner(cmd_basename: []const u8) bool {
     return eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun", "deno" });
 }
@@ -152,15 +163,11 @@ fn isKnownDevServer(cmd_basename: []const u8) bool {
 /// opt-in line-filter allowlist; `.inherit` stays raw to avoid buffering
 /// interactive UIs and unsupported watchers.
 pub fn classifyStreamCommand(cmd_basename: []const u8, argv: []const []const u8) StreamDecision {
-    if (isDockerLogsFollow(cmd_basename, argv)) return .stream_filter;
+    if (isFollowLogsCommand(cmd_basename, argv)) return .stream_filter;
 
     if ((hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) and
         (allowsShortWatchFlag(cmd_basename) or isKnownJsRunner(cmd_basename) or isKnownDevServer(cmd_basename))) return .inherit;
     if (hasArg(argv, "-w") and allowsShortWatchFlag(cmd_basename)) return .inherit;
-
-    if (hasFollowArg(argv)) {
-        if (eqAny(cmd_basename, &.{ "kubectl", "tail", "journalctl" })) return .inherit;
-    }
 
     if (argv.len >= 2) {
         const sub = argv[1];
@@ -210,6 +217,14 @@ test "streaming classification: docker follow logs are stream-filterable" {
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("docker", &.{ "docker", "compose", "logs", "--follow" }));
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("docker-compose", &.{ "docker-compose", "logs", "-f" }));
     try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("docker", &.{ "docker", "logs", "--follow=false", "api" }));
+}
+
+test "streaming classification: follow-mode logs are stream-filterable" {
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("kubectl", &.{ "kubectl", "logs", "-f", "deploy/api" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tail", &.{ "tail", "-f", "/var/log/app.log" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tail", &.{ "tail", "--follow=name", "/var/log/app.log" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("journalctl", &.{ "journalctl", "-f", "-u", "api.service" }));
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("kubectl", &.{ "kubectl", "logs", "--follow=false", "deploy/api" }));
 }
 
 test "streaming classification: start is scoped to dev runners" {
