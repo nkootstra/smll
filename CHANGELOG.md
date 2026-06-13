@@ -25,8 +25,9 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 - `docker images` now emits an argv-gated summary
   (`images N: repo:tag(size) ... dangling xK (+M)`) instead of generic column
   compaction.
-- `ninja` build progress now collapses `[N/M] ...` rows to `built M (ninja)`
-  while preserving compiler warnings/errors, and direct `webpack` builds now
+- `ninja` build progress now collapses `[N/M] ...` rows to `built N (ninja)`
+  using the completed step count while preserving compiler warnings/errors, and
+  direct `webpack` builds now
   reuse the JS build-output compactor for asset summaries and compiled banners.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
