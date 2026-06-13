@@ -1898,15 +1898,116 @@ test "wrapper: pre-capture streaming bypass with no output does not append hint"
     const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(bin_path);
 
-    try writeFakeScript(tmp.dir, "watchcmd",
+    try writeFakeScript(tmp.dir, "vitest",
         \\#!/bin/sh
         \\exit 0
     );
 
-    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{ "watchcmd", "--watch" }, 1024);
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{ "vitest", "--watch" }, 1024);
     defer result.deinit(allocator);
 
     try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: docker logs follow stays raw unless SMLL_STREAM is enabled" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "docker",
+        \\#!/bin/sh
+        \\if [ "$1" = "logs" ]; then
+        \\  printf '2026-04-19T08:42:01Z ready\n'
+        \\  printf '2026-04-19T08:42:02Z ready\n'
+        \\  printf '2026-04-19T08:42:03Z done\n'
+        \\  exit 0
+        \\fi
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "docker", "logs", "-f", "api" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "2026-04-19T08:42:01Z ready\n" ++
+            "2026-04-19T08:42:02Z ready\n" ++
+            "2026-04-19T08:42:03Z done\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters docker logs follow incrementally" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "docker",
+        \\#!/bin/sh
+        \\if [ "$1" = "logs" ]; then
+        \\  printf '2026-04-19T08:42:01Z ready\n'
+        \\  printf '2026-04-19T08:42:02Z ready\n'
+        \\  printf '2026-04-19T08:42:03Z ready\n'
+        \\  printf '2026-04-19T08:42:04Z done\n'
+        \\  exit 0
+        \\fi
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "docker", "logs", "-f", "api" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "ready\n" ++
+            "ready ×2\n" ++
+            "done\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters docker compose logs follow" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "docker",
+        \\#!/bin/sh
+        \\if [ "$1" = "compose" ] && [ "$2" = "logs" ]; then
+        \\  printf 'api-1 | 2026-04-19T08:42:01Z ready\n'
+        \\  printf 'api-1 | 2026-04-19T08:42:02Z ready\n'
+        \\  printf 'api-1 | 2026-04-19T08:42:03Z done\n'
+        \\  exit 0
+        \\fi
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "docker", "compose", "logs", "-f" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "api-1| ready\n" ++
+            "api-1| ready ×1\n" ++
+            "api-1| done\n",
+        result.stdout,
+    );
     try std.testing.expectEqualStrings("", result.stderr);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }

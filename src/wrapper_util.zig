@@ -113,33 +113,80 @@ fn allowsShortWatchFlag(cmd_basename: []const u8) bool {
     return eqAny(cmd_basename, &.{ "jest", "vitest", "tsc", "webpack", "nodemon" });
 }
 
-/// Detect streaming/interactive commands that produce continuous output and
-/// must not be buffered in wrapper mode.
-pub fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
-    if (hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) return true;
-    if (hasArg(argv, "-w") and allowsShortWatchFlag(cmd_basename)) return true;
+pub const StreamDecision = enum {
+    capture,
+    inherit,
+    stream_filter,
+};
 
-    if (hasArg(argv, "--follow") or hasArg(argv, "-f")) {
-        if (eqAny(cmd_basename, &.{ "docker", "kubectl", "tail", "journalctl" })) return true;
+fn hasFollowArg(argv: []const []const u8) bool {
+    for (argv) |arg| {
+        if (std.mem.eql(u8, arg, "--follow") or
+            std.mem.eql(u8, arg, "-f")) return true;
+        if (std.mem.startsWith(u8, arg, "--follow=")) {
+            const value = arg["--follow=".len..];
+            if (std.mem.eql(u8, value, "1") or std.ascii.eqlIgnoreCase(value, "true")) return true;
+        }
+    }
+    return false;
+}
+
+pub fn isDockerLogsFollow(cmd_basename: []const u8, argv: []const []const u8) bool {
+    if (!hasFollowArg(argv)) return false;
+    if (std.mem.eql(u8, cmd_basename, "docker")) {
+        if (argv.len >= 2 and std.mem.eql(u8, argv[1], "logs")) return true;
+        return argv.len >= 3 and std.mem.eql(u8, argv[1], "compose") and std.mem.eql(u8, argv[2], "logs");
+    }
+    return std.mem.eql(u8, cmd_basename, "docker-compose") and argv.len >= 2 and std.mem.eql(u8, argv[1], "logs");
+}
+
+fn isKnownJsRunner(cmd_basename: []const u8) bool {
+    return eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun", "deno" });
+}
+
+fn isKnownDevServer(cmd_basename: []const u8) bool {
+    return eqAny(cmd_basename, &.{ "vite", "next", "nuxt", "webpack" });
+}
+
+/// Classify commands that produce continuous output. `.stream_filter` is the
+/// opt-in line-filter allowlist; `.inherit` stays raw to avoid buffering
+/// interactive UIs and unsupported watchers.
+pub fn classifyStreamCommand(cmd_basename: []const u8, argv: []const []const u8) StreamDecision {
+    if (isDockerLogsFollow(cmd_basename, argv)) return .stream_filter;
+
+    if ((hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) and
+        (allowsShortWatchFlag(cmd_basename) or isKnownJsRunner(cmd_basename) or isKnownDevServer(cmd_basename))) return .inherit;
+    if (hasArg(argv, "-w") and allowsShortWatchFlag(cmd_basename)) return .inherit;
+
+    if (hasFollowArg(argv)) {
+        if (eqAny(cmd_basename, &.{ "kubectl", "tail", "journalctl" })) return .inherit;
     }
 
     if (argv.len >= 2) {
         const sub = argv[1];
-        if (std.mem.eql(u8, sub, "watch")) return true;
-        if (std.mem.eql(u8, cmd_basename, "go") and std.mem.eql(u8, sub, "run")) return true;
-        if (eqAny(sub, &.{ "dev", "serve", "start" })) return true;
+        if (std.mem.eql(u8, sub, "watch") and
+            (isKnownJsRunner(cmd_basename) or std.mem.eql(u8, cmd_basename, "cargo") or std.mem.eql(u8, cmd_basename, "gh"))) return .inherit;
+        if (std.mem.eql(u8, cmd_basename, "go") and std.mem.eql(u8, sub, "run")) return .inherit;
+        if (eqAny(sub, &.{ "dev", "serve", "start" }) and (isKnownJsRunner(cmd_basename) or isKnownDevServer(cmd_basename))) return .inherit;
     }
 
     if (argv.len >= 3) {
         const sub = argv[1];
         const arg2 = argv[2];
-        if (eqAny(sub, &.{ "run", "exec" })) {
-            if (eqAny(arg2, &.{ "dev", "serve", "start", "watch" })) return true;
+        if (isKnownJsRunner(cmd_basename) and eqAny(sub, &.{ "run", "exec", "task" })) {
+            if (eqAny(arg2, &.{ "dev", "serve", "start", "watch" })) return .inherit;
         }
-        if (std.mem.eql(u8, cmd_basename, "gh") and std.mem.eql(u8, sub, "run") and std.mem.eql(u8, arg2, "watch")) return true;
+        if (std.mem.eql(u8, cmd_basename, "gh") and std.mem.eql(u8, sub, "run") and std.mem.eql(u8, arg2, "watch")) return .inherit;
     }
 
-    return eqAny(cmd_basename, &.{ "nodemon", "watchman" });
+    if (eqAny(cmd_basename, &.{ "nodemon", "watchman" })) return .inherit;
+    return .capture;
+}
+
+/// Detect streaming/interactive commands that produce continuous output and
+/// must not be buffered in wrapper mode.
+pub fn isStreamingCommand(cmd_basename: []const u8, argv: []const []const u8) bool {
+    return classifyStreamCommand(cmd_basename, argv) != .capture;
 }
 
 test "streaming detection: short -w is scoped to watch-capable tools" {
@@ -155,4 +202,19 @@ test "streaming detection: explicit and positional watch forms" {
     try std.testing.expect(isStreamingCommand("npm", &.{ "npm", "run", "dev" }));
     try std.testing.expect(isStreamingCommand("go", &.{ "go", "run", "." }));
     try std.testing.expect(!isStreamingCommand("go", &.{ "go", "test", "./..." }));
+    try std.testing.expect(!isStreamingCommand("grep", &.{ "grep", "--watch", "needle" }));
+}
+
+test "streaming classification: docker follow logs are stream-filterable" {
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("docker", &.{ "docker", "logs", "-f", "api" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("docker", &.{ "docker", "compose", "logs", "--follow" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("docker-compose", &.{ "docker-compose", "logs", "-f" }));
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("docker", &.{ "docker", "logs", "--follow=false", "api" }));
+}
+
+test "streaming classification: start is scoped to dev runners" {
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("docker", &.{ "docker", "start", "db" }));
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("systemctl", &.{ "systemctl", "start", "nginx" }));
+    try std.testing.expectEqual(StreamDecision.inherit, classifyStreamCommand("npm", &.{ "npm", "run", "dev" }));
+    try std.testing.expectEqual(StreamDecision.inherit, classifyStreamCommand("next", &.{ "next", "dev" }));
 }

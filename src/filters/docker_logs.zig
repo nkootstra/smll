@@ -17,7 +17,7 @@ const Writer = std.Io.Writer;
 // `docker compose logs` dispatch arm (wrapper mode only — no pipe-mode
 // detection).
 
-const Mode = enum { plain, compose };
+pub const Mode = enum { plain, compose };
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
@@ -40,58 +40,14 @@ pub fn applyCompose(allocator: Allocator, stdout: []const u8, stderr: []const u8
 fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer, mode: Mode) !void {
     if (input.len == 0) return;
 
-    // Buffer the last line we emitted so we can coalesce repeats.
-    var pending: std.ArrayList(u8) = .empty;
-    defer pending.deinit(allocator);
-    var pending_payload_start: usize = 0;
-    var repeat_count: usize = 0;
+    var deduper = StreamDeduper.init(allocator, mode);
+    defer deduper.deinit();
 
     var lines = std.mem.splitScalar(u8, input, '\n');
-    var first: bool = true;
-    const has_ansi = std.mem.indexOfScalar(u8, input, '\x1b') != null;
-    var strip_buf: std.ArrayList(u8) = .empty;
-    defer strip_buf.deinit(allocator);
-    var normalized: std.ArrayList(u8) = .empty;
-    defer normalized.deinit(allocator);
     while (lines.next()) |raw| {
-        const clean = if (has_ansi)
-            (ansi.stripInto(&strip_buf, allocator, raw) catch raw)
-        else
-            raw;
-        const trimmed = std.mem.trimEnd(u8, clean, " \t\r");
-        if (trimmed.len == 0) {
-            // Empty line — flush pending, don't emit blank.
-            if (!first and repeat_count > 0) {
-                try flushPending(writer, pending.items, pending_payload_start, repeat_count);
-                pending.clearRetainingCapacity();
-                repeat_count = 0;
-            }
-            continue;
-        }
-
-        normalized.clearRetainingCapacity();
-        const prepared = try prepareLine(&normalized, allocator, trimmed, mode);
-        const payload = prepared.line[prepared.payload_start..];
-
-        if (repeat_count > 0) {
-            const prev_payload = pending.items[pending_payload_start..];
-            if (std.mem.eql(u8, prev_payload, payload)) {
-                repeat_count += 1;
-                continue;
-            }
-            try flushPending(writer, pending.items, pending_payload_start, repeat_count);
-            pending.clearRetainingCapacity();
-            repeat_count = 0;
-        }
-
-        pending_payload_start = prepared.payload_start;
-        try pending.appendSlice(allocator, prepared.line);
-        repeat_count = 1;
-        first = false;
+        try deduper.feedLine(raw, writer, false);
     }
-    if (repeat_count > 0) {
-        try flushPending(writer, pending.items, pending_payload_start, repeat_count);
-    }
+    try deduper.flush(writer, false);
 }
 
 const PreparedLine = struct {
@@ -125,14 +81,75 @@ fn normalizeComposeLine(buf: *std.ArrayList(u8), allocator: Allocator, line: []c
     return true;
 }
 
-fn flushPending(writer: *Writer, line: []const u8, payload_start: usize, count: usize) !void {
+pub const StreamDeduper = struct {
+    allocator: Allocator,
+    mode: Mode,
+    pending: std.ArrayList(u8) = .empty,
+    pending_payload_start: usize = 0,
+    repeat_count: usize = 0,
+    strip_buf: std.ArrayList(u8) = .empty,
+    normalized: std.ArrayList(u8) = .empty,
+
+    pub fn init(allocator: Allocator, mode: Mode) StreamDeduper {
+        return .{ .allocator = allocator, .mode = mode };
+    }
+
+    pub fn deinit(self: *StreamDeduper) void {
+        self.pending.deinit(self.allocator);
+        self.strip_buf.deinit(self.allocator);
+        self.normalized.deinit(self.allocator);
+    }
+
+    pub fn feedLine(self: *StreamDeduper, raw: []const u8, writer: *Writer, immediate: bool) !void {
+        const clean = ansi.stripInto(&self.strip_buf, self.allocator, raw) catch raw;
+        const trimmed = std.mem.trimEnd(u8, clean, " \t\r");
+        if (trimmed.len == 0) {
+            try self.flush(writer, immediate);
+            return;
+        }
+
+        self.normalized.clearRetainingCapacity();
+        const prepared = try prepareLine(&self.normalized, self.allocator, trimmed, self.mode);
+        const payload = prepared.line[prepared.payload_start..];
+
+        if (self.repeat_count > 0) {
+            const prev_payload = self.pending.items[self.pending_payload_start..];
+            if (std.mem.eql(u8, prev_payload, payload)) {
+                self.repeat_count += 1;
+                return;
+            }
+            try self.flush(writer, immediate);
+        }
+
+        self.pending_payload_start = prepared.payload_start;
+        try self.pending.appendSlice(self.allocator, prepared.line);
+        self.repeat_count = 1;
+        if (immediate) try writePrepared(writer, self.pending.items, self.pending_payload_start, null);
+    }
+
+    pub fn flush(self: *StreamDeduper, writer: *Writer, immediate: bool) !void {
+        if (self.repeat_count == 0) return;
+        if (immediate) {
+            if (self.repeat_count > 1) {
+                try writePrepared(writer, self.pending.items, self.pending_payload_start, self.repeat_count - 1);
+            }
+        } else {
+            const suffix = if (self.repeat_count > 1) self.repeat_count else null;
+            try writePrepared(writer, self.pending.items, self.pending_payload_start, suffix);
+        }
+        self.pending.clearRetainingCapacity();
+        self.repeat_count = 0;
+    }
+};
+
+fn writePrepared(writer: *Writer, line: []const u8, payload_start: usize, repeat_suffix: ?usize) !void {
     // Timestamp is usually low-value noise for agent actions; keep payload only.
     if (payload_start > 0 and payload_start < line.len) {
         try writer.writeAll(line[payload_start..]);
     } else {
         try writer.writeAll(line);
     }
-    if (count > 1) {
+    if (repeat_suffix) |count| {
         try writer.writeAll(" ×");
         try ansi.writeDecimal(writer, count);
     }
@@ -192,6 +209,33 @@ test "apply: fixture collapses repeated health checks" {
     try std.testing.expect(std.mem.find(u8, got, "starting server on :8080") != null);
     try std.testing.expect(std.mem.find(u8, got, "shutting down gracefully") != null);
     try std.testing.expect(std.mem.find(u8, got, "slow query") != null);
+}
+
+test "StreamDeduper: immediate mode emits first line and later repeat marker" {
+    var deduper = StreamDeduper.init(std.testing.allocator, .plain);
+    defer deduper.deinit();
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try deduper.feedLine("2026-04-19T08:42:01Z ready", &out.writer, true);
+    try std.testing.expectEqualStrings("ready\n", out.written());
+    try deduper.feedLine("2026-04-19T08:42:02Z ready", &out.writer, true);
+    try deduper.feedLine("2026-04-19T08:42:03Z ready", &out.writer, true);
+    try std.testing.expectEqualStrings("ready\n", out.written());
+    try deduper.flush(&out.writer, true);
+    try std.testing.expectEqualStrings("ready\nready ×2\n", out.written());
+}
+
+test "StreamDeduper: immediate mode reports one suppressed duplicate" {
+    var deduper = StreamDeduper.init(std.testing.allocator, .plain);
+    defer deduper.deinit();
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try deduper.feedLine("2026-04-19T08:42:01Z ready", &out.writer, true);
+    try deduper.feedLine("2026-04-19T08:42:02Z ready", &out.writer, true);
+    try deduper.flush(&out.writer, true);
+    try std.testing.expectEqualStrings("ready\nready ×1\n", out.written());
 }
 
 test "applyCompose: strips compose prefix spacing and collapses repeated payloads" {

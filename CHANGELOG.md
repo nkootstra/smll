@@ -29,6 +29,10 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   using the completed step count while preserving compiler warnings/errors, and
   direct `webpack` builds now
   reuse the JS build-output compactor for asset summaries and compiled banners.
+- `SMLL_STREAM=1` now enables opt-in streaming compaction for
+  `docker logs -f` / `docker compose logs -f`: first occurrences are emitted
+  immediately, repeated payloads are summarized on flush, and default streaming
+  behavior remains raw unless explicitly enabled.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
@@ -100,7 +104,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
   dangling space).
-- Raised the CI release size cap from 320 KiB to 344 KiB (352,256 bytes) to
+- Raised the CI release size cap from 320 KiB to 347 KiB (355,328 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
   a cross-compiled one.
