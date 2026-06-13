@@ -84,6 +84,7 @@ const go_test_v_fixture = @embedFile("fixture_go_test_v");
 const docker_logs_fixture = @embedFile("fixture_docker_logs");
 const docker_compose_ps_fixture = @embedFile("fixture_docker_compose_ps");
 const docker_compose_logs_fixture = @embedFile("fixture_docker_compose_logs");
+const docker_images_fixture = @embedFile("fixture_docker_images");
 const npm_install_fixture = @embedFile("fixture_npm_install");
 
 const RunResult = struct {
@@ -2776,6 +2777,23 @@ test "smoke: docker compose logs and docker-compose logs dedup service payloads"
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, v1.term);
     try std.testing.expectEqualStrings(expected, v2.stdout);
     try std.testing.expectEqualStrings(expected, v1.stdout);
+}
+
+test "smoke: docker images summarizes repositories and dangling rows" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_images_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "images" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < docker_images_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "postgres:18(479MB)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "node:24-alpine(161MB)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "dangling x3") != null);
 }
 
 test "smoke: npm install keeps WARN + summary, drops notice (default)" {

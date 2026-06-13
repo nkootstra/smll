@@ -22,6 +22,9 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   summary (`dNup name(image,status)`), and `docker compose logs` /
   `docker-compose logs` normalize `service | payload` prefixes before
   consecutive duplicate collapse.
+- `docker images` now emits an argv-gated summary
+  (`images N: repo:tag(size) ... dangling xK (+M)`) instead of generic column
+  compaction.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same

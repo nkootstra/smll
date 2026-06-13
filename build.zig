@@ -134,6 +134,7 @@ const modules = [_]ModuleEntry{
     .{ .name = "docker_compact", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_docker_ps", .path = "tests/fixtures/docker_ps.txt" },
         .{ .name = "fixture_docker_compose_ps", .path = "tests/fixtures/docker_compose_ps.txt" },
+        .{ .name = "fixture_docker_images", .path = "tests/fixtures/docker_images.txt" },
     } },
     .{ .name = "ls_compact", .fixtures = &.{
         .{ .name = "fixture_ls_la", .path = "tests/fixtures/ls_la.txt" },

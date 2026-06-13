@@ -31,6 +31,15 @@ pub fn matches(input: []const u8) bool {
     return false;
 }
 
+pub fn matchesImages(input: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |line| {
+        if (line.len == 0) continue;
+        return isDockerImagesHeader(line);
+    }
+    return false;
+}
+
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     _ = allocator;
     _ = stderr;
@@ -107,13 +116,89 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try writer.writeByte('\n');
 }
 
+pub fn applyImages(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = allocator;
+    _ = stderr;
+    if (stdout.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    const header = firstNonEmpty(&lines) orelse return;
+    const tag_col = findColumnStart(header, "TAG") orelse return;
+    const image_id_col = findColumnStart(header, "IMAGE ID") orelse return;
+    const size_col = findColumnStart(header, "SIZE") orelse return;
+
+    var count: usize = 0;
+    var named_count: usize = 0;
+    var dangling_count: usize = 0;
+    var scan = lines;
+    while (scan.next()) |line| {
+        const row = parseImageRow(line, tag_col, image_id_col, size_col) orelse continue;
+        count += 1;
+        if (isDanglingImage(row)) {
+            dangling_count += 1;
+        } else {
+            named_count += 1;
+        }
+    }
+
+    try writer.writeAll("images ");
+    try ansi.writeDecimal(writer, count);
+    if (count == 0) {
+        try writer.writeByte('\n');
+        return;
+    }
+    try writer.writeByte(':');
+
+    const max_examples = 8;
+    var emitted: usize = 0;
+    var emit = std.mem.splitScalar(u8, stdout, '\n');
+    _ = firstNonEmpty(&emit);
+    while (emit.next()) |line| {
+        if (emitted >= max_examples) break;
+        const row = parseImageRow(line, tag_col, image_id_col, size_col) orelse continue;
+        if (isDanglingImage(row)) continue;
+        try writer.writeByte(' ');
+        try writer.writeAll(row.repository);
+        try writer.writeByte(':');
+        try writer.writeAll(row.tag);
+        try writer.writeByte('(');
+        try writer.writeAll(row.size);
+        try writer.writeByte(')');
+        emitted += 1;
+    }
+    if (dangling_count > 0) {
+        try writer.writeAll(" dangling x");
+        try ansi.writeDecimal(writer, dangling_count);
+    }
+    if (named_count > emitted) {
+        try writer.writeAll(" (+");
+        try ansi.writeDecimal(writer, named_count - emitted);
+        try writer.writeByte(')');
+    }
+    try writer.writeByte('\n');
+}
+
 /// Locate column-start index of a named header in the HEADER row.
 fn findColumnStart(header: []const u8, name: []const u8) ?usize {
     return std.mem.find(u8, header, name);
 }
 
+fn firstNonEmpty(lines: *std.mem.SplitIterator(u8, .scalar)) ?[]const u8 {
+    while (lines.next()) |line| {
+        if (line.len != 0) return line;
+    }
+    return null;
+}
+
 fn isDockerPsHeader(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "CONTAINER ID");
+}
+
+fn isDockerImagesHeader(line: []const u8) bool {
+    return firstHeaderFieldIs(line, "REPOSITORY") and
+        findColumnStart(line, "TAG") != null and
+        findColumnStart(line, "IMAGE ID") != null and
+        findColumnStart(line, "SIZE") != null;
 }
 
 fn isComposePsHeader(line: []const u8) bool {
@@ -167,6 +252,25 @@ fn lastField(line: []const u8) []const u8 {
     return trimmed;
 }
 
+const ImageRow = struct {
+    repository: []const u8,
+    tag: []const u8,
+    size: []const u8,
+};
+
+fn parseImageRow(line: []const u8, tag_col: usize, image_id_col: usize, size_col: usize) ?ImageRow {
+    if (line.len == 0 or tag_col >= line.len or image_id_col > line.len or size_col >= line.len) return null;
+    const repository = std.mem.trim(u8, line[0..@min(tag_col, line.len)], " \t\r");
+    const tag = std.mem.trim(u8, line[tag_col..@min(image_id_col, line.len)], " \t\r");
+    const size = std.mem.trim(u8, line[size_col..], " \t\r");
+    if (repository.len == 0 or tag.len == 0 or size.len == 0) return null;
+    return .{ .repository = repository, .tag = tag, .size = size };
+}
+
+fn isDanglingImage(row: ImageRow) bool {
+    return std.mem.eql(u8, row.repository, "<none>") or std.mem.eql(u8, row.tag, "<none>");
+}
+
 test "matches: CONTAINER ID header" {
     const input = "CONTAINER ID   IMAGE\nabc123   nginx\n";
     try std.testing.expect(matches(input));
@@ -184,6 +288,14 @@ test "matches: NAME-prefixed non-compose header rejected" {
 test "matches: non-docker rejected" {
     try std.testing.expect(!matches("NAME  READY\npod1  1/1\n"));
     try std.testing.expect(!matches(""));
+}
+
+test "matchesImages: docker images header" {
+    try std.testing.expect(matchesImages("REPOSITORY   TAG   IMAGE ID   CREATED   SIZE\nnode   24-alpine   abc   now   161MB\n"));
+}
+
+test "matchesImages: generic repository table rejected" {
+    try std.testing.expect(!matchesImages("REPOSITORY   STATUS\norigin       ready\n"));
 }
 
 test "apply: fixture produces compact summary" {
@@ -208,6 +320,19 @@ test "apply: docker compose fixture produces compact summary" {
     const got = out.written();
     try std.testing.expect(std.mem.startsWith(u8, got, "d1up "));
     try std.testing.expect(std.mem.find(u8, got, "smll_d4_fixture-echoer-1(node:24-alpine,Up 2 seconds)") != null);
+}
+
+test "applyImages: fixture summarizes named and dangling images" {
+    const fixture = @embedFile("fixture_docker_images");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyImages(std.testing.allocator, fixture, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.startsWith(u8, got, "images 25: "));
+    try std.testing.expect(std.mem.find(u8, got, "postgres:18(479MB)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "node:24-alpine(161MB)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "dangling x3") != null);
+    try std.testing.expect(std.mem.find(u8, got, "(+14)") != null);
 }
 
 test "apply: empty input produces nothing" {
