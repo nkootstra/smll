@@ -17,6 +17,53 @@ pub fn applyGh(allocator: Allocator, stdout: []const u8, stderr: []const u8, wri
     try scanKeep(allocator, stdout, stderr, writer, shouldKeepGh, writeGhLine, true, "ok\n");
 }
 
+pub fn matchesPupTable(input: []const u8) bool {
+    var saw_border = false;
+    var saw_row = false;
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trimEnd(u8, raw, "\r");
+        if (isPupBorderLine(line)) {
+            saw_border = true;
+        } else if (isPupPipeRow(line)) {
+            saw_row = true;
+        }
+    }
+    return saw_border and saw_row;
+}
+
+pub fn applyPupTable(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    _ = stderr;
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+    var fields: std.ArrayList([]const u8) = .empty;
+    defer fields.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, stdout, '\n');
+    while (lines.next()) |raw| {
+        const clean = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const line = std.mem.trimEnd(u8, clean, "\r");
+        if (line.len == 0 or isPupBorderLine(line) or isPupSeparatorRow(line)) continue;
+        if (!isPupPipeRow(line)) {
+            try writer.writeAll(line);
+            try writer.writeByte('\n');
+            continue;
+        }
+
+        fields.clearRetainingCapacity();
+        try splitPupPipeFields(allocator, line, &fields);
+        while (fields.items.len > 0 and fields.items[fields.items.len - 1].len == 0) {
+            _ = fields.pop();
+        }
+        if (fields.items.len == 0) continue;
+        for (fields.items, 0..) |field, idx| {
+            if (idx > 0) try writer.writeByte('\t');
+            try writer.writeAll(field);
+        }
+        try writer.writeByte('\n');
+    }
+}
+
 fn scanKeep(
     allocator: Allocator,
     stdout: []const u8,
@@ -69,6 +116,43 @@ fn writeRawLine(writer: *Writer, line: []const u8) !void {
 fn writeGhLine(writer: *Writer, line: []const u8) !void {
     if (try writeCompactGhTabularRow(writer, line)) return;
     try writer.writeAll(line);
+}
+
+fn splitPupPipeFields(allocator: Allocator, line: []const u8, out: *std.ArrayList([]const u8)) !void {
+    const start: usize = if (line.len > 0 and line[0] == '|') 1 else 0;
+    const end: usize = if (line.len > start and line[line.len - 1] == '|') line.len - 1 else line.len;
+    var fields = std.mem.splitScalar(u8, line[start..end], '|');
+    while (fields.next()) |field| {
+        try out.append(allocator, std.mem.trim(u8, field, " \t"));
+    }
+}
+
+fn isPupPipeRow(line: []const u8) bool {
+    return line.len >= 2 and line[0] == '|' and std.mem.indexOfScalar(u8, line[1..], '|') != null;
+}
+
+fn isPupBorderLine(line: []const u8) bool {
+    if (line.len == 0 or line[0] != '+') return false;
+    var saw_rule = false;
+    for (line) |c| {
+        switch (c) {
+            '+', '-', '=' => saw_rule = true,
+            else => return false,
+        }
+    }
+    return saw_rule;
+}
+
+fn isPupSeparatorRow(line: []const u8) bool {
+    if (!isPupPipeRow(line)) return false;
+    var saw_rule = false;
+    for (line) |c| {
+        switch (c) {
+            '|', '-' => saw_rule = true,
+            else => return false,
+        }
+    }
+    return saw_rule;
 }
 
 fn writeCompactGhTabularRow(writer: *Writer, line: []const u8) !bool {

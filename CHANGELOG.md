@@ -45,6 +45,9 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 - `SMLL_STREAM=1` now supports `gh run watch`: repeated job table redraws are
   reduced to job state transitions such as `build: queued->running`, while
   already-completed run messages pass through raw.
+- Datadog `pup` is now an auto-wrap target. Wrapper mode minifies clean JSON
+  output and strips box framing/padding from `-o table` output while preserving
+  lossless mode.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
@@ -116,7 +119,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
   dangling space).
-- Raised the CI release size cap from 320 KiB to 356 KiB (364,544 bytes) to
+- Raised the CI release size cap from 320 KiB to 360 KiB (368,640 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
   a cross-compiled one.

@@ -4,14 +4,14 @@ pub const auto_wrap_shell_case =
     "git|rg|tree|find|docker|docker-compose|kubectl|gh|ps|ls|df|du|curl|make|cargo|zig|go|" ++
     "ninja|pytest|jest|vitest|mocha|tsc|eslint|biome|next|webpack|npm|pnpm|yarn|bun|cat|" ++
     "composer|gradle|gradlew|mvn|mvnw|pre-commit|terraform|tofu|aws|jq|" ++
-    "psql|systemctl|lsof|brew";
+    "pup|psql|systemctl|lsof|brew";
 
 pub const auto_wrap_js_array =
     "\"git\",\"rg\",\"tree\",\"find\",\"docker\",\"docker-compose\",\"kubectl\",\"gh\",\"ps\",\"ls\",\"df\",\"du\"," ++
     "\"curl\",\"make\",\"cargo\",\"zig\",\"go\",\"ninja\",\"pytest\",\"jest\",\"vitest\",\"mocha\"," ++
     "\"tsc\",\"eslint\",\"biome\",\"next\",\"webpack\",\"npm\",\"pnpm\",\"yarn\",\"bun\",\"cat\",\"composer\"," ++
     "\"gradle\",\"gradlew\",\"mvn\",\"mvnw\",\"pre-commit\",\"terraform\",\"tofu\",\"aws\"," ++
-    "\"jq\",\"psql\",\"systemctl\",\"lsof\",\"brew\"";
+    "\"jq\",\"pup\",\"psql\",\"systemctl\",\"lsof\",\"brew\"";
 
 pub fn shouldAutoWrap(command: []const u8) bool {
     var commands = std.mem.splitScalar(u8, auto_wrap_shell_case, '|');

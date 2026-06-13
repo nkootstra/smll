@@ -71,6 +71,8 @@ const docker_ps_fixture = @embedFile("fixture_docker_ps");
 const kubectl_pods_fixture = @embedFile("fixture_kubectl_pods");
 const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
 const gh_run_list_fixture = @embedFile("fixture_gh_run_list");
+const pup_skills_json_fixture = @embedFile("fixture_pup_skills_json");
+const pup_skills_table_fixture = @embedFile("fixture_pup_skills_table");
 const ls_la_fixture = @embedFile("fixture_ls_la");
 const find_plain_many_fixture = @embedFile("fixture_find_plain_many");
 const tree_large_fixture = @embedFile("fixture_tree_large");
@@ -4212,6 +4214,72 @@ test "smoke: eslint compact keeps diagnostics and summary" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "no-unused-vars") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "2 problems") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "ESLint is running") == null);
+}
+
+test "smoke: pup json output is minified" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "pup", pup_skills_json_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pup", "skills", "list", "-o", "json" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < pup_skills_json_fixture.len);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "[{\"description\":\"Datadog CLI"));
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\"name\":\"dd-pup\"") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\n  {") == null);
+}
+
+test "smoke: pup table output drops box framing and padding" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "pup", pup_skills_table_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pup", "skills", "list", "-o", "table" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < pup_skills_table_fixture.len);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "name\ttype\tdescription\tplatform\tfiles\n"));
+    try std.testing.expect(std.mem.find(u8, result.stdout, "dd-pup\tskill\tDatadog CLI (pup). OAuth2 auth with token refresh.") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "+===") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "| dd-pup") == null);
+}
+
+test "smoke: pup lossless preserves json output byte-identically" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "pup", pup_skills_json_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pup", "skills", "list", "-o", "json" }, &.{
+        .{ "SMLL_LOSSLESS", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(pup_skills_json_fixture, result.stdout);
+}
+
+test "smoke: pup plain output passes through" {
+    const allocator = std.testing.allocator;
+    const fixture = "Pup 0.63.0 (rust 1.95.0; macos aarch64)\n";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "pup", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pup", "version" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(fixture, result.stdout);
 }
 
 test "smoke: terraform plan compact keeps resource headers and summary" {

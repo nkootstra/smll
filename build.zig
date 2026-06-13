@@ -262,6 +262,8 @@ const integration_extra_fixtures = [_]Fixture{
     .{ .name = "fixture_git_show_large", .path = "tests/fixtures/large/git_show.txt" },
     .{ .name = "fixture_gh_pr_list", .path = "tests/fixtures/gh_pr_list.txt" },
     .{ .name = "fixture_gh_run_list", .path = "tests/fixtures/gh_run_list.txt" },
+    .{ .name = "fixture_pup_skills_json", .path = "tests/fixtures/pup_skills_json.txt" },
+    .{ .name = "fixture_pup_skills_table", .path = "tests/fixtures/pup_skills_table.txt" },
     .{ .name = "fixture_ls_la", .path = "tests/fixtures/ls_la.txt" },
     .{ .name = "fixture_cargo_build", .path = "tests/fixtures/cargo_build.txt" },
     .{ .name = "fixture_make_build", .path = "tests/fixtures/make_build.txt" },
