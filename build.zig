@@ -420,6 +420,7 @@ pub fn build(b: *std.Build) void {
     // create pass so any extra_dep entry can reference any module
     // regardless of declaration order.
     const ansi_mod = registry.get("ansi") orelse @panic("ansi module missing");
+    exe_mod.addImport("ansi", ansi_mod);
     for (modules) |m| {
         const mod = registry.get(m.name) orelse unreachable;
         if (m.needs_ansi) mod.addImport("ansi", ansi_mod);
@@ -450,8 +451,8 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     // Release module: same source tree, but built with ReleaseSmall +
-    // strip and a tighter import set (helpers excluded — they're pulled
-    // in transitively by the dispatched filters that need them).
+    // strip and a tighter import set. `ansi` is root-imported because
+    // wrapper_stream strips watch redraw escapes.
     const release_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
@@ -464,6 +465,7 @@ pub fn build(b: *std.Build) void {
     });
     release_mod.addOptions("build_options", app_opts);
     release_mod.addImport("util", util_mod);
+    release_mod.addImport("ansi", ansi_mod);
     for (modules) |m| {
         if (!m.in_release) continue;
         const mod = registry.get(m.name) orelse unreachable;

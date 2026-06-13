@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const ansi = @import("ansi");
 const docker_logs = @import("docker_logs");
 const jest = @import("jest");
 const tsc = @import("tsc");
@@ -185,6 +186,150 @@ const JestWatchSide = struct {
     }
 };
 
+const JobWatchState = enum {
+    queued,
+    running,
+    passed,
+    failed,
+    skipped,
+
+    fn label(self: JobWatchState) []const u8 {
+        return switch (self) {
+            .queued => "queued",
+            .running => "running",
+            .passed => "passed",
+            .failed => "failed",
+            .skipped => "skipped",
+        };
+    }
+};
+
+const JobState = struct {
+    name: []u8,
+    state: JobWatchState,
+};
+
+const ParsedJob = struct {
+    name: []const u8,
+    state: JobWatchState,
+};
+
+const GhRunWatchSide = struct {
+    allocator: std.mem.Allocator,
+    assembler: LineAssembler = .{},
+    strip_buf: std.ArrayList(u8) = .empty,
+    raw_fallback: std.ArrayList(u8) = .empty,
+    pending_name: std.ArrayList(u8) = .empty,
+    pending_state: ?JobWatchState = null,
+    pending_has_steps: bool = false,
+    last_states: std.ArrayList(JobState) = .empty,
+    saw_jobs: bool = false,
+    in_jobs: bool = false,
+
+    fn init(allocator: std.mem.Allocator) GhRunWatchSide {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(self: *GhRunWatchSide, allocator: std.mem.Allocator) void {
+        self.assembler.deinit(allocator);
+        self.strip_buf.deinit(allocator);
+        self.raw_fallback.deinit(allocator);
+        self.pending_name.deinit(allocator);
+        for (self.last_states.items) |entry| allocator.free(entry.name);
+        self.last_states.deinit(allocator);
+    }
+
+    fn feed(self: *GhRunWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
+        try self.assembler.feed(allocator, bytes, self, writer);
+    }
+
+    fn feedLine(self: *GhRunWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
+        const clean = ansi.stripInto(&self.strip_buf, self.allocator, raw) catch raw;
+        const line = std.mem.trimEnd(u8, clean, "\r");
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+
+        if (std.mem.eql(u8, trimmed, "JOBS")) {
+            try self.flushPending(writer);
+            self.saw_jobs = true;
+            self.in_jobs = true;
+            self.raw_fallback.clearRetainingCapacity();
+            return;
+        }
+
+        if (!self.saw_jobs) {
+            try self.appendFallback(line);
+            return;
+        }
+
+        if (!self.in_jobs) return;
+
+        if (trimmed.len == 0 or isRunWatchSection(trimmed)) {
+            try self.flushPending(writer);
+            self.in_jobs = false;
+            return;
+        }
+
+        if (parseRunWatchJob(line)) |job| {
+            try self.flushPending(writer);
+            self.pending_name.clearRetainingCapacity();
+            try self.pending_name.appendSlice(self.allocator, job.name);
+            self.pending_state = job.state;
+            self.pending_has_steps = false;
+            return;
+        }
+
+        if (isRunWatchStep(line)) {
+            self.pending_has_steps = true;
+            return;
+        }
+
+        try self.flushPending(writer);
+        self.in_jobs = false;
+    }
+
+    fn idleFlush(self: *GhRunWatchSide, writer: *std.Io.Writer) !void {
+        try self.flushPending(writer);
+    }
+
+    fn endFlush(self: *GhRunWatchSide, writer: *std.Io.Writer) !void {
+        try self.assembler.flush(self, writer);
+        try self.flushPending(writer);
+        if (!self.saw_jobs) try writer.writeAll(self.raw_fallback.items);
+    }
+
+    fn appendFallback(self: *GhRunWatchSide, line: []const u8) !void {
+        if (line.len == 0 and self.raw_fallback.items.len == 0) return;
+        try self.raw_fallback.appendSlice(self.allocator, line);
+        try self.raw_fallback.append(self.allocator, '\n');
+    }
+
+    fn flushPending(self: *GhRunWatchSide, writer: *std.Io.Writer) !void {
+        const pending = self.pending_state orelse return;
+        defer {
+            self.pending_state = null;
+            self.pending_has_steps = false;
+            self.pending_name.clearRetainingCapacity();
+        }
+        const state: JobWatchState = if (pending == .queued and self.pending_has_steps) .running else pending;
+        try self.emitTransition(self.pending_name.items, state, writer);
+    }
+
+    fn emitTransition(self: *GhRunWatchSide, name: []const u8, state: JobWatchState, writer: *std.Io.Writer) !void {
+        for (self.last_states.items) |*entry| {
+            if (!std.mem.eql(u8, entry.name, name)) continue;
+            if (entry.state == state) return;
+            try writer.print("{s}: {s}->{s}\n", .{ name, entry.state.label(), state.label() });
+            entry.state = state;
+            return;
+        }
+
+        const owned_name = try self.allocator.dupe(u8, name);
+        errdefer self.allocator.free(owned_name);
+        try self.last_states.append(self.allocator, .{ .name = owned_name, .state = state });
+        try writer.print("{s}: {s}\n", .{ name, state.label() });
+    }
+};
+
 pub fn runStreamFilter(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -197,6 +342,9 @@ pub fn runStreamFilter(
     }
     if (wrapper_util.isJsTestWatch(cmd, argv)) {
         return runJestWatch(allocator, io, argv, writer);
+    }
+    if (wrapper_util.isGhRunWatch(cmd, argv)) {
+        return runGhRunWatch(allocator, io, argv, writer);
     }
     return runFollowLogs(allocator, io, argv, writer);
 }
@@ -239,6 +387,19 @@ fn runJestWatch(
     var stderr_side = JestWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
     return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:js_test_watch");
+}
+
+fn runGhRunWatch(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+) !Result {
+    var stdout_side = GhRunWatchSide.init(allocator);
+    defer stdout_side.deinit(allocator);
+    var stderr_side = GhRunWatchSide.init(allocator);
+    defer stderr_side.deinit(allocator);
+    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:gh_run_watch");
 }
 
 fn runPipedStream(
@@ -342,4 +503,73 @@ fn clearFrameIndex(line: []const u8) ?usize {
         return c;
     }
     return home;
+}
+
+fn parseRunWatchJob(line: []const u8) ?ParsedJob {
+    const parsed = statusPrefix(line) orelse return null;
+    if (parsed.step) return null;
+    const rest = std.mem.trimEnd(u8, line[parsed.len..], " \t\r");
+    if (!std.mem.endsWith(u8, rest, ")")) return null;
+    const id_marker = std.mem.lastIndexOf(u8, rest, " (ID ") orelse return null;
+    const id = rest[id_marker + " (ID ".len .. rest.len - 1];
+    if (!allDigits(id)) return null;
+
+    var name = std.mem.trim(u8, rest[0..id_marker], " \t");
+    if (std.mem.lastIndexOf(u8, name, " in ")) |idx| {
+        const maybe_duration = name[idx + " in ".len ..];
+        if (looksLikeDuration(maybe_duration)) name = std.mem.trimEnd(u8, name[0..idx], " \t");
+    }
+    if (name.len == 0) return null;
+    return .{ .name = name, .state = parsed.state };
+}
+
+fn isRunWatchStep(line: []const u8) bool {
+    const parsed = statusPrefix(line) orelse return false;
+    return parsed.step;
+}
+
+fn isRunWatchSection(line: []const u8) bool {
+    return std.mem.eql(u8, line, "ANNOTATIONS") or std.mem.eql(u8, line, "ARTIFACTS");
+}
+
+const StatusPrefix = struct {
+    len: usize,
+    state: JobWatchState,
+    step: bool,
+};
+
+fn statusPrefix(line: []const u8) ?StatusPrefix {
+    const step = std.mem.startsWith(u8, line, "  ");
+    const offset: usize = if (step) 2 else 0;
+    if (line.len <= offset) return null;
+    const rest = line[offset..];
+    if (std.mem.startsWith(u8, rest, "✓ ")) return .{ .len = offset + "✓ ".len, .state = .passed, .step = step };
+    if (std.mem.startsWith(u8, rest, "X ")) return .{ .len = offset + 2, .state = .failed, .step = step };
+    if (std.mem.startsWith(u8, rest, "- ")) return .{ .len = offset + 2, .state = .skipped, .step = step };
+    if (std.mem.startsWith(u8, rest, "* ")) return .{ .len = offset + 2, .state = .queued, .step = step };
+    return null;
+}
+
+fn allDigits(input: []const u8) bool {
+    if (input.len == 0) return false;
+    for (input) |c| if (!std.ascii.isDigit(c)) return false;
+    return true;
+}
+
+fn looksLikeDuration(input: []const u8) bool {
+    if (input.len == 0 or std.mem.indexOfScalar(u8, input, ' ') != null) return false;
+    var saw_digit = false;
+    var saw_unit = false;
+    for (input) |c| {
+        if (std.ascii.isDigit(c)) {
+            saw_digit = true;
+            continue;
+        }
+        if (c == 'h' or c == 'm' or c == 's' or c == '.' or c == 'u') {
+            saw_unit = true;
+            continue;
+        }
+        return false;
+    }
+    return saw_digit and saw_unit;
 }

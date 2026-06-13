@@ -161,6 +161,11 @@ pub fn isJsTestWatch(cmd_basename: []const u8, argv: []const []const u8) bool {
         (hasArg(argv, "--watch") or hasArg(argv, "--watchAll") or hasArg(argv, "-w"));
 }
 
+pub fn isGhRunWatch(cmd_basename: []const u8, argv: []const []const u8) bool {
+    return std.mem.eql(u8, cmd_basename, "gh") and argv.len >= 3 and
+        std.mem.eql(u8, argv[1], "run") and std.mem.eql(u8, argv[2], "watch");
+}
+
 fn isKnownJsRunner(cmd_basename: []const u8) bool {
     return eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun", "deno" });
 }
@@ -176,6 +181,7 @@ pub fn classifyStreamCommand(cmd_basename: []const u8, argv: []const []const u8)
     if (isFollowLogsCommand(cmd_basename, argv)) return .stream_filter;
     if (isTscWatch(cmd_basename, argv)) return .stream_filter;
     if (isJsTestWatch(cmd_basename, argv)) return .stream_filter;
+    if (isGhRunWatch(cmd_basename, argv)) return .stream_filter;
 
     if ((hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) and
         (allowsShortWatchFlag(cmd_basename) or isKnownJsRunner(cmd_basename) or isKnownDevServer(cmd_basename))) return .inherit;
@@ -195,7 +201,6 @@ pub fn classifyStreamCommand(cmd_basename: []const u8, argv: []const []const u8)
         if (isKnownJsRunner(cmd_basename) and eqAny(sub, &.{ "run", "exec", "task" })) {
             if (eqAny(arg2, &.{ "dev", "serve", "start", "watch" })) return .inherit;
         }
-        if (std.mem.eql(u8, cmd_basename, "gh") and std.mem.eql(u8, sub, "run") and std.mem.eql(u8, arg2, "watch")) return .inherit;
     }
 
     if (eqAny(cmd_basename, &.{ "nodemon", "watchman" })) return .inherit;
@@ -250,6 +255,12 @@ test "streaming classification: js test watch is stream-filterable" {
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("jest", &.{ "jest", "--watchAll" }));
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("vitest", &.{ "vitest", "-w" }));
     try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("jest", &.{"jest"}));
+}
+
+test "streaming classification: gh run watch is stream-filterable" {
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("gh", &.{ "gh", "run", "watch" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("gh", &.{ "gh", "run", "watch", "123" }));
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("gh", &.{ "gh", "run", "view", "123" }));
 }
 
 test "streaming classification: start is scoped to dev runners" {
