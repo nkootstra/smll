@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
 // LOSSY compact filter for `cargo build` / `cargo check` / `cargo clippy` /
-// `make` / `go build` /
+// `make` / `ninja` / `go build` /
 // successful `zig build --summary all` output — on by default (v0.6).
 // Set SMLL_LOSSLESS=1 to bypass.
 //
@@ -18,7 +18,7 @@ const Writer = std.Io.Writer;
 //
 // Shape of summary line (emitted once per tool/status that fired at least one
 // progress line): `Compiled N (cargo)` / `Checked N (cargo)` /
-// `Compiled N (make)` / `Compiled N (go)`. For successful
+// `Compiled N (make)` / `built N (ninja)` / `Compiled N (go)`. For successful
 // `zig build --summary all`, the original `Build Summary: …` line is forwarded
 // verbatim; no synthesized count line is emitted.
 
@@ -48,6 +48,7 @@ const LineKind = enum {
     cargo_check_progress,
     cargo_verbose_invocation,
     make_progress,
+    ninja_progress,
     go_progress,
     warning,
     err,
@@ -61,6 +62,7 @@ fn classify(line: []const u8) LineKind {
     if (std.mem.startsWith(u8, line, CARGO_CHECK_PREFIX)) return .cargo_check_progress;
     if (std.mem.startsWith(u8, line, "     Running `rustc ")) return .cargo_verbose_invocation;
     if (std.mem.startsWith(u8, line, GO_PROGRESS_PREFIX)) return .go_progress;
+    if (ninjaProgressTotal(line) != null) return .ninja_progress;
     // Make progress: first-char switch avoids iterating the prefix array.
     switch (line[0]) {
         'g' => if (std.mem.startsWith(u8, line, "gcc ") or std.mem.startsWith(u8, line, "g++ ")) return .make_progress,
@@ -90,13 +92,14 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var cargo_check_count: usize = 0;
     var cargo_verbose_count: usize = 0;
     var make_count: usize = 0;
+    var ninja_total: usize = 0;
     var go_count: usize = 0;
 
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
 
-    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &go_count);
-    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &go_count);
+    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_total, &go_count);
+    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_total, &go_count);
 
     if (cargo_count > 0) {
         try writer.writeAll("Compiled ");
@@ -118,6 +121,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try ansi.writeDecimal(writer, make_count);
         try writer.writeAll(" (make)\n");
     }
+    if (ninja_total > 0) {
+        try writer.writeAll("built ");
+        try ansi.writeDecimal(writer, ninja_total);
+        try writer.writeAll(" (ninja)\n");
+    }
     if (go_count > 0) {
         try writer.writeAll("Compiled ");
         try ansi.writeDecimal(writer, go_count);
@@ -134,6 +142,7 @@ fn processStream(
     cargo_check_count: *usize,
     cargo_verbose_count: *usize,
     make_count: *usize,
+    ninja_total: *usize,
     go_count: *usize,
 ) !void {
     if (input.len == 0) return;
@@ -153,6 +162,9 @@ fn processStream(
             .cargo_check_progress => cargo_check_count.* += 1,
             .cargo_verbose_invocation => cargo_verbose_count.* += 1,
             .make_progress => make_count.* += 1,
+            .ninja_progress => if (ninjaProgressTotal(line)) |total| {
+                ninja_total.* = @max(ninja_total.*, total);
+            },
             .go_progress => go_count.* += 1,
             .warning, .err, .other => {
                 try writer.writeAll(line);
@@ -160,6 +172,26 @@ fn processStream(
             },
         }
     }
+}
+
+fn ninjaProgressTotal(line: []const u8) ?usize {
+    if (line.len < 6 or line[0] != '[') return null;
+    var slash: usize = 1;
+    var current_digits = false;
+    while (slash < line.len and std.ascii.isDigit(line[slash])) : (slash += 1) {
+        current_digits = true;
+    }
+    if (!current_digits or slash >= line.len or line[slash] != '/') return null;
+    var end: usize = slash + 1;
+    var total: usize = 0;
+    var total_digits = false;
+    while (end < line.len and std.ascii.isDigit(line[end])) : (end += 1) {
+        total_digits = true;
+        total = total * 10 + (line[end] - '0');
+    }
+    if (!total_digits or end >= line.len or line[end] != ']') return null;
+    if (end + 1 >= line.len or line[end + 1] != ' ') return null;
+    return total;
 }
 
 /// GNU make prints `make[N]: Entering directory '…'` / `Leaving directory`
@@ -189,6 +221,10 @@ test "matches: cargo progress" {
 test "matches: make progress" {
     try std.testing.expect(matches("gcc -c foo.c\n", ""));
     try std.testing.expect(matches("LINK bin/app\n", ""));
+}
+
+test "matches: ninja progress" {
+    try std.testing.expect(matches("[1/2] CC main.o\n", ""));
 }
 
 test "matches: go progress" {
@@ -233,6 +269,17 @@ test "apply: cargo happy path collapses to summary" {
     try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (cargo)") != null);
     try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
+}
+
+test "apply: ninja fixture collapses progress and keeps warning" {
+    const input = @embedFile("fixture_ninja_build");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "built 2 (ninja)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "[1/2]") == null);
+    try std.testing.expect(std.mem.find(u8, got, "warning: unused variable 'unused'") != null);
 }
 
 test "apply: cargo check progress collapses to checked summary" {

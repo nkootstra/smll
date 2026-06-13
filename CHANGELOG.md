@@ -25,6 +25,9 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 - `docker images` now emits an argv-gated summary
   (`images N: repo:tag(size) ... dangling xK (+M)`) instead of generic column
   compaction.
+- `ninja` build progress now collapses `[N/M] ...` rows to `built M (ninja)`
+  while preserving compiler warnings/errors, and direct `webpack` builds now
+  reuse the JS build-output compactor for asset summaries and compiled banners.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
@@ -96,7 +99,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
   dangling space).
-- Raised the CI release size cap from 320 KiB to 342 KiB (350,208 bytes) to
+- Raised the CI release size cap from 320 KiB to 344 KiB (352,256 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
   a cross-compiled one.

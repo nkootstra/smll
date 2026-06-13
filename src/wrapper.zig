@@ -532,8 +532,8 @@ fn runWrapperInner(
         const is_js_install_subcmd = is_js_pkg_manager and
             eqAny(arg1, &.{ "install", "i", "add", "remove", "rm" });
         // `<manager> build` or `<manager> run build` — content signature
-        // (Vite banner, Next.js banner, "modules transformed") confirms it
-        // is a real build pipeline before we compact.
+        // (Vite/Next/Nuxt/webpack banners, shared finalizers) confirms it is a
+        // real build pipeline before we compact.
         const is_build_subcmd = is_js_pkg_manager and
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
@@ -654,6 +654,16 @@ fn runWrapperInner(
             if (!applyFilter(pip_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "webpack")) {
+        if (!lossless and (build_output.matches(stdout_slice) or build_output.matches(stderr_slice))) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
         }
         return exit_code;
     }
@@ -795,8 +805,8 @@ fn runWrapperInner(
         const is_js_pkg_manager = eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun" });
         const is_js_install = is_js_pkg_manager and is_install_subcmd;
         // JS package manager build — npm/pnpm/yarn/bun build (or run build).
-        // Content signature (vite/next/nuxt banner) confirms we have a real
-        // bundler pipeline before routing through build_output.
+        // Content signature confirms we have a real bundler pipeline before
+        // routing through build_output.
         const is_js_build = is_js_pkg_manager and
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
@@ -838,18 +848,19 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    // Build-chatter wrapper: `make`, `cargo build`/`check`/`clippy`, `go build` — LOSSY
+    // Build-chatter wrapper: `make`, `ninja`, `cargo build`/`check`/`clippy`, `go build` — LOSSY
     // compaction by default (v0.6). Collapses `Compiling X` / `cc -c X.o`
     // / `go build: X` progress lines into a summary count; warnings and
     // errors pass through verbatim. Stream-placement: cargo/go emit
     // progress on stderr, make splits; the filter inspects both. Gate by
     // `!SMLL_LOSSLESS`. `bun` is explicitly excluded.
     const is_make = std.mem.eql(u8, cmd_basename, "make");
+    const is_ninja = std.mem.eql(u8, cmd_basename, "ninja");
     const is_build_subcmd = std.mem.eql(u8, arg1, "build");
     const is_cargo_build = eqAny(arg1, &.{ "build", "check", "clippy" }) and std.mem.eql(u8, cmd_basename, "cargo");
     const is_go_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "go");
     const is_zig_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "zig");
-    if (is_make or is_cargo_build or is_go_build or is_zig_build) {
+    if (is_make or is_ninja or is_cargo_build or is_go_build or is_zig_build) {
         if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
             if (!applyFilter(build_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else {

@@ -3992,6 +3992,8 @@ const make_build_fixture = @embedFile("fixture_make_build");
 const make_build_large = @embedFile("fixture_make_build_large");
 const go_build_fixture = @embedFile("fixture_go_build");
 const go_build_large = @embedFile("fixture_go_build_large");
+const ninja_build_fixture = @embedFile("fixture_ninja_build");
+const webpack_build_fixture = @embedFile("fixture_webpack_build");
 
 /// Fake build tool that emits a fixture on the given stream (stdout or stderr).
 /// cargo/go usually print progress to stderr; make usually prints to stdout.
@@ -4151,6 +4153,40 @@ test "smoke: make large fixture reduces by ≥ 60%" {
     try std.testing.expect(reduction >= 60);
     try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 501 (make)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'tmp'") != null);
+}
+
+test "smoke: ninja collapses bracket progress and keeps warnings" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "ninja", ninja_build_fixture, false);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"ninja"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "built 2 (ninja)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "[1/2]") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable 'unused'") != null);
+}
+
+test "smoke: webpack summarizes assets and keeps compiled banner" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "webpack", webpack_build_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"webpack"}, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < webpack_build_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "webpack 5.107.2 compiled successfully") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "assets x1; largest:") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "asset bundle.js 49 bytes") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "[built] [code generated]") == null);
 }
 
 test "smoke: go build collapses `go build:` lines on stderr" {

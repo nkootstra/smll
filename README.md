@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- ~340 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- under 344 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -190,7 +190,7 @@ Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
 | counts / environment | `wc`, `env` | collapse count padding; mask sensitive env values |
 | disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
 | network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs; preserve response bodies byte-for-byte |
-| build drivers | `make`, `cargo build`, `zig build`, `go build`, `dotnet build`, `swift build`, `xcodebuild`, `gradle` / `gradlew`, `mvn` / `mvnw`, `next build` | collapse progress, keep warnings/errors |
+| build drivers | `make`, `ninja`, `cargo build`, `zig build`, `go build`, `dotnet build`, `swift build`, `xcodebuild`, `gradle` / `gradlew`, `mvn` / `mvnw`, `next build`, `webpack` | collapse progress, keep warnings/errors |
 | test runners | `cargo test`, `pytest`, `jest` / `vitest`, `mocha`, `node --test`, `go test -v`, `dotnet test` | drop PASS/progress, keep FAIL + evidence |
 | type checker / lint | `tsc`, `mypy`, `ruff`, `eslint`, `biome` | preserve diagnostics and summaries |
 | formatters | `prettier`, `dotnet format`, `ruff format` | keep files/summaries needing action |
@@ -222,7 +222,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 342 KiB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 344 KiB (Linux x86_64
 release). No network calls, no telemetry. The only local state smll writes is
 under `~/.smll/`: cumulative stats, append-only command history, and optional
 tee logs for failed commands.

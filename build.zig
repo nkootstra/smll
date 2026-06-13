@@ -225,8 +225,11 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_vite_build", .path = "tests/fixtures/vite_build.txt" },
         .{ .name = "fixture_next_build", .path = "tests/fixtures/next_build.txt" },
         .{ .name = "fixture_nuxt_build", .path = "tests/fixtures/nuxt_build.txt" },
+        .{ .name = "fixture_webpack_build", .path = "tests/fixtures/webpack_build.txt" },
     } },
-    .{ .name = "build_compact", .needs_ansi = true },
+    .{ .name = "build_compact", .needs_ansi = true, .fixtures = &.{
+        .{ .name = "fixture_ninja_build", .path = "tests/fixtures/ninja_build.txt" },
+    } },
 
     // Generic / utility filters.
     .{ .name = "generic_compact", .needs_ansi = true },
