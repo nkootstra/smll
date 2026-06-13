@@ -192,7 +192,7 @@ interactive/watch commands still inherit raw output.
 | git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | noise strip |
 | search / listing | `rg`, `tree` | noise strip |
 | filesystem walk | `find` / `find -ls` | strip metadata columns; collapse ≥3 paths/parent to count |
-| columnar tables | `docker ps`, `docker compose ps`, `docker-compose ps`, `docker images`, `kubectl get`, `gh pr/issue list`, `ps`, `df`, `ls -l`, `systemctl`, `lsof`, `brew`, `psql`, `bun pm ls` | column/padding collapse |
+| columnar tables | `docker ps`, `docker compose ps`, `docker-compose ps`, `docker images`, `kubectl get`, `gh pr/issue list`, `ps`, `df`, `ls`, `ls -l`, `systemctl`, `lsof`, `brew`, `psql`, `bun pm ls` | column/padding collapse |
 | counts / environment | `wc`, `env` | collapse count padding; mask sensitive env values |
 | disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
 | network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs; preserve response bodies byte-for-byte |
