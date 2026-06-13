@@ -122,7 +122,7 @@ pub fn run(
 ) !Result {
     if (shouldRunStreamFilter(environ, argv)) {
         var counted_stdout = CountingWriter.init(writer);
-        const stream_result = try wrapper_stream.runDockerLogs(
+        const stream_result = try wrapper_stream.runFollowLogs(
             allocator,
             io,
             argv,

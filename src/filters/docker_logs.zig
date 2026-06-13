@@ -161,12 +161,15 @@ fn writePrepared(writer: *Writer, line: []const u8, payload_start: usize, repeat
 /// does not begin with an ISO-ish timestamp, returns 0.
 fn timestampEnd(line: []const u8) usize {
     if (!looksLikeTimestamp(line)) return 0;
-    // Advance past non-space, then past space(s).
     var i: usize = 0;
-    while (i < line.len and line[i] != ' ' and line[i] != '\t') i += 1;
+    if (looksLikeDateSpaceTime(line)) {
+        i = 19;
+        while (i < line.len and line[i] != ' ' and line[i] != '\t') i += 1;
+    } else {
+        // Advance past the timestamp token, then past space(s).
+        while (i < line.len and line[i] != ' ' and line[i] != '\t') i += 1;
+    }
     while (i < line.len and (line[i] == ' ' or line[i] == '\t')) i += 1;
-    // Some docker formats have TWO leading tokens: "2026-04-19T08:42:01.1Z  INFO  msg"
-    // — the dedup payload should start after the timestamp only.
     return i;
 }
 
@@ -182,11 +185,28 @@ fn looksLikeTimestamp(line: []const u8) bool {
     return true;
 }
 
+fn looksLikeDateSpaceTime(line: []const u8) bool {
+    if (line.len < 19 or line[10] != ' ') return false;
+    for (11..13) |i| if (!std.ascii.isDigit(line[i])) return false;
+    if (line[13] != ':') return false;
+    for (14..16) |i| if (!std.ascii.isDigit(line[i])) return false;
+    if (line[16] != ':') return false;
+    for (17..19) |i| if (!std.ascii.isDigit(line[i])) return false;
+    return true;
+}
+
 test "timestampEnd: ISO docker line" {
     const line = "2026-04-19T08:42:01.123456Z INFO  starting server";
     const idx = timestampEnd(line);
     try std.testing.expect(idx > 0);
     try std.testing.expectEqualStrings("INFO  starting server", line[idx..]);
+}
+
+test "timestampEnd: space-separated date time line" {
+    const line = "2026-04-19 08:42:01 starting server";
+    const idx = timestampEnd(line);
+    try std.testing.expect(idx > 0);
+    try std.testing.expectEqualStrings("starting server", line[idx..]);
 }
 
 test "timestampEnd: no timestamp returns 0" {

@@ -2012,6 +2012,101 @@ test "wrapper: SMLL_STREAM filters docker compose logs follow" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "wrapper: SMLL_STREAM filters kubectl logs follow" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "kubectl",
+        \\#!/bin/sh
+        \\if [ "$1" = "logs" ]; then
+        \\  printf '2026-04-19T08:42:01Z ready\n'
+        \\  printf '2026-04-19T08:42:02Z ready\n'
+        \\  printf '2026-04-19T08:42:03Z done\n'
+        \\  exit 0
+        \\fi
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "kubectl", "logs", "-f", "deploy/api" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "ready\n" ++
+            "ready ×1\n" ++
+            "done\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters tail follow" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "tail",
+        \\#!/bin/sh
+        \\printf '2026-04-19 08:42:01 ready\n'
+        \\printf '2026-04-19 08:42:02 ready\n'
+        \\printf '2026-04-19 08:42:03 ready\n'
+        \\printf '2026-04-19 08:42:04 done\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "tail", "-f", "/var/log/app.log" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "ready\n" ++
+            "ready ×2\n" ++
+            "done\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters journalctl follow" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "journalctl",
+        \\#!/bin/sh
+        \\printf '2026-04-19T08:42:01Z service started\n'
+        \\printf '2026-04-19T08:42:02Z service started\n'
+        \\printf '2026-04-19T08:42:03Z service stopped\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "journalctl", "-f", "-u", "api.service" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "service started\n" ++
+            "service started ×1\n" ++
+            "service stopped\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
 test "wrapper: raw non-verbose curl with no output does not append hint" {
     const allocator = std.testing.allocator;
 

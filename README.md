@@ -179,8 +179,9 @@ failure is swallowed so the wrapped command's exit path is never disturbed.
 Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
 
 Opt in to streaming compaction for supported follow-mode log commands with
-`SMLL_STREAM=1`. The first supported path is `docker logs -f` /
-`docker compose logs -f`; interactive/watch commands still inherit raw output.
+`SMLL_STREAM=1`. Supported paths include `docker logs -f`,
+`docker compose logs -f`, `kubectl logs -f`, `tail -f`, and `journalctl -f`;
+interactive/watch commands still inherit raw output.
 
 ## Supported commands
 
