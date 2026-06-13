@@ -74,6 +74,7 @@ const gh_run_list_fixture = @embedFile("fixture_gh_run_list");
 const pup_skills_json_fixture = @embedFile("fixture_pup_skills_json");
 const pup_skills_table_fixture = @embedFile("fixture_pup_skills_table");
 const ls_la_fixture = @embedFile("fixture_ls_la");
+const ls_columns_fixture = @embedFile("fixture_ls_columns");
 const find_plain_many_fixture = @embedFile("fixture_find_plain_many");
 const tree_large_fixture = @embedFile("fixture_tree_large");
 const tree_ascii_large_fixture = @embedFile("fixture_tree_ascii_large");
@@ -2734,6 +2735,24 @@ test "wrapper: ls -la fixture compacts without crashing" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "main.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "pipeline.zig") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "nielskootstra") == null);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "wrapper: plain ls column output normalizes to one name per line" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "ls", ls_columns_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "ls", "-C", "src" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < ls_columns_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "filter_catalog.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "wrapper.zig\n") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\t") == null);
     try std.testing.expectEqualStrings("", result.stderr);
 }
 
