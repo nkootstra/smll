@@ -391,7 +391,7 @@ test "applyPlainEntries: groups parent directories and preserves small groups" {
     try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (12 entries: build_output.txt, cargo_test_failing.txt, find_plain_many.txt)") != null);
     try std.testing.expect(std.mem.find(u8, got, "README.md\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "build.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "docs/audit.md\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "scripts/audit-fixtures.py\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "entries:") != null);
     try std.testing.expect(got.len < fixture.len);
 }

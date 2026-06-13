@@ -48,9 +48,18 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
-    var state = ScanState{};
-    try scanAndKeep(allocator, stdout, &out, &state);
-    try scanAndKeep(allocator, stderr, &out, &state);
+    switch (detectMode(stdout, stderr) orelse .mocha) {
+        .mocha => {
+            var state = MochaState{};
+            try scanMocha(allocator, stdout, &out, &state);
+            try scanMocha(allocator, stderr, &out, &state);
+        },
+        .node_test => {
+            var state = NodeState{};
+            try scanNodeTest(allocator, stdout, &out, &state);
+            try scanNodeTest(allocator, stderr, &out, &state);
+        },
+    }
 
     if (out.items.len == 0) {
         try writer.writeAll("all tests passed\n");
@@ -59,13 +68,24 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try writer.writeAll(out.items);
 }
 
-const ScanState = struct {
-    in_mocha_failure: bool = false,
-    in_node_failure: bool = false,
-    skipping_node_pass: bool = false,
+const Mode = enum { mocha, node_test };
+
+const MochaState = struct {
+    in_failure: bool = false,
 };
 
-fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state: *ScanState) !void {
+const NodeState = struct {
+    in_failure: bool = false,
+    skipping_pass: bool = false,
+};
+
+fn detectMode(stdout: []const u8, stderr: []const u8) ?Mode {
+    if (matchesNodeTest(stdout) or matchesNodeTest(stderr)) return .node_test;
+    if (matchesMocha(stdout) or matchesMocha(stderr)) return .mocha;
+    return null;
+}
+
+fn scanMocha(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state: *MochaState) !void {
     if (input.len == 0) return;
 
     var strip_buf: std.ArrayList(u8) = .empty;
@@ -80,8 +100,47 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         const line = trimRight(stripped);
         const trimmed = std.mem.trim(u8, line, " \t\r");
 
-        if (state.skipping_node_pass) {
-            if (std.mem.eql(u8, trimmed, "...")) state.skipping_node_pass = false;
+        if (startsWithUnicodePass(trimmed)) {
+            continue;
+        }
+
+        if (isMochaSummary(trimmed)) {
+            state.in_failure = false;
+            try appendLine(allocator, out, trimmed);
+            continue;
+        }
+
+        if (isMochaFailureHeader(trimmed)) {
+            state.in_failure = true;
+            try appendLine(allocator, out, trimmed);
+            continue;
+        }
+
+        if (state.in_failure) {
+            try appendLine(allocator, out, line);
+        }
+    }
+
+    state.in_failure = false;
+}
+
+fn scanNodeTest(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), state: *NodeState) !void {
+    if (input.len == 0) return;
+
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(allocator);
+
+    const trimmed_input = if (input[input.len - 1] == '\n') input[0 .. input.len - 1] else input;
+    if (trimmed_input.len == 0) return;
+
+    var lines = std.mem.splitScalar(u8, trimmed_input, '\n');
+    while (lines.next()) |raw| {
+        const stripped = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
+        const line = trimRight(stripped);
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+
+        if (state.skipping_pass) {
+            if (std.mem.eql(u8, trimmed, "...")) state.skipping_pass = false;
             continue;
         }
 
@@ -90,7 +149,7 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
         }
 
         if (isNodePassLine(trimmed)) {
-            state.skipping_node_pass = true;
+            state.skipping_pass = true;
             continue;
         }
 
@@ -98,34 +157,26 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
             continue;
         }
 
-        if (isMochaSummary(trimmed) or isNodeTrailer(trimmed)) {
-            state.in_node_failure = false;
-            try appendLine(allocator, out, trimmed);
-            continue;
-        }
-
-        if (isMochaFailureHeader(trimmed)) {
-            state.in_mocha_failure = true;
+        if (isNodeTrailer(trimmed)) {
+            state.in_failure = false;
             try appendLine(allocator, out, trimmed);
             continue;
         }
 
         if (isNodeFailureHeader(trimmed)) {
-            state.in_node_failure = true;
+            state.in_failure = true;
             try appendLine(allocator, out, trimmed);
             continue;
         }
 
-        if (state.in_node_failure) {
+        if (state.in_failure) {
             try appendLine(allocator, out, line);
-            if (std.mem.eql(u8, trimmed, "...")) state.in_node_failure = false;
-            continue;
-        }
-
-        if (state.in_mocha_failure) {
-            try appendLine(allocator, out, line);
+            if (std.mem.eql(u8, trimmed, "...")) state.in_failure = false;
         }
     }
+
+    state.in_failure = false;
+    state.skipping_pass = false;
 }
 
 fn appendLine(allocator: Allocator, out: *std.ArrayList(u8), line: []const u8) !void {
@@ -224,4 +275,32 @@ test "apply: node fixture drops ok block and keeps failing TAP diagnostics" {
     try std.testing.expect(std.mem.find(u8, got, "# tests 2") != null);
     try std.testing.expect(std.mem.find(u8, got, "# fail 1") != null);
     try std.testing.expect(std.mem.find(u8, got, "ok 1 - adds numbers") == null);
+}
+
+test "apply: mocha mode does not let ok status lines swallow summaries" {
+    const input =
+        \\ok - build step started
+        \\  1 passing
+        \\  1 failing
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, "", &out.writer);
+    try std.testing.expectEqualStrings("1 passing\n1 failing\n", out.written());
+}
+
+test "apply: mocha failure state resets before stderr chatter" {
+    const stderr =
+        \\ExperimentalWarning: noisy warning after tests
+        \\tool wrapper footer
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, @embedFile("fixture_mocha_failing"), stderr, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "AssertionError [ERR_ASSERTION]") != null);
+    try std.testing.expect(std.mem.find(u8, got, "ExperimentalWarning") == null);
+    try std.testing.expect(std.mem.find(u8, got, "tool wrapper footer") == null);
 }
