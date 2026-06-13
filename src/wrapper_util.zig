@@ -151,6 +151,11 @@ pub fn isFollowLogsCommand(cmd_basename: []const u8, argv: []const []const u8) b
     return eqAny(cmd_basename, &.{ "tail", "journalctl" });
 }
 
+pub fn isTscWatch(cmd_basename: []const u8, argv: []const []const u8) bool {
+    return std.mem.eql(u8, cmd_basename, "tsc") and
+        (hasArg(argv, "--watch") or hasArg(argv, "-w"));
+}
+
 fn isKnownJsRunner(cmd_basename: []const u8) bool {
     return eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun", "deno" });
 }
@@ -164,6 +169,7 @@ fn isKnownDevServer(cmd_basename: []const u8) bool {
 /// interactive UIs and unsupported watchers.
 pub fn classifyStreamCommand(cmd_basename: []const u8, argv: []const []const u8) StreamDecision {
     if (isFollowLogsCommand(cmd_basename, argv)) return .stream_filter;
+    if (isTscWatch(cmd_basename, argv)) return .stream_filter;
 
     if ((hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) and
         (allowsShortWatchFlag(cmd_basename) or isKnownJsRunner(cmd_basename) or isKnownDevServer(cmd_basename))) return .inherit;
@@ -225,6 +231,12 @@ test "streaming classification: follow-mode logs are stream-filterable" {
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tail", &.{ "tail", "--follow=name", "/var/log/app.log" }));
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("journalctl", &.{ "journalctl", "-f", "-u", "api.service" }));
     try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("kubectl", &.{ "kubectl", "logs", "--follow=false", "deploy/api" }));
+}
+
+test "streaming classification: tsc watch is stream-filterable" {
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tsc", &.{ "tsc", "--watch" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tsc", &.{ "tsc", "-w", "--noEmit" }));
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("tsc", &.{ "tsc", "--noEmit" }));
 }
 
 test "streaming classification: start is scoped to dev runners" {

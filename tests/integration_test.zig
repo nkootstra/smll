@@ -2107,6 +2107,81 @@ test "wrapper: SMLL_STREAM filters journalctl follow" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "wrapper: tsc watch stays raw unless SMLL_STREAM is enabled" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "tsc",
+        \\#!/bin/sh
+        \\cat <<'EOF'
+        \\[12:00:00 AM] Starting compilation in watch mode...
+        \\
+        \\src/app.ts:1:7 - error TS2322: Type 'string' is not assignable to type 'number'.
+        \\EOF
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "tsc", "--watch" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "[12:00:00 AM] Starting compilation in watch mode...\n" ++
+            "\n" ++
+            "src/app.ts:1:7 - error TS2322: Type 'string' is not assignable to type 'number'.\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: SMLL_STREAM filters tsc watch frames" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "tsc",
+        \\#!/bin/sh
+        \\cat <<'EOF'
+        \\[12:00:00 AM] Starting compilation in watch mode...
+        \\
+        \\src/app.ts:1:7 - error TS2322: Type 'string' is not assignable to type 'number'.
+        \\
+        \\1 const n: number = 'x';
+        \\        ~
+        \\
+        \\Found 1 error. Watching for file changes.
+        \\
+        \\[12:00:01 AM] File change detected. Starting incremental compilation...
+        \\
+        \\Found 0 errors. Watching for file changes.
+        \\
+        \\[12:00:02 AM] File change detected. Starting incremental compilation...
+        \\
+        \\Found 0 errors. Watching for file changes.
+        \\EOF
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "tsc", "--watch" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(
+        "src/app.ts:1:7 TS2322: Type 'string' is not assignable to type 'number'.\n" ++
+            "Found 1 error. Watching for file changes.\n" ++
+            "clean (0 errors)\n",
+        result.stdout,
+    );
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
 test "wrapper: raw non-verbose curl with no output does not append hint" {
     const allocator = std.testing.allocator;
 

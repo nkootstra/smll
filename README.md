@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- under 347 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- under 350 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -178,10 +178,10 @@ Only failed runs are recorded; successful commands write nothing. The newest
 failure is swallowed so the wrapped command's exit path is never disturbed.
 Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
 
-Opt in to streaming compaction for supported follow-mode log commands with
-`SMLL_STREAM=1`. Supported paths include `docker logs -f`,
-`docker compose logs -f`, `kubectl logs -f`, `tail -f`, and `journalctl -f`;
-interactive/watch commands still inherit raw output.
+Opt in to streaming compaction for supported follow-mode logs and watch-mode
+diagnostics with `SMLL_STREAM=1`. Supported paths include `docker logs -f`,
+`docker compose logs -f`, `kubectl logs -f`, `tail -f`, `journalctl -f`, and
+`tsc --watch`; unsupported interactive/watch commands still inherit raw output.
 
 ## Supported commands
 
@@ -205,7 +205,7 @@ interactive/watch commands still inherit raw output.
 | JSON output | `aws`, `jq` | minify clean JSON stdout |
 | pre-commit | `pre-commit` | keep failed hooks, diagnostics, and summaries |
 | GitHub CLI | `gh` | keep errors/statuses/URLs/help; table output still column-compacts |
-| finite readers | `head`, `tail` | pass through exactly; follow/watch forms stream raw |
+| finite readers | `head`, `tail` | pass through exactly; follow forms stream raw unless `SMLL_STREAM=1` is enabled |
 | fallback | unknown table/list-shaped output; large unknown stdout | safe table padding collapse; ANSI strip + blank-collapse + RLE |
 
 Unknown output only compacts when the shape is high-confidence. Ambiguous short
@@ -227,7 +227,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 347 KiB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 350 KiB (Linux x86_64
 release). No network calls, no telemetry. The only local state smll writes is
 under `~/.smll/`: cumulative stats, append-only command history, and optional
 tee logs for failed commands.

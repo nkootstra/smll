@@ -59,6 +59,8 @@ const fold_examples: usize = 3;
 /// same-code group is homogeneous enough to fold.
 const msg_key_len: usize = 40;
 
+pub const WatchLineResult = enum { ignored, emitted, clean };
+
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
@@ -91,6 +93,41 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll(line);
         try writer.writeByte('\n');
     }
+}
+
+pub fn writeWatchLine(
+    strip_buf: *std.ArrayList(u8),
+    allocator: Allocator,
+    raw: []const u8,
+    writer: *Writer,
+) !WatchLineResult {
+    const line = ansi.stripInto(strip_buf, allocator, raw) catch raw;
+    const trimmed = std.mem.trim(u8, line, " \t\r");
+    if (trimmed.len == 0) return .ignored;
+    if (isFoundZeroSummary(trimmed)) return .clean;
+    if (isFoundSummary(trimmed)) {
+        try writer.writeAll(trimmed);
+        try writer.writeByte('\n');
+        return .emitted;
+    }
+
+    const marker = " - error TS";
+    if (std.mem.find(u8, trimmed, marker)) |idx| {
+        const rest = trimmed[idx + " - error ".len ..];
+        if (std.mem.findScalar(u8, rest, ':') != null) {
+            try writer.writeAll(trimmed[0..idx]);
+            try writer.writeByte(' ');
+            try writer.writeAll(rest);
+            try writer.writeByte('\n');
+            return .emitted;
+        }
+    }
+    if (std.mem.find(u8, trimmed, "error TS") != null) {
+        try writer.writeAll(trimmed);
+        try writer.writeByte('\n');
+        return .emitted;
+    }
+    return .ignored;
 }
 
 /// Parse one stream's lines into buffered diagnostics, path-less fallbacks, and
@@ -221,6 +258,10 @@ fn isFoundSummary(line: []const u8) bool {
         std.mem.find(u8, line, "error") != null;
 }
 
+fn isFoundZeroSummary(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "Found 0 errors");
+}
+
 test "matches: error TS line" {
     try std.testing.expect(matches("src/a.ts:4:5 - error TS2322: Type 'x' ...\n"));
 }
@@ -274,6 +315,42 @@ test "apply: strips ANSI" {
     try apply(std.testing.allocator, input, &.{}, &out.writer);
     try std.testing.expect(std.mem.find(u8, out.written(), "\x1b") == null);
     try std.testing.expect(std.mem.find(u8, out.written(), "src/a.ts:1:1 TS2322: x") != null);
+}
+
+test "writeWatchLine: compacts diagnostics and reports clean transitions" {
+    var strip_buf: std.ArrayList(u8) = .empty;
+    defer strip_buf.deinit(std.testing.allocator);
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try std.testing.expectEqual(WatchLineResult.ignored, try writeWatchLine(
+        &strip_buf,
+        std.testing.allocator,
+        "[12:00:00 AM] Starting compilation in watch mode...",
+        &out.writer,
+    ));
+    try std.testing.expectEqual(WatchLineResult.emitted, try writeWatchLine(
+        &strip_buf,
+        std.testing.allocator,
+        "src/app.ts:1:7 - error TS2322: Type 'string' is not assignable to type 'number'.",
+        &out.writer,
+    ));
+    try std.testing.expectEqual(WatchLineResult.ignored, try writeWatchLine(
+        &strip_buf,
+        std.testing.allocator,
+        "        ~",
+        &out.writer,
+    ));
+    try std.testing.expectEqual(WatchLineResult.clean, try writeWatchLine(
+        &strip_buf,
+        std.testing.allocator,
+        "Found 0 errors. Watching for file changes.",
+        &out.writer,
+    ));
+    try std.testing.expectEqualStrings(
+        "src/app.ts:1:7 TS2322: Type 'string' is not assignable to type 'number'.\n",
+        out.written(),
+    );
 }
 
 test "apply: malformed error line falls back to raw" {

@@ -1,6 +1,8 @@
 const std = @import("std");
 
 const docker_logs = @import("docker_logs");
+const tsc = @import("tsc");
+const wrapper_util = @import("wrapper_util.zig");
 
 const max_line_bytes: usize = 64 * 1024;
 const idle_flush_timeout: std.Io.Timeout = .{ .duration = .{
@@ -25,21 +27,21 @@ const LineAssembler = struct {
         self: *LineAssembler,
         allocator: std.mem.Allocator,
         bytes: []const u8,
-        deduper: *docker_logs.StreamDeduper,
+        processor: anytype,
         writer: *std.Io.Writer,
     ) !void {
         var start: usize = 0;
         for (bytes, 0..) |c, i| {
             if (c != '\n') continue;
             try self.buf.appendSlice(allocator, bytes[start..i]);
-            try deduper.feedLine(self.buf.items, writer, true);
+            try processor.feedLine(self.buf.items, writer);
             self.buf.clearRetainingCapacity();
             start = i + 1;
         }
         if (start < bytes.len) {
             try self.buf.appendSlice(allocator, bytes[start..]);
             if (self.buf.items.len >= max_line_bytes) {
-                try deduper.feedLine(self.buf.items, writer, true);
+                try processor.feedLine(self.buf.items, writer);
                 self.buf.clearRetainingCapacity();
             }
         }
@@ -47,41 +49,97 @@ const LineAssembler = struct {
 
     fn flush(
         self: *LineAssembler,
-        deduper: *docker_logs.StreamDeduper,
+        processor: anytype,
         writer: *std.Io.Writer,
     ) !void {
         if (self.buf.items.len == 0) return;
-        try deduper.feedLine(self.buf.items, writer, true);
+        try processor.feedLine(self.buf.items, writer);
         self.buf.clearRetainingCapacity();
     }
 };
 
-const StreamSide = struct {
+const LogStreamSide = struct {
     assembler: LineAssembler = .{},
     deduper: docker_logs.StreamDeduper,
 
-    fn init(allocator: std.mem.Allocator, mode: docker_logs.Mode) StreamSide {
+    fn init(allocator: std.mem.Allocator, mode: docker_logs.Mode) LogStreamSide {
         return .{ .deduper = docker_logs.StreamDeduper.init(allocator, mode) };
     }
 
-    fn deinit(self: *StreamSide, allocator: std.mem.Allocator) void {
+    fn deinit(self: *LogStreamSide, allocator: std.mem.Allocator) void {
         self.assembler.deinit(allocator);
         self.deduper.deinit();
     }
 
-    fn feed(self: *StreamSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, &self.deduper, writer);
+    fn feed(self: *LogStreamSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
+        try self.assembler.feed(allocator, bytes, self, writer);
     }
 
-    fn idleFlush(self: *StreamSide, writer: *std.Io.Writer) !void {
+    fn feedLine(self: *LogStreamSide, raw: []const u8, writer: *std.Io.Writer) !void {
+        try self.deduper.feedLine(raw, writer, true);
+    }
+
+    fn idleFlush(self: *LogStreamSide, writer: *std.Io.Writer) !void {
         try self.deduper.flush(writer, true);
     }
 
-    fn endFlush(self: *StreamSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(&self.deduper, writer);
+    fn endFlush(self: *LogStreamSide, writer: *std.Io.Writer) !void {
+        try self.assembler.flush(self, writer);
         try self.deduper.flush(writer, true);
     }
 };
+
+const TscWatchSide = struct {
+    allocator: std.mem.Allocator,
+    assembler: LineAssembler = .{},
+    strip_buf: std.ArrayList(u8) = .empty,
+    clean_emitted: bool = false,
+
+    fn init(allocator: std.mem.Allocator) TscWatchSide {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(self: *TscWatchSide, allocator: std.mem.Allocator) void {
+        self.assembler.deinit(allocator);
+        self.strip_buf.deinit(allocator);
+    }
+
+    fn feed(self: *TscWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
+        try self.assembler.feed(allocator, bytes, self, writer);
+    }
+
+    fn feedLine(self: *TscWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
+        switch (try tsc.writeWatchLine(&self.strip_buf, self.allocator, raw, writer)) {
+            .ignored => {},
+            .emitted => self.clean_emitted = false,
+            .clean => {
+                if (!self.clean_emitted) {
+                    try writer.writeAll("clean (0 errors)\n");
+                    self.clean_emitted = true;
+                }
+            },
+        }
+    }
+
+    fn idleFlush(_: *TscWatchSide, _: *std.Io.Writer) !void {}
+
+    fn endFlush(self: *TscWatchSide, writer: *std.Io.Writer) !void {
+        try self.assembler.flush(self, writer);
+    }
+};
+
+pub fn runStreamFilter(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+) !Result {
+    const cmd = commandBasename(argv) orelse "";
+    if (wrapper_util.isTscWatch(cmd, argv)) {
+        return runTscWatch(allocator, io, argv, writer);
+    }
+    return runFollowLogs(allocator, io, argv, writer);
+}
 
 pub fn runFollowLogs(
     allocator: std.mem.Allocator,
@@ -90,7 +148,35 @@ pub fn runFollowLogs(
     writer: *std.Io.Writer,
 ) !Result {
     const mode: docker_logs.Mode = if (isComposeInvocation(argv)) .compose else .plain;
+    var stdout_side = LogStreamSide.init(allocator, mode);
+    defer stdout_side.deinit(allocator);
+    var stderr_side = LogStreamSide.init(allocator, mode);
+    defer stderr_side.deinit(allocator);
+    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, if (isDockerInvocation(argv)) "stream:docker_logs" else "stream:logs");
+}
 
+fn runTscWatch(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+) !Result {
+    var stdout_side = TscWatchSide.init(allocator);
+    defer stdout_side.deinit(allocator);
+    var stderr_side = TscWatchSide.init(allocator);
+    defer stderr_side.deinit(allocator);
+    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:tsc_watch");
+}
+
+fn runPipedStream(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+    stdout_side: anytype,
+    stderr_side: anytype,
+    filter_name: []const u8,
+) !Result {
     var child = std.process.spawn(io, .{
         .argv = argv,
         .stdin = .inherit,
@@ -109,11 +195,6 @@ pub fn runFollowLogs(
     );
     defer multi_reader.deinit();
 
-    var stdout_side = StreamSide.init(allocator, mode);
-    defer stdout_side.deinit(allocator);
-    var stderr_side = StreamSide.init(allocator, mode);
-    defer stderr_side.deinit(allocator);
-
     var input_bytes: usize = 0;
     while (true) {
         multi_reader.fill(64, idle_flush_timeout) catch |err| switch (err) {
@@ -126,14 +207,14 @@ pub fn runFollowLogs(
             error.EndOfStream => break,
             else => |e| return e,
         };
-        input_bytes += try drainAvailable(&multi_reader, 0, &stdout_side, allocator, writer);
-        input_bytes += try drainAvailable(&multi_reader, 1, &stderr_side, allocator, writer);
+        input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
+        input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
         try writer.flush();
     }
     try multi_reader.checkAnyError();
 
-    input_bytes += try drainAvailable(&multi_reader, 0, &stdout_side, allocator, writer);
-    input_bytes += try drainAvailable(&multi_reader, 1, &stderr_side, allocator, writer);
+    input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
+    input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
     try stdout_side.endFlush(writer);
     try stderr_side.endFlush(writer);
     try writer.flush();
@@ -145,14 +226,14 @@ pub fn runFollowLogs(
             .signal, .stopped, .unknown => 1,
         },
         .input_bytes = input_bytes,
-        .filter_name = if (isDockerInvocation(argv)) "stream:docker_logs" else "stream:logs",
+        .filter_name = filter_name,
     };
 }
 
 fn drainAvailable(
     multi_reader: *std.Io.File.MultiReader,
     index: usize,
-    side: *StreamSide,
+    side: anytype,
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
 ) !usize {
@@ -165,14 +246,17 @@ fn drainAvailable(
 }
 
 fn isComposeInvocation(argv: []const []const u8) bool {
-    if (argv.len == 0) return false;
-    const cmd = if (std.mem.findScalarLast(u8, argv[0], '/')) |idx| argv[0][idx + 1 ..] else argv[0];
+    const cmd = commandBasename(argv) orelse return false;
     if (std.mem.eql(u8, cmd, "docker-compose")) return true;
     return std.mem.eql(u8, cmd, "docker") and argv.len >= 3 and std.mem.eql(u8, argv[1], "compose");
 }
 
 fn isDockerInvocation(argv: []const []const u8) bool {
-    if (argv.len == 0) return false;
-    const cmd = if (std.mem.findScalarLast(u8, argv[0], '/')) |idx| argv[0][idx + 1 ..] else argv[0];
+    const cmd = commandBasename(argv) orelse return false;
     return std.mem.eql(u8, cmd, "docker") or std.mem.eql(u8, cmd, "docker-compose");
+}
+
+fn commandBasename(argv: []const []const u8) ?[]const u8 {
+    if (argv.len == 0) return null;
+    return if (std.mem.findScalarLast(u8, argv[0], '/')) |idx| argv[0][idx + 1 ..] else argv[0];
 }
