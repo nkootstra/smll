@@ -9,6 +9,8 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-06-13
+
 ### Added
 
 - `cargo check` and `cargo clippy` now use the existing build-output compactor in
@@ -423,7 +425,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/nkootstra/smll/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nkootstra/smll/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/nkootstra/smll/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/nkootstra/smll/compare/v1.4.0...v1.5.0
