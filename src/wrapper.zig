@@ -828,7 +828,7 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    // Build-chatter wrapper: `make`, `cargo build`, `go build` — LOSSY
+    // Build-chatter wrapper: `make`, `cargo build`/`check`/`clippy`, `go build` — LOSSY
     // compaction by default (v0.6). Collapses `Compiling X` / `cc -c X.o`
     // / `go build: X` progress lines into a summary count; warnings and
     // errors pass through verbatim. Stream-placement: cargo/go emit
@@ -836,7 +836,7 @@ fn runWrapperInner(
     // `!SMLL_LOSSLESS`. `bun` is explicitly excluded.
     const is_make = std.mem.eql(u8, cmd_basename, "make");
     const is_build_subcmd = std.mem.eql(u8, arg1, "build");
-    const is_cargo_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
+    const is_cargo_build = eqAny(arg1, &.{ "build", "check", "clippy" }) and std.mem.eql(u8, cmd_basename, "cargo");
     const is_go_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "go");
     const is_zig_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "zig");
     if (is_make or is_cargo_build or is_go_build or is_zig_build) {

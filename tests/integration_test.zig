@@ -3880,8 +3880,8 @@ test "smoke: curl -v with SMLL_LOSSLESS=1 passes both streams through byte-ident
 }
 
 // ---------------------------------------------------------------------------
-// v0.6 build_compact — shared filter for `cargo build`, `make`, `go build`,
-// and successful `zig build --summary all` output. cargo/go emit progress on
+// v0.6 build_compact — shared filter for `cargo build`/`check`/`clippy`,
+// `make`, `go build`, and successful `zig build --summary all` output. cargo/go emit progress on
 // stderr by convention; make splits across both. setupFakeBuild supports
 // routing a fixture to either stream so each tool's real shape is preserved.
 // ---------------------------------------------------------------------------
@@ -3940,6 +3940,62 @@ test "smoke: cargo build collapses Compiling lines on stderr (default)" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable: `tmp`") != null);
     // Finished line preserved.
     try std.testing.expect(std.mem.find(u8, result.stdout, "Finished dev") != null);
+}
+
+test "smoke: cargo check collapses Checking lines on stderr (default)" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        \\    Checking serde v1.0.196
+        \\    Checking cfg-if v1.0.0
+        \\    Checking smll v0.1.0 (/tmp/smll)
+        \\    Finished dev [unoptimized + debuginfo] target(s) in 1.24s
+        \\
+    ;
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "check" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Checked 3 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    Checking ") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Finished dev") != null);
+}
+
+test "smoke: cargo clippy keeps lint diagnostics while collapsing progress" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        \\    Checking smll v0.1.0 (/tmp/smll)
+        \\warning: this `if` statement can be collapsed
+        \\ --> src/lib.rs:10:5
+        \\  |
+        \\10 | /     if enabled {
+        \\11 | |         if ready { run(); }
+        \\12 | |     }
+        \\  | |_____^ help: try: `if enabled && ready { run(); }`
+        \\  |
+        \\  = note: `#[warn(clippy::collapsible_if)]` on by default
+        \\
+        \\warning: `smll` (lib) generated 1 warning
+        \\    Finished dev [unoptimized + debuginfo] target(s) in 0.42s
+        \\
+    ;
+    const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", fixture, true);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "clippy" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Checked 1 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    Checking ") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "clippy::collapsible_if") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: `smll` (lib) generated 1 warning") != null);
 }
 
 test "smoke: cargo build large fixture reduces by ≥ 60%" {
@@ -4108,14 +4164,14 @@ test "smoke: cargo build with SMLL_LOSSLESS=1 passes through byte-identical" {
     try std.testing.expectEqualSlices(u8, cargo_build_fixture, result.stderr);
 }
 
-test "smoke: cargo without build subcommand doesn't dispatch to build_compact" {
+test "smoke: cargo without build/check/clippy subcommand doesn't dispatch to build_compact" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     const bin_dir = try setupFakeBuild(allocator, tmp.dir, "cargo", cargo_build_fixture, true);
     defer allocator.free(bin_dir);
 
-    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "check" }, &.{});
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "cargo", "metadata" }, &.{});
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);

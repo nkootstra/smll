@@ -3,7 +3,8 @@ const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
-// LOSSY compact filter for `cargo build` / `make` / `go build` /
+// LOSSY compact filter for `cargo build` / `cargo check` / `cargo clippy` /
+// `make` / `go build` /
 // successful `zig build --summary all` output — on by default (v0.6).
 // Set SMLL_LOSSLESS=1 to bypass.
 //
@@ -15,17 +16,18 @@ const Writer = std.Io.Writer;
 // errors on stderr; `make` splits across both. `apply` folds stderr after
 // stdout into a single virtual stream before classification.
 //
-// Shape of summary line (emitted once per tool that fired at least one
-// progress line): `Compiled N (cargo)` / `Compiled N (make)` /
-// `Compiled N (go)`. For successful `zig build --summary all`, the
-// original `Build Summary: …` line is forwarded verbatim; no synthesized
-// count line is emitted.
+// Shape of summary line (emitted once per tool/status that fired at least one
+// progress line): `Compiled N (cargo)` / `Checked N (cargo)` /
+// `Compiled N (make)` / `Compiled N (go)`. For successful
+// `zig build --summary all`, the original `Build Summary: …` line is forwarded
+// verbatim; no synthesized count line is emitted.
 
-// Source-line prefixes that count as "compiler progress" and collapse into
-// a count. Two space-prefixed entries cover cargo's leading 3-space indent
-// ("   Compiling foo v0.1.0"). Make progress covers shell-ish build tool
-// invocations at column 0. Go progress covers `go build:` leader lines.
+// Source-line prefixes that count as build progress and collapse into a count.
+// Cargo right-aligns status words to 12 columns, so `Compiling` and `Checking`
+// have different leading-space counts. Make progress covers shell-ish build
+// tool invocations at column 0. Go progress covers `go build:` leader lines.
 const CARGO_PROGRESS_PREFIX = "   Compiling ";
+const CARGO_CHECK_PREFIX = "    Checking ";
 const GO_PROGRESS_PREFIX = "go build:";
 pub fn matches(stdout: []const u8, stderr: []const u8) bool {
     return scanForAny(stdout) or scanForAny(stderr);
@@ -43,6 +45,7 @@ fn scanForAny(input: []const u8) bool {
 
 const LineKind = enum {
     cargo_progress,
+    cargo_check_progress,
     cargo_verbose_invocation,
     make_progress,
     go_progress,
@@ -55,6 +58,7 @@ fn classify(line: []const u8) LineKind {
     if (line.len == 0) return .other;
     // Progress classification first — these prefixes are anchored.
     if (std.mem.startsWith(u8, line, CARGO_PROGRESS_PREFIX)) return .cargo_progress;
+    if (std.mem.startsWith(u8, line, CARGO_CHECK_PREFIX)) return .cargo_check_progress;
     if (std.mem.startsWith(u8, line, "     Running `rustc ")) return .cargo_verbose_invocation;
     if (std.mem.startsWith(u8, line, GO_PROGRESS_PREFIX)) return .go_progress;
     // Make progress: first-char switch avoids iterating the prefix array.
@@ -83,6 +87,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     }
 
     var cargo_count: usize = 0;
+    var cargo_check_count: usize = 0;
     var cargo_verbose_count: usize = 0;
     var make_count: usize = 0;
     var go_count: usize = 0;
@@ -90,14 +95,20 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
 
-    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_verbose_count, &make_count, &go_count);
-    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_verbose_count, &make_count, &go_count);
+    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &go_count);
+    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &go_count);
 
     if (cargo_count > 0) {
         try writer.writeAll("Compiled ");
         try ansi.writeDecimal(writer, cargo_count);
         try writer.writeAll(" (cargo)\n");
-    } else if (cargo_verbose_count > 0) {
+    }
+    if (cargo_check_count > 0) {
+        try writer.writeAll("Checked ");
+        try ansi.writeDecimal(writer, cargo_check_count);
+        try writer.writeAll(" (cargo)\n");
+    }
+    if (cargo_count == 0 and cargo_check_count == 0 and cargo_verbose_count > 0) {
         try writer.writeAll("Ran ");
         try ansi.writeDecimal(writer, cargo_verbose_count);
         try writer.writeAll(" rustc invocations (cargo -vv)\n");
@@ -120,6 +131,7 @@ fn processStream(
     writer: *Writer,
     strip_buf: *std.ArrayList(u8),
     cargo_count: *usize,
+    cargo_check_count: *usize,
     cargo_verbose_count: *usize,
     make_count: *usize,
     go_count: *usize,
@@ -138,6 +150,7 @@ fn processStream(
         const kind = classify(line);
         switch (kind) {
             .cargo_progress => cargo_count.* += 1,
+            .cargo_check_progress => cargo_check_count.* += 1,
             .cargo_verbose_invocation => cargo_verbose_count.* += 1,
             .make_progress => make_count.* += 1,
             .go_progress => go_count.* += 1,
@@ -170,6 +183,7 @@ fn findZigSuccessSummary(input: []const u8) ?[]const u8 {
 test "matches: cargo progress" {
     try std.testing.expect(matches("   Compiling foo v0.1.0\n", ""));
     try std.testing.expect(matches("", "   Compiling foo v0.1.0\n"));
+    try std.testing.expect(matches("", "    Checking foo v0.1.0\n"));
 }
 
 test "matches: make progress" {
@@ -219,6 +233,22 @@ test "apply: cargo happy path collapses to summary" {
     try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (cargo)") != null);
     try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
+}
+
+test "apply: cargo check progress collapses to checked summary" {
+    const input =
+        \\    Checking a v0.1.0
+        \\    Checking b v0.1.0
+        \\    Finished dev [unoptimized + debuginfo] target(s) in 1.23s
+        \\
+    ;
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, "", input, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "Checked 2 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Checking") == null);
 }
 
 test "apply: cargo verbose rustc invocations are dropped" {

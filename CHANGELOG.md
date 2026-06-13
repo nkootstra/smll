@@ -11,6 +11,9 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ### Added
 
+- `cargo check` and `cargo clippy` now use the existing build-output compactor in
+  wrapper mode. Cargo `Checking` progress collapses to `Checked N (cargo)`,
+  while clippy/rustc diagnostics and final `Finished ...` lines are preserved.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
@@ -82,7 +85,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
   dangling space).
-- Raised the CI release size cap from 320 KiB to 336 KiB (344,064 bytes) to
+- Raised the CI release size cap from 320 KiB to 340 KiB (348,160 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
   a cross-compiled one.
