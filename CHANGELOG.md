@@ -14,6 +14,10 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 - `cargo check` and `cargo clippy` now use the existing build-output compactor in
   wrapper mode. Cargo `Checking` progress collapses to `Checked N (cargo)`,
   while clippy/rustc diagnostics and final `Finished ...` lines are preserved.
+- Mocha and Node's built-in `node --test` output now compact in wrapper and pipe
+  mode. Passing cases are dropped, failure blocks stay intact, and count trailers
+  such as `1 failing` / `# fail 1` are preserved. Script runners
+  (`npm/pnpm/yarn/bun test`) try this shape after Jest/Vitest detection.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same

@@ -627,9 +627,9 @@ test "applyPlain: multi-operand blocks collapse each dir (≥3)" {
     defer out.deinit();
     try applyPlain(std.testing.allocator, fixture, &.{}, &out.writer, false);
     const got = out.written();
-    // docs: 9 entries, src: 18 entries — both ≥3 → collapse with 3 examples.
+    // docs: 7 entries, src: 18 entries — both ≥3 → collapse with 3 examples.
     try std.testing.expectEqualStrings(
-        "docs/ (9 entries: audit.md, audits, brainstorms)\n" ++
+        "docs/ (7 entries: audits, brainstorms, drafts)\n" ++
             "src/ (18 entries: filter_catalog.zig, filters, history.zig)\n",
         got,
     );

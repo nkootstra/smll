@@ -1,9 +1,7 @@
 docs:
-audit.md
 audits
 brainstorms
 drafts
-pipe-mode-performance.md
 plans
 releases
 remediation-plan.md

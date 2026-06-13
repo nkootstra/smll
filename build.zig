@@ -195,6 +195,10 @@ const modules = [_]ModuleEntry{
     .{ .name = "jest", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_jest_failing", .path = "tests/fixtures/jest_failing.txt" },
     } },
+    .{ .name = "js_test", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
+        .{ .name = "fixture_mocha_failing", .path = "tests/fixtures/mocha_failing.txt" },
+        .{ .name = "fixture_node_test_failing", .path = "tests/fixtures/node_test_failing.txt" },
+    } },
     .{ .name = "tsc", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_tsc_errors", .path = "tests/fixtures/tsc_errors.txt" },
     } },
@@ -314,6 +318,8 @@ pub fn build(b: *std.Build) void {
     const signals_property_fixtures = [_]Fixture{
         .{ .name = "sigfix_cargo_test", .path = "tests/fixtures/cargo_test_failing.txt" },
         .{ .name = "sigfix_jest", .path = "tests/fixtures/jest_failing.txt" },
+        .{ .name = "sigfix_mocha", .path = "tests/fixtures/mocha_failing.txt" },
+        .{ .name = "sigfix_node_test", .path = "tests/fixtures/node_test_failing.txt" },
         .{ .name = "sigfix_tsc", .path = "tests/fixtures/tsc_errors.txt" },
         .{ .name = "sigfix_go_test", .path = "tests/fixtures/go_test_v.txt" },
         .{ .name = "sigfix_pytest", .path = "tests/fixtures/pytest_failing.txt" },

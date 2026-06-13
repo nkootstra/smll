@@ -77,6 +77,8 @@ const tree_large_fixture = @embedFile("fixture_tree_large");
 const tree_ascii_large_fixture = @embedFile("fixture_tree_ascii_large");
 // v0.9 smoke-test fixtures
 const jest_failing_fixture = @embedFile("fixture_jest_failing");
+const mocha_failing_fixture = @embedFile("fixture_mocha_failing");
+const node_test_failing_fixture = @embedFile("fixture_node_test_failing");
 const tsc_errors_fixture = @embedFile("fixture_tsc_errors");
 const go_test_v_fixture = @embedFile("fixture_go_test_v");
 const docker_logs_fixture = @embedFile("fixture_docker_logs");
@@ -2639,6 +2641,43 @@ test "smoke: jest keeps FAIL + ● titles, drops PASS (default)" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "PASS  src/utils/format.test.ts") == null);
 }
 
+test "smoke: npm test with mocha output keeps failures and drops passing cases" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "npm", mocha_failing_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "npm", "test" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < mocha_failing_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "1 passing (4ms)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "1 failing") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "AssertionError [ERR_ASSERTION]") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "✔ adds numbers") == null);
+}
+
+test "smoke: node --test keeps failing TAP diagnostics and count trailers" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "node", node_test_failing_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "node", "--test" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < node_test_failing_fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "not ok 2 - divides by zero") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "ERR_ASSERTION") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "# tests 2") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "# fail 1") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "ok 1 - adds numbers") == null);
+}
+
 test "smoke: tsc compresses errors to path:L:C TSnnnn (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -2859,6 +2898,9 @@ test "generic-compact: dispatch invariant — bespoke commands never reach gener
         .{ .name = "pytest", .argv = &.{"pytest"} },
         .{ .name = "jest", .argv = &.{"jest"} },
         .{ .name = "vitest", .argv = &.{"vitest"} },
+        .{ .name = "mocha", .argv = &.{"mocha"} },
+        .{ .name = "node", .argv = &.{ "node", "--test" } },
+        .{ .name = "npm", .argv = &.{ "npm", "test" } },
         .{ .name = "tsc", .argv = &.{"tsc"} },
         .{ .name = "cargo", .argv = &.{ "cargo", "test" } },
         .{ .name = "go", .argv = &.{ "go", "test" } },

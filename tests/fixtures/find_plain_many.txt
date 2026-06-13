@@ -1,6 +1,5 @@
 README.md
 build.zig
-docs/audit.md
 scripts/audit-fixtures.py
 src/core/analyzer.zig
 src/core/cache.zig
