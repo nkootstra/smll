@@ -782,6 +782,7 @@ fn runWrapperInner(
         const is_docker_compose_v1 = std.mem.eql(u8, cmd_basename, "docker-compose");
         const is_docker_compose_v2 = is_docker_cmd and std.mem.eql(u8, arg1, "compose");
         const docker_subcmd = if (is_docker_compose_v2) arg2 else arg1;
+        const is_docker_images = is_docker_cmd and std.mem.eql(u8, arg1, "images");
         const is_logs_subcmd = std.mem.eql(u8, arg1, "logs");
         // docker logs <container> — line dedup (before docker ps table dispatch).
         const is_docker_logs = is_logs_subcmd and is_docker_cmd;
@@ -803,6 +804,8 @@ fn runWrapperInner(
             if (!applyFilter(docker_logs.applyCompose, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             if (!applyFilter(docker_logs.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and is_docker_images and docker_compact.matchesImages(stdout_slice)) {
+            if (!applyFilter(docker_compact.applyImages, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if (!lossless and is_js_build and build_output.matches(stdout_slice)) {
             if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if (!lossless and is_js_build and build_output.matches(stderr_slice)) {
