@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const docker_logs = @import("docker_logs");
+const jest = @import("jest");
 const tsc = @import("tsc");
 const wrapper_util = @import("wrapper_util.zig");
 
@@ -128,6 +129,62 @@ const TscWatchSide = struct {
     }
 };
 
+const JestWatchSide = struct {
+    allocator: std.mem.Allocator,
+    assembler: LineAssembler = .{},
+    frame: std.ArrayList(u8) = .empty,
+    last_emitted: std.ArrayList(u8) = .empty,
+
+    fn init(allocator: std.mem.Allocator) JestWatchSide {
+        return .{ .allocator = allocator };
+    }
+
+    fn deinit(self: *JestWatchSide, allocator: std.mem.Allocator) void {
+        self.assembler.deinit(allocator);
+        self.frame.deinit(allocator);
+        self.last_emitted.deinit(allocator);
+    }
+
+    fn feed(self: *JestWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
+        try self.assembler.feed(allocator, bytes, self, writer);
+    }
+
+    fn feedLine(self: *JestWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
+        const line = if (clearFrameIndex(raw)) |idx| blk: {
+            try self.flushFrame(writer);
+            break :blk raw[idx..];
+        } else raw;
+
+        try self.frame.appendSlice(self.allocator, line);
+        try self.frame.append(self.allocator, '\n');
+    }
+
+    fn idleFlush(self: *JestWatchSide, writer: *std.Io.Writer) !void {
+        try self.flushFrame(writer);
+    }
+
+    fn endFlush(self: *JestWatchSide, writer: *std.Io.Writer) !void {
+        try self.assembler.flush(self, writer);
+        try self.flushFrame(writer);
+    }
+
+    fn flushFrame(self: *JestWatchSide, writer: *std.Io.Writer) !void {
+        if (self.frame.items.len == 0) return;
+        defer self.frame.clearRetainingCapacity();
+        if (!jest.matches(self.frame.items)) return;
+
+        var compact = std.Io.Writer.Allocating.init(self.allocator);
+        defer compact.deinit();
+        try jest.apply(self.allocator, self.frame.items, &.{}, &compact.writer);
+        const rendered = compact.written();
+        if (rendered.len == 0 or std.mem.eql(u8, rendered, self.last_emitted.items)) return;
+
+        try writer.writeAll(rendered);
+        self.last_emitted.clearRetainingCapacity();
+        try self.last_emitted.appendSlice(self.allocator, rendered);
+    }
+};
+
 pub fn runStreamFilter(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -137,6 +194,9 @@ pub fn runStreamFilter(
     const cmd = commandBasename(argv) orelse "";
     if (wrapper_util.isTscWatch(cmd, argv)) {
         return runTscWatch(allocator, io, argv, writer);
+    }
+    if (wrapper_util.isJsTestWatch(cmd, argv)) {
+        return runJestWatch(allocator, io, argv, writer);
     }
     return runFollowLogs(allocator, io, argv, writer);
 }
@@ -166,6 +226,19 @@ fn runTscWatch(
     var stderr_side = TscWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
     return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:tsc_watch");
+}
+
+fn runJestWatch(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    argv: []const []const u8,
+    writer: *std.Io.Writer,
+) !Result {
+    var stdout_side = JestWatchSide.init(allocator);
+    defer stdout_side.deinit(allocator);
+    var stderr_side = JestWatchSide.init(allocator);
+    defer stderr_side.deinit(allocator);
+    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:js_test_watch");
 }
 
 fn runPipedStream(
@@ -259,4 +332,14 @@ fn isDockerInvocation(argv: []const []const u8) bool {
 fn commandBasename(argv: []const []const u8) ?[]const u8 {
     if (argv.len == 0) return null;
     return if (std.mem.findScalarLast(u8, argv[0], '/')) |idx| argv[0][idx + 1 ..] else argv[0];
+}
+
+fn clearFrameIndex(line: []const u8) ?usize {
+    const clear = std.mem.indexOf(u8, line, "\x1b[2J");
+    const home = std.mem.indexOf(u8, line, "\x1b[H");
+    if (clear) |c| {
+        if (home) |h| return @min(c, h);
+        return c;
+    }
+    return home;
 }

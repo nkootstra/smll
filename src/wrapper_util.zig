@@ -156,6 +156,11 @@ pub fn isTscWatch(cmd_basename: []const u8, argv: []const []const u8) bool {
         (hasArg(argv, "--watch") or hasArg(argv, "-w"));
 }
 
+pub fn isJsTestWatch(cmd_basename: []const u8, argv: []const []const u8) bool {
+    return eqAny(cmd_basename, &.{ "jest", "vitest" }) and
+        (hasArg(argv, "--watch") or hasArg(argv, "--watchAll") or hasArg(argv, "-w"));
+}
+
 fn isKnownJsRunner(cmd_basename: []const u8) bool {
     return eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun", "deno" });
 }
@@ -170,6 +175,7 @@ fn isKnownDevServer(cmd_basename: []const u8) bool {
 pub fn classifyStreamCommand(cmd_basename: []const u8, argv: []const []const u8) StreamDecision {
     if (isFollowLogsCommand(cmd_basename, argv)) return .stream_filter;
     if (isTscWatch(cmd_basename, argv)) return .stream_filter;
+    if (isJsTestWatch(cmd_basename, argv)) return .stream_filter;
 
     if ((hasArg(argv, "--watch") or hasArg(argv, "--watchAll")) and
         (allowsShortWatchFlag(cmd_basename) or isKnownJsRunner(cmd_basename) or isKnownDevServer(cmd_basename))) return .inherit;
@@ -237,6 +243,13 @@ test "streaming classification: tsc watch is stream-filterable" {
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tsc", &.{ "tsc", "--watch" }));
     try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("tsc", &.{ "tsc", "-w", "--noEmit" }));
     try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("tsc", &.{ "tsc", "--noEmit" }));
+}
+
+test "streaming classification: js test watch is stream-filterable" {
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("jest", &.{ "jest", "--watch" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("jest", &.{ "jest", "--watchAll" }));
+    try std.testing.expectEqual(StreamDecision.stream_filter, classifyStreamCommand("vitest", &.{ "vitest", "-w" }));
+    try std.testing.expectEqual(StreamDecision.capture, classifyStreamCommand("jest", &.{"jest"}));
 }
 
 test "streaming classification: start is scoped to dev runners" {
