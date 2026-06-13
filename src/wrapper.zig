@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const tee = @import("tee.zig");
 const wrapper_git = @import("wrapper_git.zig");
 const wrapper_io = @import("wrapper_io.zig");
+const wrapper_stream = @import("wrapper_stream.zig");
 const wrapper_util = @import("wrapper_util.zig");
 const rg = @import("rg");
 const tree = @import("tree");
@@ -118,6 +120,24 @@ pub fn run(
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !Result {
+    if (shouldRunStreamFilter(environ, argv)) {
+        var counted_stdout = CountingWriter.init(writer);
+        const stream_result = try wrapper_stream.runDockerLogs(
+            allocator,
+            io,
+            argv,
+            &counted_stdout.writer,
+        );
+        try counted_stdout.writer.flush();
+        return .{
+            .exit_code = stream_result.exit_code,
+            .input_bytes = stream_result.input_bytes,
+            .output_bytes = counted_stdout.count,
+            .filter_name = stream_result.filter_name,
+            .record_stats = true,
+        };
+    }
+
     // Capture compacted stdout separately; stderr is forwarded through a
     // counting proxy so stats match the full agent-visible stream.
     var capture = std.Io.Writer.Allocating.init(allocator);
@@ -167,6 +187,29 @@ pub fn run(
         .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
     };
+}
+
+fn shouldRunStreamFilter(environ: *const std.process.Environ.Map, argv: []const []const u8) bool {
+    if (argv.len == 0) return false;
+    if (envFlagOn(environ, "SMLL_LOSSLESS")) return false;
+    if (!envFlagOn(environ, "SMLL_STREAM")) return false;
+    if (stdoutIsTty()) return false;
+    const cmd_basename = pathBasename(argv[0]);
+    return wrapper_util.classifyStreamCommand(cmd_basename, argv) == .stream_filter;
+}
+
+fn stdoutIsTty() bool {
+    if (builtin.os.tag == .linux and !builtin.link_libc) {
+        var wsz: std.posix.winsize = undefined;
+        const rc = std.os.linux.syscall3(.ioctl, 1, std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
+        return std.os.linux.errno(rc) == .SUCCESS;
+    }
+    const rc = std.posix.system.isatty(1);
+    return std.posix.errno(rc - 1) == .SUCCESS;
+}
+
+fn pathBasename(path: []const u8) []const u8 {
+    return if (std.mem.findScalarLast(u8, path, '/')) |idx| path[idx + 1 ..] else path;
 }
 
 /// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.

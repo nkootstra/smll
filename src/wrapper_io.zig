@@ -65,7 +65,7 @@ pub const CountingWriter = struct {
     count: usize = 0,
     writer: std.Io.Writer = .{
         .buffer = &.{},
-        .vtable = &.{ .drain = drain },
+        .vtable = &.{ .drain = drain, .flush = flush },
     },
 
     pub fn init(out: *std.Io.Writer) CountingWriter {
@@ -87,5 +87,11 @@ pub const CountingWriter = struct {
         self.count += written;
         w.end = 0;
         return written;
+    }
+
+    fn flush(w: *std.Io.Writer) std.Io.Writer.Error!void {
+        const self: *CountingWriter = @fieldParentPtr("writer", w);
+        try self.out.flush();
+        w.end = 0;
     }
 };
