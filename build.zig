@@ -133,6 +133,7 @@ const modules = [_]ModuleEntry{
     } },
     .{ .name = "docker_compact", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_docker_ps", .path = "tests/fixtures/docker_ps.txt" },
+        .{ .name = "fixture_docker_compose_ps", .path = "tests/fixtures/docker_compose_ps.txt" },
     } },
     .{ .name = "ls_compact", .fixtures = &.{
         .{ .name = "fixture_ls_la", .path = "tests/fixtures/ls_la.txt" },
@@ -209,6 +210,7 @@ const modules = [_]ModuleEntry{
     // Logs / packages / builds.
     .{ .name = "docker_logs", .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_docker_logs", .path = "tests/fixtures/docker_logs.txt" },
+        .{ .name = "fixture_docker_compose_logs", .path = "tests/fixtures/docker_compose_logs.txt" },
     } },
     .{ .name = "npm_install", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_npm_install", .path = "tests/fixtures/npm_install.txt" },

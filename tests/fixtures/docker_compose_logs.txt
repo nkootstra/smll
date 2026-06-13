@@ -1,0 +1,4 @@
+echoer-1  | ready
+echoer-1  | ready
+echoer-1  | ready
+echoer-1  | done

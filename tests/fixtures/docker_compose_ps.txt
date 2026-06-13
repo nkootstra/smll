@@ -1,0 +1,2 @@
+NAME                       IMAGE            COMMAND                  SERVICE   CREATED         STATUS         PORTS
+smll_d4_fixture-echoer-1   node:24-alpine   "docker-entrypoint.s…"   echoer    3 seconds ago   Up 2 seconds   

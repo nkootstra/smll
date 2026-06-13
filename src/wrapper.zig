@@ -777,10 +777,15 @@ fn runWrapperInner(
     // docker routes through docker_compact (name-only summary); the rest fall
     // through to the generic columnar RLE filter. Set SMLL_LOSSLESS=1 for raw
     // passthrough.
-    if (eqAny(cmd_basename, &.{ "docker", "kubectl", "gh", "ps", "df", "psql", "systemctl", "lsof", "npm", "pnpm", "yarn", "brew", "bun" })) {
+    if (eqAny(cmd_basename, &.{ "docker", "docker-compose", "kubectl", "gh", "ps", "df", "psql", "systemctl", "lsof", "npm", "pnpm", "yarn", "brew", "bun" })) {
+        const is_docker_cmd = std.mem.eql(u8, cmd_basename, "docker");
+        const is_docker_compose_v1 = std.mem.eql(u8, cmd_basename, "docker-compose");
+        const is_docker_compose_v2 = is_docker_cmd and std.mem.eql(u8, arg1, "compose");
+        const docker_subcmd = if (is_docker_compose_v2) arg2 else arg1;
         const is_logs_subcmd = std.mem.eql(u8, arg1, "logs");
         // docker logs <container> — line dedup (before docker ps table dispatch).
-        const is_docker_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "docker");
+        const is_docker_logs = is_logs_subcmd and is_docker_cmd;
+        const is_docker_compose_logs = (is_docker_compose_v1 or is_docker_compose_v2) and std.mem.eql(u8, docker_subcmd, "logs");
         // kubectl logs <pod> — same grammar, same filter.
         const is_kubectl_logs = is_logs_subcmd and std.mem.eql(u8, cmd_basename, "kubectl");
         // JS package manager installs — npm/pnpm/yarn/bun {install,i,ci,add,remove,rm}.
@@ -794,7 +799,9 @@ fn runWrapperInner(
         const is_js_build = is_js_pkg_manager and
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
-        if (!lossless and (is_docker_logs or is_kubectl_logs)) {
+        if (!lossless and is_docker_compose_logs) {
+            if (!applyFilter(docker_logs.applyCompose, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (!lossless and (is_docker_logs or is_kubectl_logs)) {
             if (!applyFilter(docker_logs.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if (!lossless and is_js_build and build_output.matches(stdout_slice)) {
             if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
@@ -807,7 +814,7 @@ fn runWrapperInner(
             // pnpm). Dispatch off stderr when stdout doesn't match but stderr does.
             if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             return exit_code;
-        } else if (!lossless and std.mem.eql(u8, cmd_basename, "docker") and docker_compact.matches(stdout_slice)) {
+        } else if (!lossless and (is_docker_cmd or is_docker_compose_v1) and docker_compact.matches(stdout_slice)) {
             if (!applyFilter(docker_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if (!lossless and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
             if (!applyFilter(kubectl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
