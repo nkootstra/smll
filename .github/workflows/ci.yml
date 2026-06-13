@@ -61,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           size=$(wc -c < zig-out/release/smll)
-          limit=348160 # 340 KiB
+          limit=350208 # 342 KiB
           echo "binary size: ${size} bytes (cap ${limit})"
           if [ "$size" -ge "$limit" ]; then
             echo "::error::binary size ${size} exceeds release cap ${limit}"

@@ -13,19 +13,31 @@ const Writer = std.Io.Writer;
 //   "YYYY-MM-DDTHH:MM:SS...Z" or "YYYY-MM-DD HH:MM:SS" it is elided for the
 //   purpose of comparison only — the first occurrence is emitted verbatim.
 //
-// Detection: called unconditionally by the `docker logs` / `kubectl logs`
-// dispatch arm (wrapper mode only — no pipe-mode detection).
+// Detection: called unconditionally by the `docker logs` / `kubectl logs` /
+// `docker compose logs` dispatch arm (wrapper mode only — no pipe-mode
+// detection).
+
+const Mode = enum { plain, compose };
 
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     if (stdout.len == 0 and stderr.len == 0) return;
 
-    try applyStream(allocator, stdout, writer);
+    try applyStream(allocator, stdout, writer, .plain);
     if (stderr.len != 0) {
-        try applyStream(allocator, stderr, writer);
+        try applyStream(allocator, stderr, writer, .plain);
     }
 }
 
-fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
+pub fn applyCompose(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
+    if (stdout.len == 0 and stderr.len == 0) return;
+
+    try applyStream(allocator, stdout, writer, .compose);
+    if (stderr.len != 0) {
+        try applyStream(allocator, stderr, writer, .compose);
+    }
+}
+
+fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer, mode: Mode) !void {
     if (input.len == 0) return;
 
     // Buffer the last line we emitted so we can coalesce repeats.
@@ -39,6 +51,8 @@ fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
     const has_ansi = std.mem.indexOfScalar(u8, input, '\x1b') != null;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
+    var normalized: std.ArrayList(u8) = .empty;
+    defer normalized.deinit(allocator);
     while (lines.next()) |raw| {
         const clean = if (has_ansi)
             (ansi.stripInto(&strip_buf, allocator, raw) catch raw)
@@ -55,8 +69,9 @@ fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
             continue;
         }
 
-        const payload_start = timestampEnd(trimmed);
-        const payload = trimmed[payload_start..];
+        normalized.clearRetainingCapacity();
+        const prepared = try prepareLine(&normalized, allocator, trimmed, mode);
+        const payload = prepared.line[prepared.payload_start..];
 
         if (repeat_count > 0) {
             const prev_payload = pending.items[pending_payload_start..];
@@ -69,14 +84,45 @@ fn applyStream(allocator: Allocator, input: []const u8, writer: *Writer) !void {
             repeat_count = 0;
         }
 
-        pending_payload_start = payload_start;
-        try pending.appendSlice(allocator, trimmed);
+        pending_payload_start = prepared.payload_start;
+        try pending.appendSlice(allocator, prepared.line);
         repeat_count = 1;
         first = false;
     }
     if (repeat_count > 0) {
         try flushPending(writer, pending.items, pending_payload_start, repeat_count);
     }
+}
+
+const PreparedLine = struct {
+    line: []const u8,
+    payload_start: usize,
+};
+
+fn prepareLine(buf: *std.ArrayList(u8), allocator: Allocator, line: []const u8, mode: Mode) !PreparedLine {
+    if (mode == .compose) {
+        if (try normalizeComposeLine(buf, allocator, line)) {
+            return .{ .line = buf.items, .payload_start = 0 };
+        }
+    }
+    return .{ .line = line, .payload_start = timestampEnd(line) };
+}
+
+fn normalizeComposeLine(buf: *std.ArrayList(u8), allocator: Allocator, line: []const u8) !bool {
+    const pipe_idx = std.mem.indexOfScalar(u8, line, '|') orelse return false;
+    const service = std.mem.trim(u8, line[0..pipe_idx], " \t\r");
+    if (service.len == 0) return false;
+
+    const raw_payload = std.mem.trimStart(u8, line[pipe_idx + 1 ..], " \t\r");
+    const payload = raw_payload[timestampEnd(raw_payload)..];
+
+    try buf.appendSlice(allocator, service);
+    try buf.append(allocator, '|');
+    if (payload.len > 0) {
+        try buf.append(allocator, ' ');
+        try buf.appendSlice(allocator, payload);
+    }
+    return true;
 }
 
 fn flushPending(writer: *Writer, line: []const u8, payload_start: usize, count: usize) !void {
@@ -146,6 +192,19 @@ test "apply: fixture collapses repeated health checks" {
     try std.testing.expect(std.mem.find(u8, got, "starting server on :8080") != null);
     try std.testing.expect(std.mem.find(u8, got, "shutting down gracefully") != null);
     try std.testing.expect(std.mem.find(u8, got, "slow query") != null);
+}
+
+test "applyCompose: strips compose prefix spacing and collapses repeated payloads" {
+    const input = @embedFile("fixture_docker_compose_logs");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try applyCompose(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expectEqualStrings(
+        "echoer-1| ready ×3\n" ++
+            "echoer-1| done\n",
+        got,
+    );
 }
 
 test "apply: no duplicates passes through verbatim" {

@@ -18,6 +18,10 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   mode. Passing cases are dropped, failure blocks stay intact, and count trailers
   such as `1 failing` / `# fail 1` are preserved. Script runners
   (`npm/pnpm/yarn/bun test`) try this shape after Jest/Vitest detection.
+- `docker compose ps` / `docker-compose ps` now reuse the Docker container
+  summary (`dNup name(image,status)`), and `docker compose logs` /
+  `docker-compose logs` normalize `service | payload` prefixes before
+  consecutive duplicate collapse.
 - The package-dependency-tree compaction (`src/filters/package_tree.zig`) now
   covers `npm ls`/`npm list`, `pnpm ls`/`pnpm list`, and `yarn list` in addition
   to `bun pm ls` (argv-gated dispatch in wrapper mode). It emits the same
@@ -89,7 +93,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
   bare blank gap, so an agent can tell "same as the row above" apart from a
   genuinely empty field (and a trailing repeated column no longer leaves a
   dangling space).
-- Raised the CI release size cap from 320 KiB to 340 KiB (348,160 bytes) to
+- Raised the CI release size cap from 320 KiB to 342 KiB (350,208 bytes) to
   make room for the in-progress runner/test output compaction work. Documented
   that the gate measures a native x86_64 build, which runs slightly larger than
   a cross-compiled one.

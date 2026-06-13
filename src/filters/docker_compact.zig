@@ -19,13 +19,14 @@ const Writer = std.Io.Writer;
 //   "mixed" — mixed running / stopped
 //   "none"  — nothing running (all not-Up)
 //
-// Detection: first non-empty line starts with "CONTAINER ID".
+// Detection: first non-empty line is either `docker ps` ("CONTAINER ID ...")
+// or `docker compose ps` ("NAME IMAGE ... SERVICE ... STATUS ...").
 
 pub fn matches(input: []const u8) bool {
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |line| {
         if (line.len == 0) continue;
-        return std.mem.startsWith(u8, line, "CONTAINER ID");
+        return isDockerPsHeader(line) or isComposePsHeader(line);
     }
     return false;
 }
@@ -38,7 +39,8 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var lines = std.mem.splitScalar(u8, stdout, '\n');
     const header = lines.next() orelse return;
     const status_col = findColumnStart(header, "STATUS") orelse 0;
-    const names_col = findColumnStart(header, "NAMES") orelse 0;
+    const names_col = findColumnStart(header, "NAMES") orelse findColumnStart(header, "NAME") orelse 0;
+    const name_is_first_col = names_col == 0 and std.mem.startsWith(u8, header, "NAME");
 
     // First pass: count rows + determine aggregate state.
     var saved = lines;
@@ -47,7 +49,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     while (saved.next()) |line| {
         if (line.len == 0) continue;
         count += 1;
-        if (status_col < line.len and std.mem.startsWith(u8, line[status_col..], "Up")) {
+        if (statusStartsWithUp(line, status_col)) {
             up_count += 1;
         }
     }
@@ -69,7 +71,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     const image_col = findColumnStart(header, "IMAGE") orelse 0;
     while (emit.next()) |line| {
         if (line.len == 0) continue;
-        const name = extractName(line, names_col);
+        const name = if (name_is_first_col) firstField(line) else extractName(line, names_col);
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
@@ -110,6 +112,28 @@ fn findColumnStart(header: []const u8, name: []const u8) ?usize {
     return std.mem.find(u8, header, name);
 }
 
+fn isDockerPsHeader(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "CONTAINER ID");
+}
+
+fn isComposePsHeader(line: []const u8) bool {
+    return firstHeaderFieldIs(line, "NAME") and
+        findColumnStart(line, "IMAGE") != null and
+        findColumnStart(line, "SERVICE") != null and
+        findColumnStart(line, "STATUS") != null;
+}
+
+fn firstHeaderFieldIs(line: []const u8, name: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, name)) return false;
+    return line.len == name.len or line[name.len] == ' ' or line[name.len] == '\t';
+}
+
+fn statusStartsWithUp(line: []const u8, status_col: usize) bool {
+    if (status_col >= line.len) return false;
+    const status = std.mem.trim(u8, line[status_col..@min(status_col + 25, line.len)], " \t\r");
+    return std.mem.startsWith(u8, status, "Up");
+}
+
 /// Extract name field. If names_col points into the line, take from there;
 /// otherwise fall back to the last whitespace-gap field.
 fn extractName(line: []const u8, names_col: usize) []const u8 {
@@ -117,6 +141,17 @@ fn extractName(line: []const u8, names_col: usize) []const u8 {
         return std.mem.trim(u8, line[names_col..], " \t\r");
     }
     return lastField(line);
+}
+
+fn firstField(line: []const u8) []const u8 {
+    const trimmed = std.mem.trimStart(u8, line, " \t\r");
+    var i: usize = 0;
+    while (i < trimmed.len) : (i += 1) {
+        if (trimmed[i] == ' ' or trimmed[i] == '\t' or trimmed[i] == '\r') {
+            return trimmed[0..i];
+        }
+    }
+    return trimmed;
 }
 
 fn lastField(line: []const u8) []const u8 {
@@ -137,6 +172,15 @@ test "matches: CONTAINER ID header" {
     try std.testing.expect(matches(input));
 }
 
+test "matches: docker compose ps header" {
+    const input = "NAME   IMAGE   COMMAND   SERVICE   CREATED   STATUS   PORTS\nsvc-1  nginx   x         web       now       Up 1s\n";
+    try std.testing.expect(matches(input));
+}
+
+test "matches: NAME-prefixed non-compose header rejected" {
+    try std.testing.expect(!matches("NAMESPACE   IMAGE   SERVICE   STATUS\nprod        nginx   web       Up\n"));
+}
+
 test "matches: non-docker rejected" {
     try std.testing.expect(!matches("NAME  READY\npod1  1/1\n"));
     try std.testing.expect(!matches(""));
@@ -154,6 +198,16 @@ test "apply: fixture produces compact summary" {
     try std.testing.expect(std.mem.find(u8, got, "helios-convex-dashboard") != null);
     try std.testing.expect(std.mem.find(u8, got, "helios-convex-backend") != null);
     try std.testing.expect(std.mem.find(u8, got, "helios-mysql") != null);
+}
+
+test "apply: docker compose fixture produces compact summary" {
+    const fixture = @embedFile("fixture_docker_compose_ps");
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, fixture, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.startsWith(u8, got, "d1up "));
+    try std.testing.expect(std.mem.find(u8, got, "smll_d4_fixture-echoer-1(node:24-alpine,Up 2 seconds)") != null);
 }
 
 test "apply: empty input produces nothing" {

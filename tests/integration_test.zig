@@ -82,6 +82,8 @@ const node_test_failing_fixture = @embedFile("fixture_node_test_failing");
 const tsc_errors_fixture = @embedFile("fixture_tsc_errors");
 const go_test_v_fixture = @embedFile("fixture_go_test_v");
 const docker_logs_fixture = @embedFile("fixture_docker_logs");
+const docker_compose_ps_fixture = @embedFile("fixture_docker_compose_ps");
+const docker_compose_logs_fixture = @embedFile("fixture_docker_compose_logs");
 const npm_install_fixture = @embedFile("fixture_npm_install");
 
 const RunResult = struct {
@@ -2736,6 +2738,44 @@ test "smoke: docker logs dedups consecutive identical lines (default)" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "GET /health 200 2ms") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "failed to connect to redis: connection refused") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "shutting down gracefully") != null);
+}
+
+test "smoke: docker compose ps uses docker compact summary" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_compose_ps_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "compose", "ps" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "d1up "));
+    try std.testing.expect(std.mem.find(u8, result.stdout, "smll_d4_fixture-echoer-1(node:24-alpine,Up 2 seconds)") != null);
+}
+
+test "smoke: docker compose logs and docker-compose logs dedup service payloads" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const docker_bin_dir = try setupFakeTool(allocator, tmp.dir, "docker", docker_compose_logs_fixture);
+    defer allocator.free(docker_bin_dir);
+    const compose_bin_dir = try setupFakeTool(allocator, tmp.dir, "docker-compose", docker_compose_logs_fixture);
+    defer allocator.free(compose_bin_dir);
+
+    var v2 = try runSmllWrapperEnv(allocator, docker_bin_dir, &.{ "docker", "compose", "logs" }, &.{});
+    defer v2.deinit(allocator);
+    var v1 = try runSmllWrapperEnv(allocator, compose_bin_dir, &.{ "docker-compose", "logs" }, &.{});
+    defer v1.deinit(allocator);
+
+    const expected =
+        "echoer-1| ready ×3\n" ++
+        "echoer-1| done\n";
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, v2.term);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, v1.term);
+    try std.testing.expectEqualStrings(expected, v2.stdout);
+    try std.testing.expectEqualStrings(expected, v1.stdout);
 }
 
 test "smoke: npm install keeps WARN + summary, drops notice (default)" {

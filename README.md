@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- ~336 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- ~340 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -186,7 +186,7 @@ Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
 | git | `status`, `diff`, `log`, `show`, `add`, `commit`, `push`, `pull`, `fetch`, `merge`, `rebase`, `checkout`, `branch`, `stash`, `blame` | noise strip |
 | search / listing | `rg`, `tree` | noise strip |
 | filesystem walk | `find` / `find -ls` | strip metadata columns; collapse ≥3 paths/parent to count |
-| columnar tables | `docker ps`, `kubectl get`, `gh pr/issue list`, `ps`, `df`, `ls -l`, `systemctl`, `lsof`, `brew`, `psql`, `bun pm ls` | column/padding collapse |
+| columnar tables | `docker ps`, `docker compose ps`, `docker-compose ps`, `kubectl get`, `gh pr/issue list`, `ps`, `df`, `ls -l`, `systemctl`, `lsof`, `brew`, `psql`, `bun pm ls` | column/padding collapse |
 | counts / environment | `wc`, `env` | collapse count padding; mask sensitive env values |
 | disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
 | network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs; preserve response bodies byte-for-byte |
@@ -194,7 +194,7 @@ Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
 | test runners | `cargo test`, `pytest`, `jest` / `vitest`, `mocha`, `node --test`, `go test -v`, `dotnet test` | drop PASS/progress, keep FAIL + evidence |
 | type checker / lint | `tsc`, `mypy`, `ruff`, `eslint`, `biome` | preserve diagnostics and summaries |
 | formatters | `prettier`, `dotnet format`, `ruff format` | keep files/summaries needing action |
-| logs | `docker logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |
+| logs | `docker logs`, `docker compose logs`, `docker-compose logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |
 | package managers | `npm install` / `npm ci`, `pnpm`, `yarn`, `bun`, `pip list/outdated`, `uv`, `uvx`, `composer` | drop noise, keep warnings/errors/summaries |
 | infra plans | `terraform plan`, `tofu plan` | keep resource headers, warnings/errors, and plan summary |
 | JSON output | `aws`, `jq` | minify clean JSON stdout |
@@ -222,7 +222,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 340 KiB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 342 KiB (Linux x86_64
 release). No network calls, no telemetry. The only local state smll writes is
 under `~/.smll/`: cumulative stats, append-only command history, and optional
 tee logs for failed commands.
