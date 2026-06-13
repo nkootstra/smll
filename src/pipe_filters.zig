@@ -15,6 +15,7 @@ const git_merge = @import("git_merge");
 const git_blame = @import("git_blame");
 const cargo_test = @import("cargo_test");
 const jest = @import("jest");
+const js_test = @import("js_test");
 const tsc = @import("tsc");
 const go_test = @import("go_test");
 const pytest = @import("pytest");
@@ -91,10 +92,10 @@ pub const GitLogCompact = struct {
 // git_show (the branch shape is distinct from both). git_checkout is NOT here
 // because its matches() always returns false (argv-only in wrapper mode).
 pub const Filters = .{
-    git_status,    git_branch,      git_reflog,         git_show,
-    GitLogCompact, git_diff,        git_commit,         git_merge,
-    git_blame,     cargo_test,      jest,               tsc,
-    go_test,       pytest,          kubectl_compact,    docker_compact,
-    npm_install,   tree,            ls_compact,         FindCompactPipe,
-    DuCompactPipe, CurlCompactPipe, GenericCompactPipe,
+    git_status,      git_branch,    git_reflog,      git_show,
+    GitLogCompact,   git_diff,      git_commit,      git_merge,
+    git_blame,       cargo_test,    jest,            js_test,
+    tsc,             go_test,       pytest,          kubectl_compact,
+    docker_compact,  npm_install,   tree,            ls_compact,
+    FindCompactPipe, DuCompactPipe, CurlCompactPipe, GenericCompactPipe,
 };

@@ -1,0 +1,25 @@
+
+  math
+    ✔ adds numbers
+    1) divides by zero
+
+
+  1 passing (4ms)
+  1 failing
+
+  1) math
+       divides by zero:
+
+      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+Infinity !== 0
+
+      + expected - actual
+
+      -Infinity
+      +0
+
+      at Context.<anonymous> (test/mocha.test.cjs:4:46)
+      at process.processImmediate (node:internal/timers:485:21)
+
+

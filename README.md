@@ -191,7 +191,7 @@ Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
 | disk usage | `du`, `du -sh` | 2-sig-fig round + sort |
 | network probe | `curl -v` / `-vvv` | drop TLS handshake + PEM certs; preserve response bodies byte-for-byte |
 | build drivers | `make`, `cargo build`, `zig build`, `go build`, `dotnet build`, `swift build`, `xcodebuild`, `gradle` / `gradlew`, `mvn` / `mvnw`, `next build` | collapse progress, keep warnings/errors |
-| test runners | `cargo test`, `pytest`, `jest` / `vitest`, `go test -v`, `dotnet test` | drop PASS/progress, keep FAIL + evidence |
+| test runners | `cargo test`, `pytest`, `jest` / `vitest`, `mocha`, `node --test`, `go test -v`, `dotnet test` | drop PASS/progress, keep FAIL + evidence |
 | type checker / lint | `tsc`, `mypy`, `ruff`, `eslint`, `biome` | preserve diagnostics and summaries |
 | formatters | `prettier`, `dotnet format`, `ruff format` | keep files/summaries needing action |
 | logs | `docker logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |

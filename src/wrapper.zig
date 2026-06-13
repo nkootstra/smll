@@ -25,6 +25,7 @@ const kubectl_compact = @import("kubectl_compact");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
 const jest = @import("jest");
+const js_test = @import("js_test");
 const tsc = @import("tsc");
 const go_test = @import("go_test");
 const docker_logs = @import("docker_logs");
@@ -428,21 +429,16 @@ fn runWrapperInner(
     const is_pytest = std.mem.eql(u8, cmd_basename, "pytest");
     const is_test_subcmd = std.mem.eql(u8, arg1, "test");
     const is_cargo_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "cargo");
-    // jest/vitest: direct invocation OR script runners (npm/pnpm/yarn/bun test)
-    // that produce jest-shaped output. Output-shape detection in jest.matches()
-    // guards against false positives when other test runners are used.
-    const is_jest = switch (cmd_basename[0]) {
-        'j' => std.mem.eql(u8, cmd_basename, "jest"),
-        'v' => std.mem.eql(u8, cmd_basename, "vitest"),
-        'n' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "npm"),
-        'p' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "pnpm"),
-        'y' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "yarn"),
-        'b' => is_test_subcmd and std.mem.eql(u8, cmd_basename, "bun"),
-        else => false,
-    };
+    const is_js_script_test = is_test_subcmd and eqAny(cmd_basename, &.{ "npm", "pnpm", "yarn", "bun" });
+    // jest/vitest: direct invocation OR script runners that produce jest-shaped
+    // output. Mocha/node:test run after this and only claim their own shapes.
+    const is_jest = eqAny(cmd_basename, &.{ "jest", "vitest" }) or is_js_script_test;
+    const is_js_test = is_js_script_test or
+        std.mem.eql(u8, cmd_basename, "mocha") or
+        (std.mem.eql(u8, cmd_basename, "node") and std.mem.eql(u8, arg1, "--test"));
     const is_tsc = std.mem.eql(u8, cmd_basename, "tsc");
     const is_go_test = is_test_subcmd and std.mem.eql(u8, cmd_basename, "go");
-    if (is_pytest or is_cargo_test or is_jest or is_tsc or is_go_test) {
+    if (is_pytest or is_cargo_test or is_jest or is_js_test or is_tsc or is_go_test) {
         if (!lossless) {
             if (is_pytest and (pytest.matches(stdout_slice) or pytest.matches(stderr_slice))) {
                 if (!applyFilter(pytest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
@@ -454,6 +450,10 @@ fn runWrapperInner(
             }
             if (is_jest and (jest.matches(stdout_slice) or jest.matches(stderr_slice))) {
                 if (!applyFilter(jest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                return exit_code;
+            }
+            if (is_js_test and (js_test.matches(stdout_slice) or js_test.matches(stderr_slice))) {
+                if (!applyFilter(js_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
                 return exit_code;
             }
             if (is_tsc and (tsc.matches(stdout_slice) or tsc.matches(stderr_slice))) {

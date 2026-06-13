@@ -37,6 +37,10 @@ const Bit = enum(u5) {
     cargo_test,
     // jest
     jest_test,
+    // js_test
+    js_test_mocha_passing,
+    js_test_mocha_failing,
+    js_test_node_tests,
     // tsc
     tsc_error_ts,
     tsc_found,
@@ -73,6 +77,9 @@ const needles = blk: {
     var table: [std.meta.fields(Bit).len][]const u8 = undefined;
     table[@intFromEnum(Bit.cargo_test)] = "test";
     table[@intFromEnum(Bit.jest_test)] = "Test";
+    table[@intFromEnum(Bit.js_test_mocha_passing)] = " passing";
+    table[@intFromEnum(Bit.js_test_mocha_failing)] = " failing";
+    table[@intFromEnum(Bit.js_test_node_tests)] = "# tests ";
     table[@intFromEnum(Bit.tsc_error_ts)] = "error TS";
     table[@intFromEnum(Bit.tsc_found)] = "Found ";
     table[@intFromEnum(Bit.go_run_fuzz)] = "=== ";
@@ -124,6 +131,9 @@ pub const Signals = struct {
     }
     pub fn jest(self: Signals) bool {
         return self.any(mask(&.{.jest_test}));
+    }
+    pub fn jsTest(self: Signals) bool {
+        return self.any(mask(&.{ .js_test_mocha_passing, .js_test_mocha_failing, .js_test_node_tests }));
     }
     pub fn tsc(self: Signals) bool {
         return self.any(mask(&.{ .tsc_error_ts, .tsc_found }));
@@ -213,7 +223,7 @@ test "compute saturates and early-exits when every needle is present" {
     const sig = compute(buf[0..len]);
     const all: u32 = (@as(u32, 1) << needles.len) - 1;
     try std.testing.expectEqual(all, sig.bits);
-    try std.testing.expect(sig.cargoTest() and sig.jest() and sig.tsc() and
+    try std.testing.expect(sig.cargoTest() and sig.jest() and sig.jsTest() and sig.tsc() and
         sig.goTest() and sig.pytest() and sig.npmInstall());
 }
 

@@ -16,6 +16,7 @@ const wrapper_util = @import("wrapper_util.zig");
 const cargo_test = @import("cargo_test");
 const pytest = @import("pytest");
 const jest = @import("jest");
+const js_test = @import("js_test");
 const tsc = @import("tsc");
 const go_test = @import("go_test");
 const npm_install = @import("npm_install");
@@ -55,6 +56,7 @@ test "signals gate is a superset of matches for every gated filter (real fixture
     const gated = [_]Gated{
         .{ .matches = cargo_test.matches, .gate = cargo_test.sigGate },
         .{ .matches = jest.matches, .gate = jest.sigGate },
+        .{ .matches = js_test.matches, .gate = js_test.sigGate },
         .{ .matches = tsc.matches, .gate = tsc.sigGate },
         .{ .matches = go_test.matches, .gate = go_test.sigGate },
         .{ .matches = pytest.matches, .gate = pytest.sigGate },
@@ -62,6 +64,7 @@ test "signals gate is a superset of matches for every gated filter (real fixture
     };
     const corpus = [_][]const u8{
         @embedFile("sigfix_cargo_test"),    @embedFile("sigfix_jest"),
+        @embedFile("sigfix_mocha"),         @embedFile("sigfix_node_test"),
         @embedFile("sigfix_tsc"),           @embedFile("sigfix_go_test"),
         @embedFile("sigfix_pytest"),        @embedFile("sigfix_npm"),
         @embedFile("sigfix_pnpm"),          @embedFile("sigfix_pnpm9"),
@@ -84,6 +87,8 @@ test "signals gate accepts each real positive fixture's target filter" {
     inline for (.{
         .{ cargo_test, @embedFile("sigfix_cargo_test") },
         .{ jest, @embedFile("sigfix_jest") },
+        .{ js_test, @embedFile("sigfix_mocha") },
+        .{ js_test, @embedFile("sigfix_node_test") },
         .{ tsc, @embedFile("sigfix_tsc") },
         .{ go_test, @embedFile("sigfix_go_test") },
         .{ pytest, @embedFile("sigfix_pytest") },
@@ -110,6 +115,7 @@ test "large generic streams route past every gated filter unchanged" {
         // through to the generic compactor exactly as before the gate existed.
         try std.testing.expect(!cargo_test.matches(data));
         try std.testing.expect(!jest.matches(data));
+        try std.testing.expect(!js_test.matches(data));
         try std.testing.expect(!tsc.matches(data));
         try std.testing.expect(!go_test.matches(data));
         try std.testing.expect(!pytest.matches(data));
