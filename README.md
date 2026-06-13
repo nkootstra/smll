@@ -6,7 +6,7 @@ A tiny wrapper that compresses noisy command output before it lands in your
 coding agent's context window. Drop-in — just prefix the command. Format-lossy,
 fact-preserving by default; set `SMLL_LOSSLESS=1` to bypass all filters.
 
-- under 356 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
+- under 360 KiB release binary (Linux x86_64, `ReleaseSmall` + strip)
 - Single-file Zig, zero runtime dependencies, no telemetry
 
 ## Install
@@ -203,9 +203,10 @@ interactive/watch commands still inherit raw output.
 | logs | `docker logs`, `docker compose logs`, `docker-compose logs`, `kubectl logs` — consecutive-identical dedup | dedup + `(×N)` marker |
 | package managers | `npm install` / `npm ci`, `pnpm`, `yarn`, `bun`, `pip list/outdated`, `uv`, `uvx`, `composer` | drop noise, keep warnings/errors/summaries |
 | infra plans | `terraform plan`, `tofu plan` | keep resource headers, warnings/errors, and plan summary |
-| JSON output | `aws`, `jq` | minify clean JSON stdout |
+| JSON output | `aws`, `jq`, Datadog `pup` | minify clean JSON stdout |
 | pre-commit | `pre-commit` | keep failed hooks, diagnostics, and summaries |
 | GitHub CLI | `gh` | keep errors/statuses/URLs/help; table output still column-compacts |
+| Datadog CLI | `pup` | minify JSON, strip table box framing |
 | finite readers | `head`, `tail` | pass through exactly; follow forms stream raw unless `SMLL_STREAM=1` is enabled |
 | fallback | unknown table/list-shaped output; large unknown stdout | safe table padding collapse; ANSI strip + blank-collapse + RLE |
 
@@ -228,7 +229,7 @@ loses the use case. smll preserves failure evidence (`--- FAIL:` lines with
 their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
-**Small, no deps, no telemetry.** The binary stays under 356 KiB (Linux x86_64
+**Small, no deps, no telemetry.** The binary stays under 360 KiB (Linux x86_64
 release). No network calls, no telemetry. The only local state smll writes is
 under `~/.smll/`: cumulative stats, append-only command history, and optional
 tee logs for failed commands.

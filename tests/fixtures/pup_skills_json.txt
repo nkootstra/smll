@@ -1,0 +1,298 @@
+[
+  {
+    "description": "Datadog CLI (pup). OAuth2 auth with token refresh.",
+    "name": "dd-pup",
+    "type": "skill"
+  },
+  {
+    "description": "Monitor management - create, update, mute, and alerting best practices.",
+    "name": "dd-monitors",
+    "type": "skill"
+  },
+  {
+    "description": "Log management - search, pipelines, archives, and cost control.",
+    "name": "dd-logs",
+    "type": "skill"
+  },
+  {
+    "description": "APM - traces, services, dependencies, performance analysis.",
+    "name": "dd-apm",
+    "type": "skill"
+  },
+  {
+    "description": "Live Debugger - create, delete, and watch log probes and events.",
+    "name": "dd-debugger",
+    "type": "skill"
+  },
+  {
+    "description": "Datadog docs lookup using docs.datadoghq.com/llms.txt.",
+    "name": "dd-docs",
+    "type": "skill"
+  },
+  {
+    "description": "Use pup CLI or generate code (TypeScript, Python, Java, Go, Rust).",
+    "name": "dd-code-generation",
+    "type": "skill"
+  },
+  {
+    "description": "File GitHub issues to the right repository (pup CLI or plugin).",
+    "name": "dd-file-issue",
+    "type": "skill"
+  },
+  {
+    "description": "Symbol Database - search service symbols, find probe-able methods.",
+    "name": "dd-symdb",
+    "type": "skill"
+  },
+  {
+    "description": "Manage Datadog Agentless Scanning for AWS and Azure resources.",
+    "name": "agentless-scanning",
+    "type": "agent"
+  },
+  {
+    "description": "Manage API keys and Application keys for authentication.",
+    "name": "api-management",
+    "type": "agent"
+  },
+  {
+    "description": "Manage APM retention filters and span-based metrics.",
+    "name": "apm-configuration",
+    "type": "agent"
+  },
+  {
+    "description": "Manage App Builder applications (low-code internal tools).",
+    "name": "app-builder",
+    "type": "agent"
+  },
+  {
+    "description": "Manage ASM including WAF rules, threat detection, API protection.",
+    "name": "application-security",
+    "type": "agent"
+  },
+  {
+    "description": "Query and segment RUM users and accounts.",
+    "name": "audience-management",
+    "type": "agent"
+  },
+  {
+    "description": "Query and manage Audit Trail events for compliance.",
+    "name": "audit-logs",
+    "type": "agent"
+  },
+  {
+    "description": "Configure AWS integration for monitoring and log collection.",
+    "name": "aws-integration",
+    "type": "agent"
+  },
+  {
+    "description": "Configure Azure integration for monitoring and resources.",
+    "name": "azure-integration",
+    "type": "agent"
+  },
+  {
+    "description": "Manage CI/CD Visibility including tests, pipelines, DORA metrics.",
+    "name": "cicd",
+    "type": "agent"
+  },
+  {
+    "description": "Manage Cloud Cost Management including multi-cloud config.",
+    "name": "cloud-cost",
+    "type": "agent"
+  },
+  {
+    "description": "Manage CSM Threats and Workload Protection agent rules.",
+    "name": "cloud-workload-security",
+    "type": "agent"
+  },
+  {
+    "description": "Monitor Kubernetes and containerized environments.",
+    "name": "container-monitoring",
+    "type": "agent"
+  },
+  {
+    "description": "Manage dashboards including CRUD and widgets.",
+    "name": "dashboards",
+    "type": "agent"
+  },
+  {
+    "description": "GDPR/data privacy compliance through targeted deletion.",
+    "name": "data-deletion",
+    "type": "agent"
+  },
+  {
+    "description": "Access control, data enrichment, data protection.",
+    "name": "data-governance",
+    "type": "agent"
+  },
+  {
+    "description": "Query and manage DBM data and monitors.",
+    "name": "database-monitoring",
+    "type": "agent"
+  },
+  {
+    "description": "Manage error tracking issues, triage, and assignment.",
+    "name": "error-tracking",
+    "type": "agent"
+  },
+  {
+    "description": "Manage events including submission, search, filtering.",
+    "name": "events",
+    "type": "agent"
+  },
+  {
+    "description": "Manage Agent fleet, deployments, upgrades, schedules.",
+    "name": "fleet-automation",
+    "type": "agent"
+  },
+  {
+    "description": "Configure GCP integration for monitoring and resources.",
+    "name": "gcp-integration",
+    "type": "agent"
+  },
+  {
+    "description": "Manage incident lifecycle, teams, and response.",
+    "name": "incident-response",
+    "type": "agent"
+  },
+  {
+    "description": "Query infrastructure hosts, counts, and metadata.",
+    "name": "infrastructure",
+    "type": "agent"
+  },
+  {
+    "description": "Manage log archives, pipelines, indexes, custom destinations.",
+    "name": "log-configuration",
+    "type": "agent"
+  },
+  {
+    "description": "Search and analyze log data with flexible queries.",
+    "name": "logs",
+    "type": "agent"
+  },
+  {
+    "description": "Query, list, and manage metrics.",
+    "name": "metrics",
+    "type": "agent"
+  },
+  {
+    "description": "Full monitor management, downtimes, and templates.",
+    "name": "monitoring-alerting",
+    "type": "agent"
+  },
+  {
+    "description": "Network Performance Monitoring and DNS monitoring.",
+    "name": "network-performance",
+    "type": "agent"
+  },
+  {
+    "description": "Manage investigation notebooks.",
+    "name": "notebooks",
+    "type": "agent"
+  },
+  {
+    "description": "Manage Observability Pipelines for data routing.",
+    "name": "observability-pipelines",
+    "type": "agent"
+  },
+  {
+    "description": "Manage organization settings, teams, and users.",
+    "name": "organization-management",
+    "type": "agent"
+  },
+  {
+    "description": "Manage reusable dashboard widget groups.",
+    "name": "powerpacks",
+    "type": "agent"
+  },
+  {
+    "description": "Manage RUM metrics and retention filters.",
+    "name": "rum-metrics-retention",
+    "type": "agent"
+  },
+  {
+    "description": "Query Real User Monitoring data.",
+    "name": "rum",
+    "type": "agent"
+  },
+  {
+    "description": "Manage SAML SSO configuration.",
+    "name": "saml-configuration",
+    "type": "agent"
+  },
+  {
+    "description": "Manage service quality scorecards.",
+    "name": "scorecards",
+    "type": "agent"
+  },
+  {
+    "description": "Manage CSPM findings and compliance.",
+    "name": "security-posture-management",
+    "type": "agent"
+  },
+  {
+    "description": "Security monitoring signals and rules.",
+    "name": "security",
+    "type": "agent"
+  },
+  {
+    "description": "Manage service registry and metadata.",
+    "name": "service-catalog",
+    "type": "agent"
+  },
+  {
+    "description": "Manage Service Level Objectives.",
+    "name": "slos",
+    "type": "agent"
+  },
+  {
+    "description": "Manage Spark pod autosizing for Kubernetes.",
+    "name": "spark-pod-autosizing",
+    "type": "agent"
+  },
+  {
+    "description": "Manage static code analysis.",
+    "name": "static-analysis",
+    "type": "agent"
+  },
+  {
+    "description": "Manage synthetic monitoring tests.",
+    "name": "synthetics",
+    "type": "agent"
+  },
+  {
+    "description": "Manage third-party integrations (PagerDuty, Slack, etc.).",
+    "name": "third-party-integrations",
+    "type": "agent"
+  },
+  {
+    "description": "Query APM traces and spans.",
+    "name": "traces",
+    "type": "agent"
+  },
+  {
+    "description": "Track Datadog usage and billing.",
+    "name": "usage-metering",
+    "type": "agent"
+  },
+  {
+    "description": "Manage users, roles, teams, and permissions.",
+    "name": "user-access-management",
+    "type": "agent"
+  },
+  {
+    "description": "Manage workflow automations.",
+    "name": "workflows",
+    "type": "agent"
+  },
+  {
+    "description": "pi coding agent extension: exposes pup as LLM tools (logs, metrics, traces, monitors, ...).",
+    "files": [
+      "index.ts",
+      "package.json",
+      "README.md"
+    ],
+    "name": "dd-pup-pi",
+    "platform": "pi",
+    "type": "extension"
+  }
+]
