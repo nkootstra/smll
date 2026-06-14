@@ -333,6 +333,46 @@
       }
     },
     {
+      "name": "cargo-check-warning",
+      "category": "build output",
+      "command": [
+        "cargo",
+        "check"
+      ],
+      "fixture": "tests/fixtures/cargo_build.txt",
+      "stream": "stderr",
+      "signals": [
+        "unused variable",
+        "Finished dev"
+      ],
+      "tool_signals": {
+        "rtk": [
+          "unused variable",
+          "cargo build: 0 errors, 1 warnings"
+        ]
+      }
+    },
+    {
+      "name": "cargo-clippy-warning",
+      "category": "build output",
+      "command": [
+        "cargo",
+        "clippy"
+      ],
+      "fixture": "tests/fixtures/cargo_build.txt",
+      "stream": "stderr",
+      "signals": [
+        "unused variable",
+        "Finished dev"
+      ],
+      "tool_signals": {
+        "rtk": [
+          "unused variable",
+          "cargo clippy: 0 errors, 1 warnings"
+        ]
+      }
+    },
+    {
       "name": "cargo-build-large",
       "category": "build output",
       "command": [
@@ -431,6 +471,29 @@
       ]
     },
     {
+      "name": "webpack-build",
+      "category": "build output",
+      "command": [
+        "webpack"
+      ],
+      "fixture": "tests/fixtures/webpack_build.txt",
+      "signals": [
+        "bundle.js",
+        "webpack 5.107.2 compiled successfully"
+      ]
+    },
+    {
+      "name": "ninja-build",
+      "category": "build output",
+      "command": [
+        "ninja"
+      ],
+      "fixture": "tests/fixtures/ninja_build.txt",
+      "signals": [
+        "unused variable"
+      ]
+    },
+    {
       "name": "jest-failing",
       "category": "tests",
       "command": [
@@ -441,6 +504,33 @@
       "signals": [
         "Button component",
         "Network timeout"
+      ]
+    },
+    {
+      "name": "node-test-failing",
+      "category": "tests",
+      "command": [
+        "node",
+        "--test"
+      ],
+      "fixture": "tests/fixtures/node_test_failing.txt",
+      "exit_code": 1,
+      "signals": [
+        "divides by zero",
+        "AssertionError"
+      ]
+    },
+    {
+      "name": "mocha-failing",
+      "category": "tests",
+      "command": [
+        "mocha"
+      ],
+      "fixture": "tests/fixtures/mocha_failing.txt",
+      "exit_code": 1,
+      "signals": [
+        "divides by zero",
+        "AssertionError"
       ]
     },
     {
@@ -722,6 +812,37 @@
       ]
     },
     {
+      "name": "docker-images",
+      "category": "process/cluster",
+      "command": [
+        "docker",
+        "images"
+      ],
+      "fixture": "tests/fixtures/docker_images.txt",
+      "signals": [
+        "postgres"
+      ]
+    },
+    {
+      "name": "docker-compose-ps",
+      "category": "process/cluster",
+      "command": [
+        "docker",
+        "compose",
+        "ps"
+      ],
+      "fixture": "tests/fixtures/docker_compose_ps.txt",
+      "signals": [
+        "smll_d4_fixture-echoer-1",
+        "node:24-alpine"
+      ],
+      "tool_signals": {
+        "rtk": [
+          "[compose] 2 services"
+        ]
+      }
+    },
+    {
       "name": "kubectl-get-pods",
       "category": "process/cluster",
       "command": [
@@ -906,6 +1027,44 @@
       ]
     },
     {
+      "name": "ls-plain-columns",
+      "category": "search/listing",
+      "command": [
+        "ls"
+      ],
+      "fixture": "tests/fixtures/ls_columns.txt",
+      "signals": [
+        "filter_catalog.zig",
+        "main.zig"
+      ]
+    },
+    {
+      "name": "ls-comma",
+      "category": "search/listing",
+      "command": [
+        "ls",
+        "-m"
+      ],
+      "fixture": "tests/fixtures/ls_comma.txt",
+      "signals": [
+        "filter_catalog.zig",
+        "main.zig"
+      ]
+    },
+    {
+      "name": "ls-multi-dir",
+      "category": "search/listing",
+      "command": [
+        "ls",
+        "docs",
+        "src"
+      ],
+      "fixture": "tests/fixtures/ls_multi_dir.txt",
+      "signals": [
+        "filter_catalog.zig"
+      ]
+    },
+    {
       "name": "ls-recursive",
       "category": "search/listing",
       "command": [
@@ -986,6 +1145,35 @@
           "Example Domain"
         ]
       }
+    },
+    {
+      "name": "pup-skills-json",
+      "category": "network/cloud",
+      "command": [
+        "pup",
+        "skills",
+        "list",
+        "--json"
+      ],
+      "fixture": "tests/fixtures/pup_skills_json.txt",
+      "signals": [
+        "dd-pup",
+        "agentless-scanning"
+      ]
+    },
+    {
+      "name": "pup-skills-table",
+      "category": "network/cloud",
+      "command": [
+        "pup",
+        "skills",
+        "list"
+      ],
+      "fixture": "tests/fixtures/pup_skills_table.txt",
+      "signals": [
+        "dd-pup",
+        "agentless-scanning"
+      ]
     },
     {
       "name": "curl-verbose-large",
@@ -1095,6 +1283,54 @@
       "signals": [
         "discord.js@14.15.3",
         "react@18.3.1"
+      ]
+    },
+    {
+      "name": "npm-ls",
+      "category": "package managers",
+      "command": [
+        "npm",
+        "ls"
+      ],
+      "fixture": "tests/fixtures/npm_ls.txt",
+      "signals": [
+        "chalk@4.1.2",
+        "debug@4.3.4"
+      ]
+    },
+    {
+      "name": "pnpm-list",
+      "category": "package managers",
+      "command": [
+        "pnpm",
+        "list"
+      ],
+      "fixture": "tests/fixtures/pnpm_list.txt",
+      "signals": [
+        "chalk 4.1.2",
+        "debug 4.3.4"
+      ],
+      "tool_signals": {
+        "smll": [
+          "chalk@4.1.2",
+          "debug@4.3.4"
+        ],
+        "rtk": [
+          "demo-app 1.0.0"
+        ]
+      }
+    },
+    {
+      "name": "yarn-list",
+      "category": "package managers",
+      "command": [
+        "yarn",
+        "list"
+      ],
+      "fixture": "tests/fixtures/yarn_list.txt",
+      "signals": [
+        "chalk@4.1.2",
+        "debug@4.3.4"
       ]
     },
     {
