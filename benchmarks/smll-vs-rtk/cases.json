@@ -342,8 +342,15 @@
       "fixture": "tests/fixtures/cargo_build.txt",
       "stream": "stderr",
       "signals": [
-        "unused variable"
-      ]
+        "unused variable",
+        "Finished dev"
+      ],
+      "tool_signals": {
+        "rtk": [
+          "unused variable",
+          "cargo build: 0 errors, 1 warnings"
+        ]
+      }
     },
     {
       "name": "cargo-clippy-warning",
@@ -355,8 +362,15 @@
       "fixture": "tests/fixtures/cargo_build.txt",
       "stream": "stderr",
       "signals": [
-        "unused variable"
-      ]
+        "unused variable",
+        "Finished dev"
+      ],
+      "tool_signals": {
+        "rtk": [
+          "unused variable",
+          "cargo clippy: 0 errors, 1 warnings"
+        ]
+      }
     },
     {
       "name": "cargo-build-large",
