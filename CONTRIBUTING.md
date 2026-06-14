@@ -99,7 +99,7 @@ when adding a new one.
 
 The rtk comparison is intentionally container-first so contributors do not need
 rtk, Rust, Zig, or tokenizer packages installed locally. It pins rtk to
-`v0.42.3` by default; set `RTK_REF=<tag-or-sha>` to compare another revision.
+`v0.42.4` by default; set `RTK_REF=<tag-or-sha>` to compare another revision.
 The headline comparison is exact tokenizer-counted stdout+stderr net savings;
 native stats/gain estimates in the report are diagnostics, not the benchmark
 score.
