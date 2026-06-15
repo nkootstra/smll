@@ -157,7 +157,7 @@ pub fn run(
     // so agents don't loop retrying the command. Streaming commands inherit
     // stdio directly, so their output bypasses this capture buffer and must
     // not get an extra hint appended.
-    if (output.len == 0 and last_stderr_bytes == 0 and !last_output_inherited) {
+    if (output.len == 0 and counted_stderr.count == 0 and !last_output_inherited) {
         try writeNoOutputHint(&final_stdout.writer, argv, exit_code);
     } else {
         try final_stdout.writer.writeAll(output);
@@ -214,7 +214,6 @@ fn pathBasename(path: []const u8) []const u8 {
 
 /// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.
 var last_input_bytes: usize = 0;
-var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
 /// Coarse dispatch label for `--explain` / `SMLL_DEBUG=1`. Each top-level
 /// command-family arm in runWrapperInner sets this before its filter runs;
@@ -317,7 +316,6 @@ fn runWrapperInner(
         last_output_inherited = true;
         last_filter_name = "passthrough";
         last_input_bytes = 0;
-        last_stderr_bytes = 0;
         var child = std.process.spawn(io, .{
             .argv = argv,
             .stdin = .inherit,
@@ -350,7 +348,6 @@ fn runWrapperInner(
     const captured = drainChildOutput(allocator, io, &child, max_output_bytes) catch |err| switch (err) {
         error.StreamTooLong => {
             last_input_bytes = 0;
-            last_stderr_bytes = max_output_label.len;
             stderr_writer.writeAll(max_output_label) catch {};
             return 1;
         },
@@ -361,7 +358,6 @@ fn runWrapperInner(
 
     // Record raw stream sizes for stats tracking and empty-output detection.
     last_input_bytes = stdout_slice.len + stderr_slice.len;
-    last_stderr_bytes = stderr_slice.len;
     last_raw_stdout = stdout_slice;
     last_raw_stderr = stderr_slice;
 
@@ -587,7 +583,7 @@ fn runWrapperInner(
             if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             return exit_code;
         }
-        if (exit_code != 0 and stderr_slice.len > 0) {
+        if (exit_code != 0 and stderr_slice.len > 0 and !isBunScriptEchoOnly(cmd_basename, stderr_slice)) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless and is_js_install_subcmd and npm_install.matches(stdout_slice)) {
             if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
@@ -993,4 +989,17 @@ fn runWrapperInner(
     }
     try stderr_writer.writeAll(stderr_slice);
     return exit_code;
+}
+
+fn isBunScriptEchoOnly(cmd_basename: []const u8, stderr_slice: []const u8) bool {
+    if (!std.mem.eql(u8, cmd_basename, "bun")) return false;
+    var saw_echo = false;
+    var lines = std.mem.splitScalar(u8, stderr_slice, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        if (line.len == 0) continue;
+        if (!std.mem.startsWith(u8, line, "$ ")) return false;
+        saw_echo = true;
+    }
+    return saw_echo;
 }
