@@ -214,7 +214,6 @@ fn pathBasename(path: []const u8) []const u8 {
 
 /// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.
 var last_input_bytes: usize = 0;
-var last_stderr_bytes: usize = 0;
 var last_output_inherited: bool = false;
 /// Coarse dispatch label for `--explain` / `SMLL_DEBUG=1`. Each top-level
 /// command-family arm in runWrapperInner sets this before its filter runs;
@@ -317,7 +316,6 @@ fn runWrapperInner(
         last_output_inherited = true;
         last_filter_name = "passthrough";
         last_input_bytes = 0;
-        last_stderr_bytes = 0;
         var child = std.process.spawn(io, .{
             .argv = argv,
             .stdin = .inherit,
@@ -350,7 +348,6 @@ fn runWrapperInner(
     const captured = drainChildOutput(allocator, io, &child, max_output_bytes) catch |err| switch (err) {
         error.StreamTooLong => {
             last_input_bytes = 0;
-            last_stderr_bytes = max_output_label.len;
             stderr_writer.writeAll(max_output_label) catch {};
             return 1;
         },
@@ -361,7 +358,6 @@ fn runWrapperInner(
 
     // Record raw stream sizes for stats tracking and empty-output detection.
     last_input_bytes = stdout_slice.len + stderr_slice.len;
-    last_stderr_bytes = stderr_slice.len;
     last_raw_stdout = stdout_slice;
     last_raw_stderr = stderr_slice;
 
