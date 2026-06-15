@@ -4101,6 +4101,69 @@ test "smoke: bun keeps package warnings and summary" {
     try std.testing.expectEqualStrings("deprecated x1: left-pad\nadded 12 packages\n", result.stdout);
 }
 
+test "smoke: bun script echo compacted to no output emits success hint" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    try writeFakeScript(tmp.dir, "bun",
+        \\#!/bin/sh
+        \\printf '$ true\n' >&2
+        \\exit 0
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "bun", "run", "format:check" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("(smll: bun exited 0 with no output)\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "smoke: bun failing script echo compacted to no output emits failure hint" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    try writeFakeScript(tmp.dir, "bun",
+        \\#!/bin/sh
+        \\printf '$ exit 7\n' >&2
+        \\exit 7
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "bun", "run", "format:check" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 7 }, result.term);
+    try std.testing.expectEqualStrings("(smll: bun exited 7 with no output)\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "smoke: bun actionable stderr remains visible without no-output hint" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    try writeFakeScript(tmp.dir, "bun",
+        \\#!/bin/sh
+        \\printf 'error: failed\n' >&2
+        \\exit 7
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "bun", "run", "format:check" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 7 }, result.term);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("error: failed\n", result.stderr);
+}
+
 test "smoke: uv keeps package errors" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
