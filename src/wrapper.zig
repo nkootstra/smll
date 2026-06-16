@@ -59,6 +59,8 @@ const curlBodyLooksBinary = wrapper_util.curlBodyLooksBinary;
 const eqAny = wrapper_util.eqAny;
 const isStreamingCommand = wrapper_util.isStreamingCommand;
 
+const AcliFilterFn = *const fn (std.mem.Allocator, []const u8, []const u8, *std.Io.Writer) anyerror!void;
+
 // Maximum bytes captured per child stream before failing closed. Large unknown
 // text output is still eligible for generic compaction, so keep this high
 // enough for real-world tool dumps while bounding memory use. Verbose curl gets
@@ -103,6 +105,21 @@ fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code
     }
 
     try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
+}
+
+fn applyAcliFilter(
+    apply: AcliFilterFn,
+    allocator: std.mem.Allocator,
+    stdout_slice: []const u8,
+    stderr_slice: []const u8,
+    writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) bool {
+    apply(allocator, stdout_slice, stderr_slice, writer) catch {
+        passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        return false;
+    };
+    return true;
 }
 
 fn findHasTypeFile(argv: []const []const u8) bool {
@@ -377,6 +394,7 @@ fn runWrapperInner(
     const has_arg1 = argv.len >= 2;
     const arg1 = if (has_arg1) argv[1] else "";
     const arg2 = if (argv.len >= 3) argv[2] else "";
+    const arg3 = if (argv.len >= 4) argv[3] else "";
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
     // via dirname RLE. `find -ls` goes through find_compact instead
@@ -754,12 +772,24 @@ fn runWrapperInner(
     }
 
     if (std.mem.eql(u8, cmd_basename, "acli")) {
-        if (lossless or (exit_code != 0 and stderr_slice.len > 0)) {
+        const is_jira_workitem = std.mem.eql(u8, arg1, "jira") and std.mem.eql(u8, arg2, "workitem");
+        const is_confluence_page = std.mem.eql(u8, arg1, "confluence") and std.mem.eql(u8, arg2, "page");
+        const is_confluence_space = std.mem.eql(u8, arg1, "confluence") and std.mem.eql(u8, arg2, "space");
+        if (lossless or exit_code != 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
             if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
-        } else if (acli_compact.matches(stdout_slice)) {
-            if (!applyFilter(acli_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (is_jira_workitem and std.mem.eql(u8, arg3, "search")) {
+            if (!applyAcliFilter(acli_compact.applyJiraWorkitemSearch, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else if (is_jira_workitem and std.mem.eql(u8, arg3, "view")) {
+            if (!applyAcliFilter(acli_compact.applyJiraWorkitemView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else if (is_confluence_page and std.mem.eql(u8, arg3, "view")) {
+            if (!applyAcliFilter(acli_compact.applyConfluencePageView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else if (is_confluence_space and std.mem.eql(u8, arg3, "list")) {
+            if (!applyAcliFilter(acli_compact.applyConfluenceSpaceList, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             try stderr_writer.writeAll(stderr_slice);
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
