@@ -11,6 +11,12 @@ const Shape = enum {
     view,
 };
 
+const PendingIndentedLine = enum {
+    none,
+    body,
+    field_value,
+};
+
 /// Return true for recognized Atlassian CLI Jira/Confluence text output.
 pub fn matches(input: []const u8) bool {
     return detectShape(input) != .none;
@@ -51,14 +57,25 @@ fn isKnownView(input: []const u8) bool {
     var actionable_lines: usize = 0;
     var saw_jira = false;
     var saw_confluence = false;
+    var pending_body_line = false;
 
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |raw| {
         const line = std.mem.trim(u8, raw, " \t\r");
         if (line.len == 0) continue;
+        if (pending_body_line) {
+            if (!isBodyBoundaryLabel(line)) {
+                pending_body_line = false;
+                continue;
+            }
+            pending_body_line = false;
+        }
         if (hasJiraKey(line) or startsWithAnyIgnore(line, &.{ "Key:", "Work item:", "Issue:" })) saw_jira = true;
         if (startsWithAnyIgnore(line, &.{ "ID:", "Title:", "Space:", "Version:" }) or hasIgnore(line, "/wiki/")) saw_confluence = true;
-        if (isActionableViewLine(line)) actionable_lines += 1;
+        if (isActionableViewLine(line)) {
+            actionable_lines += 1;
+            pending_body_line = isBodySectionLabel(line);
+        }
     }
 
     return actionable_lines >= 4 and (saw_jira or saw_confluence);
@@ -69,7 +86,7 @@ fn applyView(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
     defer strip_buf.deinit(allocator);
 
     var kept: usize = 0;
-    var keep_next_body_line = false;
+    var pending_indented_line: PendingIndentedLine = .none;
     var in_fields_section = false;
 
     var lines = std.mem.splitScalar(u8, stdout, '\n');
@@ -79,13 +96,39 @@ fn applyView(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
         const line = std.mem.trim(u8, clean, " \t\r");
         if (line.len == 0) continue;
 
+        switch (pending_indented_line) {
+            .none => {},
+            .body => {
+                if (!isBodyBoundaryLabel(line)) {
+                    try writer.writeAll("  ");
+                    try writer.writeAll(line);
+                    try writer.writeByte('\n');
+                    kept += 1;
+                    pending_indented_line = .none;
+                    continue;
+                }
+                pending_indented_line = .none;
+            },
+            .field_value => {
+                if (!looksLikeSectionLabel(line)) {
+                    try writer.writeAll("  ");
+                    try writer.writeAll(line);
+                    try writer.writeByte('\n');
+                    kept += 1;
+                    pending_indented_line = .none;
+                    continue;
+                }
+                pending_indented_line = .none;
+            },
+        }
+
         if (isActionableViewLine(line)) {
             try writer.writeAll(line);
             try writer.writeByte('\n');
             kept += 1;
             if (startsWithAnyIgnore(line, &.{"Fields:"})) in_fields_section = true;
             if (startsWithAnyIgnore(line, &.{ "Description:", "Body:", "Comments:" })) in_fields_section = false;
-            keep_next_body_line = isBodySectionLabel(line);
+            pending_indented_line = if (isBodySectionLabel(line)) .body else .none;
             continue;
         }
 
@@ -93,16 +136,8 @@ fn applyView(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
             try writer.writeAll(line);
             try writer.writeByte('\n');
             kept += 1;
-            keep_next_body_line = line[line.len - 1] == ':';
+            pending_indented_line = if (line[line.len - 1] == ':') .field_value else .none;
             continue;
-        }
-
-        if (keep_next_body_line and !looksLikeSectionLabel(line)) {
-            try writer.writeAll("  ");
-            try writer.writeAll(line);
-            try writer.writeByte('\n');
-            kept += 1;
-            keep_next_body_line = false;
         }
     }
 
@@ -144,6 +179,10 @@ fn isActionableViewLine(line: []const u8) bool {
 
 fn isBodySectionLabel(line: []const u8) bool {
     return startsWithAnyIgnore(line, &.{ "Description:", "Body:", "Comments:" }) and line[line.len - 1] == ':';
+}
+
+fn isBodyBoundaryLabel(line: []const u8) bool {
+    return isBodySectionLabel(line) or startsWithAnyIgnore(line, &.{"Fields:"});
 }
 
 fn looksLikeSectionLabel(line: []const u8) bool {
@@ -232,6 +271,28 @@ test "preserves Jira custom fields and story points" {
     try std.testing.expect(std.mem.find(u8, got, "Custom Review Group: Example Reviewers") != null);
     try std.testing.expect(std.mem.find(u8, got, "Customer Impact:\n  Anonymized customer impact text preserves custom field shape.") != null);
     try std.testing.expect(std.mem.find(u8, got, "Additional anonymized description detail") == null);
+}
+
+test "indents body text that looks like a view field" {
+    const fixture =
+        "Key: EXAMPLE-106\n" ++
+        "Type: Task\n" ++
+        "Summary: Anonymized body text edge case\n" ++
+        "Status: In Progress\n" ++
+        "Assignee: Grace Example\n" ++
+        "URL: https://example.atlassian.invalid/browse/EXAMPLE-106\n" ++
+        "\n" ++
+        "Description:\n" ++
+        "Status: anonymized body text should stay inside the description.\n" ++
+        "Additional anonymized detail that can be elided.\n";
+    try std.testing.expect(matches(fixture));
+    const got = try applyToString(std.testing.allocator, fixture);
+    defer std.testing.allocator.free(got);
+
+    try std.testing.expect(std.mem.find(u8, got, "Status: In Progress") != null);
+    try std.testing.expect(std.mem.find(u8, got, "Description:\n  Status: anonymized body text should stay inside the description.") != null);
+    try std.testing.expect(std.mem.find(u8, got, "\nStatus: anonymized body text should stay inside the description.") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Additional anonymized detail") == null);
 }
 
 test "compacts Confluence page view and preserves page metadata" {
