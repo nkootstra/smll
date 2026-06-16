@@ -1,0 +1,17 @@
+Key: EXAMPLE-101
+Type: Task
+Summary: Anonymized sample work item
+Status: In Progress
+Assignee: Ada Example
+Priority: Medium
+Reporter: Linus Example
+Created: 2026-01-02T03:04:05.000+0000
+Updated: 2026-01-03T04:05:06.000+0000
+URL: https://example.atlassian.invalid/browse/EXAMPLE-101
+
+Description:
+Anonymized sample description text preserves multiline output shape without real content.
+Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+
+Comments:
+Ada Example added a fully anonymized sample note for testing output shape.

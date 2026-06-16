@@ -144,6 +144,16 @@ def build_cases() -> list[Case]:
     add("kubectl-logs", ("kubectl", "logs", "app"), fixture("tests/fixtures/docker_logs.txt"))
     add("gh-pr-list", ("gh", "pr", "list"), fixture("tests/fixtures/gh_pr_list.txt"))
     add("gh-run-list", ("gh", "run", "list"), fixture("tests/fixtures/gh_run_list.txt"))
+    add(
+        "acli-jira-workitem-search",
+        ("acli", "jira", "workitem", "search", "--jql", "project = EXAMPLE"),
+        fixture("tests/fixtures/acli_jira_workitem_search.txt"),
+    )
+    add(
+        "acli-confluence-page-view",
+        ("acli", "confluence", "page", "view", "--id", "100000001"),
+        fixture("tests/fixtures/acli_confluence_page_view.txt"),
+    )
     add("ps-aux", ("ps", "aux"), fixture("tests/fixtures/ps_aux.txt"))
     add(
         "df-h",

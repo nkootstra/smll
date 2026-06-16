@@ -1,0 +1,5 @@
+TYPE       KEY          ASSIGNEE       PRIORITY  STATUS       SUMMARY
+Task       EXAMPLE-101  Ada Example    Medium    In Progress  Anonymized sample work item
+Bug        EXAMPLE-102  Unassigned     High      To Do        Consectetur adipiscing elit sed
+Story      EXAMPLE-103  Linus Example  Low       Done         Eiusmod tempor incididunt ut labore
+Sub-task   EXAMPLE-104  Grace Example  Medium    In Review    Ut enim ad minim veniam

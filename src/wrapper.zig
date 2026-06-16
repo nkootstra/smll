@@ -21,6 +21,7 @@ const pip_compact = @import("pip_compact");
 const prettier_compact = @import("prettier_compact");
 const dotnet_compact = @import("dotnet_compact");
 const tool_compact = @import("tool_compact");
+const acli_compact = @import("acli_compact");
 const gh_compact = @import("gh_compact");
 const curl_compact = @import("curl_compact");
 const kubectl_compact = @import("kubectl_compact");
@@ -744,6 +745,21 @@ fn runWrapperInner(
             if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else if (tool_compact.matchesPupTable(stdout_slice)) {
             if (!applyFilter(tool_compact.applyPupTable, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            try stderr_writer.writeAll(stderr_slice);
+        } else {
+            try writeWithFallbackText(allocator, stdout_slice, writer);
+            try stderr_writer.writeAll(stderr_slice);
+        }
+        return exit_code;
+    }
+
+    if (std.mem.eql(u8, cmd_basename, "acli")) {
+        if (lossless or (exit_code != 0 and stderr_slice.len > 0)) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        } else if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
+            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else if (acli_compact.matches(stdout_slice)) {
+            if (!applyFilter(acli_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             try stderr_writer.writeAll(stderr_slice);
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);

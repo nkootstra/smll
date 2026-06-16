@@ -1176,6 +1176,134 @@
       ]
     },
     {
+      "name": "acli-jira-workitem-search",
+      "category": "network/cloud",
+      "profiles": [
+        "agent",
+        "acli"
+      ],
+      "command": [
+        "acli",
+        "jira",
+        "workitem",
+        "search",
+        "--jql",
+        "project = EXAMPLE"
+      ],
+      "fixture": "tests/fixtures/acli_jira_workitem_search.txt",
+      "signals": [
+        "EXAMPLE-101",
+        "In Progress",
+        "Anonymized sample work item"
+      ]
+    },
+    {
+      "name": "acli-jira-workitem-view",
+      "category": "network/cloud",
+      "profiles": [
+        "agent",
+        "acli"
+      ],
+      "command": [
+        "acli",
+        "jira",
+        "workitem",
+        "view",
+        "EXAMPLE-101"
+      ],
+      "fixture": "tests/fixtures/acli_jira_workitem_view.txt",
+      "signals": [
+        "Key: EXAMPLE-101",
+        "URL: https://example.atlassian.invalid/browse/EXAMPLE-101"
+      ]
+    },
+    {
+      "name": "acli-jira-workitem-fields",
+      "category": "network/cloud",
+      "profiles": [
+        "agent",
+        "acli"
+      ],
+      "command": [
+        "acli",
+        "jira",
+        "workitem",
+        "view",
+        "EXAMPLE-105",
+        "--fields",
+        "summary,customfield_10016,customfield_10020"
+      ],
+      "fixture": "tests/fixtures/acli_jira_workitem_fields.txt",
+      "signals": [
+        "Story Points: 2",
+        "Acceptance Criteria:",
+        "Definition Of Done:",
+        "Custom Review Group: Example Reviewers"
+      ]
+    },
+    {
+      "name": "acli-jira-workitem-json",
+      "category": "network/cloud",
+      "profiles": [
+        "agent",
+        "acli"
+      ],
+      "command": [
+        "acli",
+        "jira",
+        "workitem",
+        "search",
+        "--jql",
+        "project = EXAMPLE",
+        "--json"
+      ],
+      "fixture": "tests/fixtures/acli_jira_workitem_search_json.txt",
+      "signals": [
+        "EXAMPLE-101",
+        "Anonymized sample work item"
+      ]
+    },
+    {
+      "name": "acli-confluence-page-view",
+      "category": "network/cloud",
+      "profiles": [
+        "agent",
+        "acli"
+      ],
+      "command": [
+        "acli",
+        "confluence",
+        "page",
+        "view",
+        "--id",
+        "100000001"
+      ],
+      "fixture": "tests/fixtures/acli_confluence_page_view.txt",
+      "signals": [
+        "Title: Anonymized Planning Notes",
+        "Labels: lorem, ipsum, anonymized"
+      ]
+    },
+    {
+      "name": "acli-confluence-space-list",
+      "category": "network/cloud",
+      "profiles": [
+        "agent",
+        "acli"
+      ],
+      "command": [
+        "acli",
+        "confluence",
+        "space",
+        "list"
+      ],
+      "fixture": "tests/fixtures/acli_confluence_space_list.txt",
+      "signals": [
+        "EXAMPLE",
+        "Anonymized Space"
+      ]
+    },
+    {
       "name": "curl-verbose-large",
       "category": "network/cloud",
       "profiles": [

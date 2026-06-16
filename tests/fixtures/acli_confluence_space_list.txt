@@ -1,0 +1,4 @@
+KEY       NAME                         TYPE    STATUS   HOMEPAGE
+EXAMPLE   Anonymized Space             global  current  Anonymized Planning Notes
+DOCS      Dolor Sit Documentation      global  current  Consectetur Guide
+TEAM      Amet Team Space              global  current  Eiusmod Overview

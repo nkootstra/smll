@@ -1,0 +1,1 @@
+error: authentication required for https://example.atlassian.invalid

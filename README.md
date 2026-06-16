@@ -206,6 +206,7 @@ interactive/watch commands still inherit raw output.
 | JSON output | `aws`, `jq`, Datadog `pup` | minify clean JSON stdout |
 | pre-commit | `pre-commit` | keep failed hooks, diagnostics, and summaries |
 | GitHub CLI | `gh` | keep errors/statuses/URLs/help; table output still column-compacts |
+| Atlassian CLI | `acli` | minify JSON; compact Jira work item and Confluence page/space output |
 | Datadog CLI | `pup` | minify JSON, strip table box framing |
 | finite readers | `head`, `tail` | pass through exactly; follow forms stream raw unless `SMLL_STREAM=1` is enabled |
 | fallback | unknown table/list-shaped output; large unknown stdout | safe table padding collapse; ANSI strip + blank-collapse + RLE |

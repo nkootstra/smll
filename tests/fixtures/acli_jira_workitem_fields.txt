@@ -1,0 +1,20 @@
+Key: EXAMPLE-105
+Type: Story
+Summary: Anonymized custom fields example
+Status: In Review
+Assignee: Grace Example
+URL: https://example.atlassian.invalid/browse/EXAMPLE-105
+
+Fields:
+Story Points: 2
+Acceptance Criteria:
+Add text
+Definition Of Done:
+None
+Custom Review Group: Example Reviewers
+Customer Impact:
+Anonymized customer impact text preserves custom field shape.
+
+Description:
+Anonymized description text should still be compacted after the first useful line.
+Additional anonymized description detail that can be elided.

@@ -1,0 +1,24 @@
+[
+  {
+    "key": "EXAMPLE-101",
+    "fields": {
+      "summary": "Anonymized sample work item",
+      "status": {
+        "name": "In Progress"
+      },
+      "assignee": {
+        "displayName": "Ada Example"
+      }
+    }
+  },
+  {
+    "key": "EXAMPLE-102",
+    "fields": {
+      "summary": "Consectetur adipiscing elit sed",
+      "status": {
+        "name": "To Do"
+      },
+      "assignee": null
+    }
+  }
+]

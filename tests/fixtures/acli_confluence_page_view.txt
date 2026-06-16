@@ -1,0 +1,15 @@
+ID: 100000001
+Title: Anonymized Planning Notes
+Space: EXAMPLE
+Status: current
+Author: Ada Example
+Created: 2026-01-02T03:04:05.000Z
+Last updated: 2026-01-03T04:05:06.000Z
+Version: 7
+URL: https://example.atlassian.invalid/wiki/spaces/EXAMPLE/pages/100000001/Anonymized+Planning+Notes
+
+Body:
+Anonymized sample page body preserves multiline output shape without real content.
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+
+Labels: lorem, ipsum, anonymized
