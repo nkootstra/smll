@@ -4,14 +4,14 @@ pub const auto_wrap_shell_case =
     "git|rg|tree|find|docker|docker-compose|kubectl|gh|ps|ls|df|du|curl|make|cargo|zig|go|" ++
     "ninja|pytest|jest|vitest|mocha|tsc|eslint|biome|next|webpack|npm|pnpm|yarn|bun|cat|" ++
     "composer|gradle|gradlew|mvn|mvnw|pre-commit|terraform|tofu|aws|jq|" ++
-    "pup|psql|systemctl|lsof|brew";
+    "pup|acli|psql|systemctl|lsof|brew";
 
 pub const auto_wrap_js_array =
     "\"git\",\"rg\",\"tree\",\"find\",\"docker\",\"docker-compose\",\"kubectl\",\"gh\",\"ps\",\"ls\",\"df\",\"du\"," ++
     "\"curl\",\"make\",\"cargo\",\"zig\",\"go\",\"ninja\",\"pytest\",\"jest\",\"vitest\",\"mocha\"," ++
     "\"tsc\",\"eslint\",\"biome\",\"next\",\"webpack\",\"npm\",\"pnpm\",\"yarn\",\"bun\",\"cat\",\"composer\"," ++
     "\"gradle\",\"gradlew\",\"mvn\",\"mvnw\",\"pre-commit\",\"terraform\",\"tofu\",\"aws\"," ++
-    "\"jq\",\"pup\",\"psql\",\"systemctl\",\"lsof\",\"brew\"";
+    "\"jq\",\"pup\",\"acli\",\"psql\",\"systemctl\",\"lsof\",\"brew\"";
 
 pub fn shouldAutoWrap(command: []const u8) bool {
     var commands = std.mem.splitScalar(u8, auto_wrap_shell_case, '|');
@@ -35,6 +35,7 @@ test "catalog names high-value filters" {
 
     try std.testing.expect(std.mem.find(u8, auto_wrap_shell_case, "terraform") != null);
     try std.testing.expect(std.mem.find(u8, auto_wrap_js_array, "\"aws\"") != null);
+    try std.testing.expect(std.mem.find(u8, auto_wrap_shell_case, "acli") != null);
     try std.testing.expect(std.mem.find(u8, rendered, "next build") != null);
     try std.testing.expect(std.mem.find(u8, rendered, "terraform plan") != null);
     try std.testing.expect(std.mem.find(u8, rendered, "eslint") != null);
@@ -44,6 +45,7 @@ test "catalog names high-value filters" {
 test "auto-wrap lookup uses the hook command catalog" {
     try std.testing.expect(shouldAutoWrap("git"));
     try std.testing.expect(shouldAutoWrap("pre-commit"));
+    try std.testing.expect(shouldAutoWrap("acli"));
     try std.testing.expect(!shouldAutoWrap("python"));
 }
 

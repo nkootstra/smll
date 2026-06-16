@@ -73,6 +73,12 @@ const gh_pr_list_fixture = @embedFile("fixture_gh_pr_list");
 const gh_run_list_fixture = @embedFile("fixture_gh_run_list");
 const pup_skills_json_fixture = @embedFile("fixture_pup_skills_json");
 const pup_skills_table_fixture = @embedFile("fixture_pup_skills_table");
+const acli_jira_workitem_search_fixture = @embedFile("fixture_acli_jira_workitem_search");
+const acli_jira_workitem_view_fixture = @embedFile("fixture_acli_jira_workitem_view");
+const acli_jira_workitem_fields_fixture = @embedFile("fixture_acli_jira_workitem_fields");
+const acli_confluence_page_view_fixture = @embedFile("fixture_acli_confluence_page_view");
+const acli_confluence_space_list_fixture = @embedFile("fixture_acli_confluence_space_list");
+const acli_error_stderr_fixture = @embedFile("fixture_acli_error_stderr");
 const ls_la_fixture = @embedFile("fixture_ls_la");
 const ls_columns_fixture = @embedFile("fixture_ls_columns");
 const find_plain_many_fixture = @embedFile("fixture_find_plain_many");
@@ -4362,6 +4368,138 @@ test "smoke: pup plain output passes through" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualStrings(fixture, result.stdout);
+}
+
+const AcliFixtureExpectation = struct {
+    fixture: []const u8,
+    argv: []const []const u8,
+    present: []const []const u8,
+    absent: []const []const u8 = &.{},
+};
+
+fn runAcliFixture(
+    allocator: std.mem.Allocator,
+    fixture: []const u8,
+    argv: []const []const u8,
+    extra_env: []const [2][]const u8,
+) !RunResult {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "acli", fixture);
+    defer allocator.free(bin_dir);
+
+    return try runSmllWrapperEnv(allocator, bin_dir, argv, extra_env);
+}
+
+fn expectAcliFixtureCompacts(case: AcliFixtureExpectation) !void {
+    const allocator = std.testing.allocator;
+    var result = try runAcliFixture(allocator, case.fixture, case.argv, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expect(result.stdout.len < case.fixture.len);
+    for (case.present) |needle| {
+        try std.testing.expect(std.mem.find(u8, result.stdout, needle) != null);
+    }
+    for (case.absent) |needle| {
+        try std.testing.expect(std.mem.find(u8, result.stdout, needle) == null);
+    }
+}
+
+test "smoke: acli recognized text outputs compact useful fields" {
+    try expectAcliFixtureCompacts(.{
+        .fixture = acli_jira_workitem_search_fixture,
+        .argv = &.{ "acli", "jira", "workitem", "search", "--jql", "project = EXAMPLE" },
+        .present = &.{ "EXAMPLE-101", "In Progress", "Anonymized sample work item" },
+    });
+    try expectAcliFixtureCompacts(.{
+        .fixture = acli_jira_workitem_view_fixture,
+        .argv = &.{ "acli", "jira", "workitem", "view", "EXAMPLE-101" },
+        .present = &.{ "Key: EXAMPLE-101", "URL: https://example.atlassian.invalid/browse/EXAMPLE-101" },
+        .absent = &.{"Ut enim ad minim veniam"},
+    });
+    try expectAcliFixtureCompacts(.{
+        .fixture = acli_jira_workitem_fields_fixture,
+        .argv = &.{ "acli", "jira", "workitem", "view", "EXAMPLE-105", "--fields", "summary,customfield_10016,customfield_10020" },
+        .present = &.{ "Story Points: 2", "Acceptance Criteria:\n  Add text", "Definition Of Done:\n  None", "Custom Review Group: Example Reviewers" },
+        .absent = &.{"Additional anonymized description detail"},
+    });
+    try expectAcliFixtureCompacts(.{
+        .fixture = acli_confluence_page_view_fixture,
+        .argv = &.{ "acli", "confluence", "page", "view", "--id", "100000001" },
+        .present = &.{ "Title: Anonymized Planning Notes", "Labels: lorem, ipsum, anonymized" },
+        .absent = &.{"Duis aute irure"},
+    });
+    try expectAcliFixtureCompacts(.{
+        .fixture = acli_confluence_space_list_fixture,
+        .argv = &.{ "acli", "confluence", "space", "list" },
+        .present = &.{ "EXAMPLE Anonymized Space", "DOCS Dolor Sit Documentation" },
+    });
+}
+
+test "smoke: acli json output is minified" {
+    const allocator = std.testing.allocator;
+    const fixture =
+        "[\n" ++
+        "  {\"key\": \"EXAMPLE-101\", \"summary\": \"Anonymized sample work item\"},\n" ++
+        "  {\"key\": \"EXAMPLE-102\", \"summary\": \"Consectetur adipiscing elit\"}\n" ++
+        "]\n";
+    var result = try runAcliFixture(allocator, fixture, &.{ "acli", "jira", "workitem", "search", "--json" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < fixture.len);
+    try std.testing.expectEqualStrings("[{\"key\":\"EXAMPLE-101\",\"summary\":\"Anonymized sample work item\"},{\"key\":\"EXAMPLE-102\",\"summary\":\"Consectetur adipiscing elit\"}]\n", result.stdout);
+}
+
+test "smoke: acli lossless preserves output byte-identically" {
+    const allocator = std.testing.allocator;
+    var result = try runAcliFixture(allocator, acli_jira_workitem_search_fixture, &.{ "acli", "jira", "workitem", "search" }, &.{
+        .{ "SMLL_LOSSLESS", "1" },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(acli_jira_workitem_search_fixture, result.stdout);
+}
+
+test "smoke: acli unknown subcommand does not use bespoke view compaction" {
+    const allocator = std.testing.allocator;
+    const fixture =
+        "Key: EXAMPLE-109\n" ++
+        "Type: Task\n" ++
+        "Summary: This looks like a view but is from another command\n" ++
+        "Status: In Progress\n" ++
+        "URL: https://example.atlassian.invalid/browse/EXAMPLE-109\n" ++
+        "Description:\n" ++
+        "This body line must remain raw because argv did not select a view handler.\n";
+    var result = try runAcliFixture(allocator, fixture, &.{ "acli", "config", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(fixture, result.stdout);
+}
+
+test "smoke: failed acli preserves stderr diagnostics" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "acli",
+        \\#!/bin/sh
+        \\printf 'error: authentication required for https://example.atlassian.invalid\n' >&2
+        \\exit 1
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "acli", "jira", "workitem", "search" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings(acli_error_stderr_fixture, result.stderr);
 }
 
 test "smoke: terraform plan compact keeps resource headers and summary" {

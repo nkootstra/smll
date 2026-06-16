@@ -174,6 +174,14 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_yarn_list", .path = "tests/fixtures/yarn_list.txt" },
     } },
     .{ .name = "tool_compact", .needs_ansi = true },
+    .{ .name = "acli_compact", .needs_ansi = true, .extra_deps = &.{"columnar"}, .fixtures = &.{
+        .{ .name = "fixture_acli_jira_workitem_search", .path = "tests/fixtures/acli_jira_workitem_search.txt" },
+        .{ .name = "fixture_acli_jira_workitem_view", .path = "tests/fixtures/acli_jira_workitem_view.txt" },
+        .{ .name = "fixture_acli_jira_workitem_fields", .path = "tests/fixtures/acli_jira_workitem_fields.txt" },
+        .{ .name = "fixture_acli_confluence_page_view", .path = "tests/fixtures/acli_confluence_page_view.txt" },
+        .{ .name = "fixture_acli_confluence_space_list", .path = "tests/fixtures/acli_confluence_space_list.txt" },
+        .{ .name = "fixture_acli_error_stderr", .path = "tests/fixtures/acli_error.stderr.txt" },
+    } },
     .{ .name = "gh_compact", .fixtures = &.{
         .{ .name = "fixture_gh_pr_view", .path = "tests/fixtures/gh_pr_view.txt" },
         .{ .name = "fixture_gh_pr_checks", .path = "tests/fixtures/gh_pr_checks.txt" },
