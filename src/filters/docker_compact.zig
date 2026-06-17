@@ -74,7 +74,9 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try ansi.writeDecimal(writer, count);
     try writer.writeAll(state);
 
-    // Second pass: emit name, image, and status for each container.
+    // Second pass: emit names and image tags. Count + aggregate state above
+    // carry the common status signal; detailed status/ports are recoverable
+    // with `docker inspect` when needed.
     var emit = std.mem.splitScalar(u8, stdout, '\n');
     _ = emit.next(); // skip header
     const image_col = findColumnStart(header, "IMAGE") orelse 0;
@@ -84,31 +86,11 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
-        // Append image (truncated at column boundary) and status.
         if (image_col > 0 and image_col < line.len) {
-            const img_start = image_col;
-            // Image field ends at next multi-space gap.
-            var img_end = img_start;
-            while (img_end < line.len) : (img_end += 1) {
-                if (img_end + 1 < line.len and line[img_end] == ' ' and line[img_end + 1] == ' ') break;
-            }
-            const image = std.mem.trim(u8, line[img_start..img_end], " ");
+            const image = extractColumn(line, image_col);
             if (image.len > 0) {
                 try writer.writeByte('(');
                 try writer.writeAll(image);
-                // Add status indicator.
-                if (status_col > 0 and status_col < line.len) {
-                    const st = std.mem.trim(u8, line[status_col..@min(status_col + 25, line.len)], " ");
-                    // Trim status at first multi-space gap.
-                    var st_end: usize = 0;
-                    while (st_end < st.len) : (st_end += 1) {
-                        if (st_end + 1 < st.len and st[st_end] == ' ' and st[st_end + 1] == ' ') break;
-                    }
-                    if (st_end > 0) {
-                        try writer.writeByte(',');
-                        try writer.writeAll(st[0..st_end]);
-                    }
-                }
                 try writer.writeByte(')');
             }
         }
@@ -239,6 +221,14 @@ fn firstField(line: []const u8) []const u8 {
     return trimmed;
 }
 
+fn extractColumn(line: []const u8, start: usize) []const u8 {
+    var end = start;
+    while (end < line.len) : (end += 1) {
+        if (end + 1 < line.len and line[end] == ' ' and line[end + 1] == ' ') break;
+    }
+    return std.mem.trim(u8, line[start..end], " \t\r");
+}
+
 fn lastField(line: []const u8) []const u8 {
     const trimmed = std.mem.trimEnd(u8, line, " \t\r");
     if (trimmed.len == 0) return trimmed;
@@ -317,9 +307,7 @@ test "apply: docker compose fixture produces compact summary" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, fixture, &.{}, &out.writer);
-    const got = out.written();
-    try std.testing.expect(std.mem.startsWith(u8, got, "d1up "));
-    try std.testing.expect(std.mem.find(u8, got, "smll_d4_fixture-echoer-1(node:24-alpine,Up 2 seconds)") != null);
+    try std.testing.expectEqualStrings("d1up smll_d4_fixture-echoer-1(node:24-alpine)\n", out.written());
 }
 
 test "applyImages: fixture summarizes named and dangling images" {

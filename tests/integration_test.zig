@@ -3083,6 +3083,29 @@ test "generic-table: unknown table lossless passes through unchanged" {
     try std.testing.expectEqualSlices(u8, fixture, result.stdout);
 }
 
+test "columnar: ps auxww collapses repeated full rows" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const fixture =
+        "USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND\n" ++
+        "www          1  0.1  0.5 123456  7890 ?        S    00:00   0:00 /usr/bin/python3 /opt/app/venv/bin/gunicorn --workers 8\n" ++
+        "www          1  0.1  0.5 123456  7890 ?        S    00:00   0:00 /usr/bin/python3 /opt/app/venv/bin/gunicorn --workers 8\n" ++
+        "www          1  0.1  0.5 123456  7890 ?        S    00:00   0:00 /usr/bin/python3 /opt/app/venv/bin/gunicorn --workers 8\n" ++
+        "root         2  0.0  0.1  20480  1024 ?        S    00:00   0:00 /usr/sbin/nginx -g daemon off;\n";
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "ps", fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "ps", "auxww" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(result.stdout.len < fixture.len);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "gunicorn --workers 8") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "~ x2") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "nginx -g daemon off;") != null);
+}
+
 test "generic-table: unknown json output passes through unchanged" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -3317,7 +3340,7 @@ test "smoke: docker compose ps uses docker compact summary" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(std.mem.startsWith(u8, result.stdout, "d1up "));
-    try std.testing.expect(std.mem.find(u8, result.stdout, "smll_d4_fixture-echoer-1(node:24-alpine,Up 2 seconds)") != null);
+    try std.testing.expectEqualStrings("d1up smll_d4_fixture-echoer-1(node:24-alpine)\n", result.stdout);
 }
 
 test "smoke: docker compose logs and docker-compose logs dedup service payloads" {
@@ -4848,6 +4871,74 @@ fn setupFakeBuild(
     return try tmp_dir.realPathFileAlloc(io, ".", allocator);
 }
 
+test "smoke: turbo task output keeps task label and error" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFakeScript(tmp.dir, "turbo",
+        \\#!/bin/sh
+        \\cat <<'EOF'
+        \\ cache hit, replaying logs abc123
+        \\ cache miss, executing abc456
+        \\
+        \\3 packages in scope
+        \\
+        \\> myapp:lint
+        \\
+        \\Error: src/index.ts(5,1): error TS2304
+        \\
+        \\Tasks:    0 successful, 1 total
+        \\Duration: 1.1s
+        \\EOF
+        \\exit 1
+    );
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "turbo", "run", "lint" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "> myapp:lint") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "error TS2304") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cache hit") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "Tasks:") == null);
+}
+
+test "smoke: direct compiler diagnostics drop include stack and generated counts" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFakeScript(tmp.dir, "gcc",
+        \\#!/bin/sh
+        \\cat <<'EOF'
+        \\In file included from /usr/include/stdio.h:42:
+        \\                 from main.c:1:
+        \\main.c:10:5: error: use of undeclared identifier 'foo'
+        \\    foo();
+        \\    ^
+        \\main.c:15:12: warning: unused variable 'x' [-Wunused-variable]
+        \\    int x = 42;
+        \\        ^
+        \\2 warnings generated.
+        \\1 error generated.
+        \\EOF
+        \\exit 1
+    );
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gcc", "-c", "main.c" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "main.c:10:5: error") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "main.c:15:12: warning") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "foo();") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "In file included") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warnings generated") == null);
+}
+
 test "smoke: cargo build collapses Compiling lines on stderr (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -4860,13 +4951,13 @@ test "smoke: cargo build collapses Compiling lines on stderr (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // Progress collapsed, summary emitted.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 7 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 0e 1w 7 crates") != null);
     // No raw "   Compiling " lines survive.
     try std.testing.expect(std.mem.find(u8, result.stdout, "   Compiling ") == null);
     // Warning block preserved verbatim.
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused variable: `tmp`") != null);
-    // Finished line preserved.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Finished dev") != null);
+    // Finished line is folded into the cargo summary.
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    Finished dev") == null);
 }
 
 test "smoke: cargo check collapses Checking lines on stderr (default)" {
@@ -4887,9 +4978,9 @@ test "smoke: cargo check collapses Checking lines on stderr (default)" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Checked 3 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 0e 0w 3 crates") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "    Checking ") == null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Finished dev") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    Finished dev") == null);
 }
 
 test "smoke: cargo clippy keeps lint diagnostics while collapsing progress" {
@@ -4919,10 +5010,10 @@ test "smoke: cargo clippy keeps lint diagnostics while collapsing progress" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Checked 1 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 0e 1w 1 crates") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "    Checking ") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "clippy::collapsible_if") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: `smll` (lib) generated 1 warning") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "warning: `smll` (lib) generated 1 warning") == null);
 }
 
 test "smoke: cargo build large fixture reduces by ≥ 60%" {
@@ -4938,7 +5029,7 @@ test "smoke: cargo build large fixture reduces by ≥ 60%" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     const reduction = (cargo_build_large.len - result.stdout.len) * 100 / cargo_build_large.len;
     try std.testing.expect(reduction >= 60);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Compiled 500 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 1e 2w 500 crates") != null);
     // Warnings survived.
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused import") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: variable does not need to be mutable") != null);
