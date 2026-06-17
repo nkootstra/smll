@@ -993,15 +993,6 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    if (eqAny(cmd_basename, &.{ "cc", "gcc", "g++", "clang", "clang++" })) {
-        if (!lossless and build_compact.matchesCompilerDiagnostics(stdout_slice, stderr_slice)) {
-            if (!applyFilter(build_compact.applyCompilerDiagnostics, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
-        } else {
-            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-        }
-        return exit_code;
-    }
-
     if (std.mem.eql(u8, cmd_basename, "git") and argv.len >= 2) {
         return wrapper_git.dispatch(
             allocator,

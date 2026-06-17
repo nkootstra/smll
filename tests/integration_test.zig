@@ -4905,40 +4905,6 @@ test "smoke: turbo task output keeps task label and error" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "Tasks:") == null);
 }
 
-test "smoke: direct compiler diagnostics drop include stack and generated counts" {
-    const allocator = std.testing.allocator;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try writeFakeScript(tmp.dir, "gcc",
-        \\#!/bin/sh
-        \\cat <<'EOF'
-        \\In file included from /usr/include/stdio.h:42:
-        \\                 from main.c:1:
-        \\main.c:10:5: error: use of undeclared identifier 'foo'
-        \\    foo();
-        \\    ^
-        \\main.c:15:12: warning: unused variable 'x' [-Wunused-variable]
-        \\    int x = 42;
-        \\        ^
-        \\2 warnings generated.
-        \\1 error generated.
-        \\EOF
-        \\exit 1
-    );
-    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
-    defer allocator.free(bin_dir);
-
-    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gcc", "-c", "main.c" }, &.{});
-    defer result.deinit(allocator);
-
-    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "main.c:10:5: error") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "main.c:15:12: warning") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "foo();") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "In file included") == null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "warnings generated") == null);
-}
-
 test "smoke: cargo build collapses Compiling lines on stderr (default)" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -4951,7 +4917,7 @@ test "smoke: cargo build collapses Compiling lines on stderr (default)" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     // Progress collapsed, summary emitted.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 0e 1w 7 crates") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 7 crates") != null);
     // No raw "   Compiling " lines survive.
     try std.testing.expect(std.mem.find(u8, result.stdout, "   Compiling ") == null);
     // Warning block preserved verbatim.
@@ -4978,7 +4944,7 @@ test "smoke: cargo check collapses Checking lines on stderr (default)" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 0e 0w 3 crates") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 3 crates") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "    Checking ") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "    Finished dev") == null);
 }
@@ -5010,7 +4976,7 @@ test "smoke: cargo clippy keeps lint diagnostics while collapsing progress" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 0e 1w 1 crates") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 1 crates") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "    Checking ") == null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "clippy::collapsible_if") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: `smll` (lib) generated 1 warning") == null);
@@ -5029,7 +4995,7 @@ test "smoke: cargo build large fixture reduces by ≥ 60%" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     const reduction = (cargo_build_large.len - result.stdout.len) * 100 / cargo_build_large.len;
     try std.testing.expect(reduction >= 60);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 1e 2w 500 crates") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "cargo: Finished dev; 500 crates") != null);
     // Warnings survived.
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: unused import") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "warning: variable does not need to be mutable") != null);

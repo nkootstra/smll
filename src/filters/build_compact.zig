@@ -17,10 +17,10 @@ const Writer = std.Io.Writer;
 // stdout into a single virtual stream before classification.
 //
 // Shape of summary line (emitted once per tool/status that fired at least one
-// progress line): `Compiled N (cargo)` / `Checked N (cargo)` /
-// `Compiled N (make)` / `built N (ninja)` / `Compiled N (go)`. For successful
-// `zig build --summary all`, the original `Build Summary: …` line is forwarded
-// verbatim; no synthesized count line is emitted.
+// progress line): `cargo: N crates` / `Compiled N (make)` /
+// `built N (ninja)` / `Compiled N (go)`. For successful `zig build --summary
+// all`, the original `Build Summary: …` line is forwarded verbatim; no
+// synthesized count line is emitted.
 
 // Source-line prefixes that count as build progress and collapse into a count.
 // Cargo right-aligns status words to 12 columns, so `Compiling` and `Checking`
@@ -33,25 +33,12 @@ pub fn matches(stdout: []const u8, stderr: []const u8) bool {
     return scanForAny(stdout) or scanForAny(stderr);
 }
 
-pub fn matchesCompilerDiagnostics(stdout: []const u8, stderr: []const u8) bool {
-    return scanForCompilerDiagnostic(stdout) or scanForCompilerDiagnostic(stderr);
-}
-
 fn scanForAny(input: []const u8) bool {
     if (input.len == 0) return false;
     var it = std.mem.splitScalar(u8, input, '\n');
     while (it.next()) |line| {
         if (std.mem.startsWith(u8, line, "Build Summary: ")) return true;
         if (classify(line) != .other) return true;
-    }
-    return false;
-}
-
-fn scanForCompilerDiagnostic(input: []const u8) bool {
-    if (input.len == 0) return false;
-    var it = std.mem.splitScalar(u8, input, '\n');
-    while (it.next()) |line| {
-        if (isCompilerDiagnosticStart(std.mem.trim(u8, line, " \t\r"))) return true;
     }
     return false;
 }
@@ -107,30 +94,18 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var make_count: usize = 0;
     var ninja_count: usize = 0;
     var go_count: usize = 0;
-    var cargo_warning_count: usize = 0;
-    var cargo_error_count: usize = 0;
-    var cargo_finished_profile: ?[]const u8 = null;
+    var cargo_finished_dev = false;
 
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
 
-    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count, &cargo_warning_count, &cargo_error_count, &cargo_finished_profile);
-    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count, &cargo_warning_count, &cargo_error_count, &cargo_finished_profile);
+    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count, &cargo_finished_dev);
+    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count, &cargo_finished_dev);
 
     const cargo_crates = cargo_count + cargo_check_count;
     if (cargo_crates > 0) {
         try writer.writeAll("cargo: ");
-        if (cargo_finished_profile) |profile| {
-            try writer.writeAll("Finished ");
-            try writer.writeAll(profile);
-            try writer.writeAll("; ");
-        }
-        try ansi.writeDecimal(writer, cargo_error_count);
-        try writer.writeByte('e');
-        try writer.writeByte(' ');
-        try ansi.writeDecimal(writer, cargo_warning_count);
-        try writer.writeByte('w');
-        try writer.writeByte(' ');
+        if (cargo_finished_dev) try writer.writeAll("Finished dev; ");
         try ansi.writeDecimal(writer, cargo_crates);
         try writer.writeAll(" crates\n");
     } else if (cargo_verbose_count > 0) {
@@ -155,17 +130,6 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     }
 }
 
-pub fn applyCompilerDiagnostics(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
-    if (stdout.len == 0 and stderr.len == 0) return;
-
-    var strip_buf: std.ArrayList(u8) = .empty;
-    defer strip_buf.deinit(allocator);
-    var wrote_line = false;
-    var pending_blank = false;
-    try processCompilerStream(allocator, stdout, writer, &strip_buf, &wrote_line, &pending_blank);
-    try processCompilerStream(allocator, stderr, writer, &strip_buf, &wrote_line, &pending_blank);
-}
-
 fn processStream(
     allocator: Allocator,
     input: []const u8,
@@ -177,9 +141,7 @@ fn processStream(
     make_count: *usize,
     ninja_count: *usize,
     go_count: *usize,
-    cargo_warning_count: *usize,
-    cargo_error_count: *usize,
-    cargo_finished_profile: *?[]const u8,
+    cargo_finished_dev: *bool,
 ) !void {
     if (input.len == 0) return;
     // splitScalar yields an empty final element when input ends in '\n'.
@@ -203,48 +165,15 @@ fn processStream(
             },
             .go_progress => go_count.* += 1,
             .warning, .err, .other => {
-                if (isCargoFinishedLine(line)) {
-                    if (cargo_finished_profile.* == null) cargo_finished_profile.* = cargoFinishedProfile(line);
+                if (std.mem.startsWith(u8, line, "    Finished dev")) {
+                    cargo_finished_dev.* = true;
                     continue;
                 }
                 if (isCargoGeneratedWarningSummary(line)) continue;
-                if (kind == .warning and isRustWarningStart(line)) cargo_warning_count.* += 1;
-                if (kind == .err and isRustErrorStart(line)) cargo_error_count.* += 1;
                 try writer.writeAll(line);
                 try writer.writeByte('\n');
             },
         }
-    }
-}
-
-fn processCompilerStream(
-    allocator: Allocator,
-    input: []const u8,
-    writer: *Writer,
-    strip_buf: *std.ArrayList(u8),
-    wrote_line: *bool,
-    pending_blank: *bool,
-) !void {
-    if (input.len == 0) return;
-    const trimmed_input = if (input[input.len - 1] == '\n') input[0 .. input.len - 1] else input;
-    if (trimmed_input.len == 0) return;
-    var it = std.mem.splitScalar(u8, trimmed_input, '\n');
-    while (it.next()) |raw| {
-        const clean = ansi.stripInto(strip_buf, allocator, raw) catch raw;
-        const line = std.mem.trimEnd(u8, clean, " \t\r");
-        const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len == 0) {
-            if (wrote_line.*) pending_blank.* = true;
-            continue;
-        }
-        if (isCompilerIncludeStack(trimmed) or isGeneratedDiagnosticCount(trimmed)) continue;
-        if (pending_blank.*) {
-            try writer.writeByte('\n');
-            pending_blank.* = false;
-        }
-        try writer.writeAll(line);
-        try writer.writeByte('\n');
-        wrote_line.* = true;
     }
 }
 
@@ -275,48 +204,9 @@ fn isMakeDirNoise(line: []const u8) bool {
         std.mem.find(u8, line, ": Leaving directory") != null;
 }
 
-fn isCargoFinishedLine(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "    Finished ");
-}
-
-fn cargoFinishedProfile(line: []const u8) []const u8 {
-    const rest = line["    Finished ".len..];
-    var end: usize = 0;
-    while (end < rest.len and rest[end] != ' ' and rest[end] != '\t' and rest[end] != '[') : (end += 1) {}
-    return rest[0..end];
-}
-
 fn isCargoGeneratedWarningSummary(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "warning: `") and
         std.mem.find(u8, line, " generated ") != null;
-}
-
-fn isRustWarningStart(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "warning:");
-}
-
-fn isRustErrorStart(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "error:") or std.mem.startsWith(u8, line, "error[");
-}
-
-fn isCompilerDiagnosticStart(line: []const u8) bool {
-    return std.mem.find(u8, line, ": error:") != null or
-        std.mem.find(u8, line, ": warning:") != null or
-        std.mem.find(u8, line, ": fatal error:") != null;
-}
-
-fn isCompilerIncludeStack(line: []const u8) bool {
-    return std.mem.startsWith(u8, line, "In file included from ") or
-        (std.mem.startsWith(u8, line, "from ") and std.mem.endsWith(u8, line, ":"));
-}
-
-fn isGeneratedDiagnosticCount(line: []const u8) bool {
-    if (!std.mem.endsWith(u8, line, " generated.")) return false;
-    var i: usize = 0;
-    while (i < line.len and std.ascii.isDigit(line[i])) : (i += 1) {}
-    if (i == 0 or i >= line.len or line[i] != ' ') return false;
-    const rest = line[i + 1 ..];
-    return std.mem.startsWith(u8, rest, "warning") or std.mem.startsWith(u8, rest, "error");
 }
 
 fn findZigSuccessSummary(input: []const u8) ?[]const u8 {
@@ -382,7 +272,7 @@ test "apply: cargo happy path collapses to summary" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 0e 0w 3 crates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 3 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
 }
 
@@ -423,7 +313,7 @@ test "apply: cargo check progress collapses to checked summary" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 0e 0w 2 crates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 2 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "Checking") == null);
 }
 
@@ -439,7 +329,7 @@ test "apply: cargo verbose rustc invocations are dropped" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "cargo: 0e 0w 2 crates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: 2 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "rustc --crate-name") == null);
 }
 
@@ -575,7 +465,7 @@ test "apply: compile error block emitted verbatim, no progress collapse inside" 
     try std.testing.expect(std.mem.find(u8, got, "error[E0308]: mismatched types") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/lib.rs:3:5") != null);
     try std.testing.expect(std.mem.find(u8, got, "expected `i32`") != null);
-    try std.testing.expect(std.mem.find(u8, got, "cargo: 1e 0w 1 crates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: 1 crates") != null);
 }
 
 test "apply: mixed cargo + make emits two summary lines" {
@@ -588,7 +478,7 @@ test "apply: mixed cargo + make emits two summary lines" {
     defer out.deinit();
     try apply(std.testing.allocator, input, "", &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "cargo: 0e 0w 1 crates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: 1 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (make)") != null);
 }
 
@@ -617,33 +507,7 @@ test "apply: large synthetic cargo fixture reduces ≥ 60%" {
     defer out.deinit();
     try apply(alloc, "", raw, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 0e 0w 500 crates") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 500 crates") != null);
     // Reduction target: ≥ 60%.  got/raw < 0.4 → got * 5 < raw * 2.
     try std.testing.expect(got.len * 5 < raw.len * 2);
-}
-
-test "applyCompilerDiagnostics: drops include stack and generated counters" {
-    const input =
-        \\In file included from /usr/include/stdio.h:42:
-        \\                 from main.c:1:
-        \\main.c:10:5: error: use of undeclared identifier 'foo'
-        \\    foo();
-        \\    ^
-        \\main.c:15:12: warning: unused variable 'x' [-Wunused-variable]
-        \\    int x = 42;
-        \\        ^
-        \\2 warnings generated.
-        \\1 error generated.
-        \\
-    ;
-    var out = Writer.Allocating.init(std.testing.allocator);
-    defer out.deinit();
-    try applyCompilerDiagnostics(std.testing.allocator, input, "", &out.writer);
-    const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "main.c:10:5: error") != null);
-    try std.testing.expect(std.mem.find(u8, got, "main.c:15:12: warning") != null);
-    try std.testing.expect(std.mem.find(u8, got, "foo();") != null);
-    try std.testing.expect(std.mem.find(u8, got, "In file included") == null);
-    try std.testing.expect(std.mem.find(u8, got, "warnings generated") == null);
-    try std.testing.expect(got.len < input.len);
 }

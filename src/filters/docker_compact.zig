@@ -74,24 +74,26 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try ansi.writeDecimal(writer, count);
     try writer.writeAll(state);
 
-    // Second pass: emit names and image tags. Count + aggregate state above
-    // carry the common status signal; detailed status/ports are recoverable
-    // with `docker inspect` when needed.
+    // Second pass: emit names. For compose-style rows, also keep the image tag
+    // beside the service/container name; detailed status/port text is
+    // recoverable with `docker inspect` when needed.
     var emit = std.mem.splitScalar(u8, stdout, '\n');
     _ = emit.next(); // skip header
-    const image_col = findColumnStart(header, "IMAGE") orelse 0;
     while (emit.next()) |line| {
         if (line.len == 0) continue;
         const name = if (name_is_first_col) firstField(line) else extractName(line, names_col);
         if (name.len == 0) continue;
         try writer.writeByte(' ');
         try writer.writeAll(name);
-        if (image_col > 0 and image_col < line.len) {
-            const image = extractColumn(line, image_col);
-            if (image.len > 0) {
-                try writer.writeByte('(');
-                try writer.writeAll(image);
-                try writer.writeByte(')');
+        if (name_is_first_col) {
+            const trimmed = std.mem.trimStart(u8, line, " \t\r");
+            if (trimmed.len > name.len) {
+                const image = firstField(trimmed[name.len..]);
+                if (image.len > 0) {
+                    try writer.writeByte('(');
+                    try writer.writeAll(image);
+                    try writer.writeByte(')');
+                }
             }
         }
     }
@@ -219,14 +221,6 @@ fn firstField(line: []const u8) []const u8 {
         }
     }
     return trimmed;
-}
-
-fn extractColumn(line: []const u8, start: usize) []const u8 {
-    var end = start;
-    while (end < line.len) : (end += 1) {
-        if (end + 1 < line.len and line[end] == ' ' and line[end + 1] == ' ') break;
-    }
-    return std.mem.trim(u8, line[start..end], " \t\r");
 }
 
 fn lastField(line: []const u8) []const u8 {

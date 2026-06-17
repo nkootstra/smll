@@ -195,9 +195,16 @@ fn fieldsEqual(a: []const []const u8, b: []const []const u8) bool {
 }
 
 fn writeDecimal(writer: *Writer, value: usize) !void {
-    var buf: [32]u8 = undefined;
-    const s = try std.fmt.bufPrint(&buf, "{d}", .{value});
-    try writer.writeAll(s);
+    var buf: [20]u8 = undefined;
+    var i: usize = buf.len;
+    var n = value;
+    while (true) {
+        i -= 1;
+        buf[i] = @as(u8, @intCast(n % 10)) + '0';
+        n /= 10;
+        if (n == 0) break;
+    }
+    try writer.writeAll(buf[i..]);
 }
 
 /// Truncate path portions in the last field to basename.
