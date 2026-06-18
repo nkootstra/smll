@@ -16,9 +16,10 @@ const Writer = std.Io.Writer;
 // progress mirrors, webpack module build rows.
 
 const DROP_PREFIXES = [_][]const u8{
+    "cache hit, replaying logs ",
+    "cache miss, executing ",
     "(node:", // node deprecation warning header
     "(Use ", // node --trace-deprecation continuation
-    "> ", // npm-script invocation lines (`> app@0.1.0 build`, `> vite build`)
     "transforming...",
     "rendering chunks (",
     "computing gzip size (",
@@ -27,6 +28,8 @@ const DROP_PREFIXES = [_][]const u8{
     "ℹ vite v",
     "ℹ rendering chunks",
     "ℹ computing gzip size",
+    "Tasks:",
+    "Duration:",
 };
 
 const DROP_CONTAINS = [_][]const u8{
@@ -34,6 +37,11 @@ const DROP_CONTAINS = [_][]const u8{
 };
 
 pub fn matches(input: []const u8) bool {
+    // Turbo task output: cache/scope/progress lines plus one or more task
+    // sections (`> package:script`) and an aggregate `Tasks:` footer.
+    if (std.mem.find(u8, input, "Tasks:") != null and
+        std.mem.find(u8, input, "Duration:") != null and
+        (std.mem.find(u8, input, "\n> ") != null or std.mem.startsWith(u8, input, "> "))) return true;
     // Vite build banner
     if (std.mem.find(u8, input, "vite v") != null and
         (std.mem.find(u8, input, "building for production") != null or
@@ -185,6 +193,8 @@ fn scanAndKeep(
 }
 
 fn shouldDrop(line: []const u8) bool {
+    if (std.mem.endsWith(u8, line, " packages in scope")) return true;
+    if (isScriptHeader(line)) return true;
     for (DROP_PREFIXES) |p| {
         if (std.mem.startsWith(u8, line, p)) return true;
     }
@@ -192,6 +202,20 @@ fn shouldDrop(line: []const u8) bool {
         if (std.mem.find(u8, line, c) != null) return true;
     }
     return false;
+}
+
+fn isScriptHeader(line: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, "> ")) return false;
+    const body = line[2..];
+    if (std.mem.findScalar(u8, body, '@') != null and std.mem.findScalar(u8, body, ' ') != null) return true;
+    return std.mem.startsWith(u8, body, "vite ") or
+        std.mem.startsWith(u8, body, "next ") or
+        std.mem.startsWith(u8, body, "nuxt ") or
+        std.mem.startsWith(u8, body, "webpack ") or
+        std.mem.startsWith(u8, body, "npm ") or
+        std.mem.startsWith(u8, body, "pnpm ") or
+        std.mem.startsWith(u8, body, "yarn ") or
+        std.mem.startsWith(u8, body, "bun ");
 }
 
 fn assetSizeBytes(line: []const u8) ?usize {
@@ -334,6 +358,16 @@ test "matches: built in summary" {
     try std.testing.expect(matches("\xe2\x9c\x93 built in 12.34s\n"));
 }
 
+test "matches: turbo task output" {
+    try std.testing.expect(matches(
+        " cache hit, replaying logs abc123\n\n" ++
+            "> myapp:lint\n\n" ++
+            "Error: src/index.ts(5,1): error TS2304\n\n" ++
+            "Tasks:    0 successful, 1 total\n" ++
+            "Duration: 1.1s\n",
+    ));
+}
+
 test "matches: nuxt total size summary" {
     try std.testing.expect(matches("\xce\xa3 Total size: 1.23 MB (1.05 MB gzip)\n"));
 }
@@ -398,6 +432,31 @@ test "apply: asset rows drop the gzip column" {
     try std.testing.expect(std.mem.find(u8, got, "index-abc.js 1,234.56 kB") != null);
     // B12: gzip column dropped.
     try std.testing.expect(std.mem.find(u8, got, "gzip:") == null);
+}
+
+test "apply: turbo task output keeps task and error only" {
+    const input =
+        " cache hit, replaying logs abc123\n" ++
+        " cache miss, executing abc456\n" ++
+        "\n" ++
+        "3 packages in scope\n" ++
+        "\n" ++
+        "> myapp:lint\n" ++
+        "\n" ++
+        "Error: src/index.ts(5,1): error TS2304\n" ++
+        "\n" ++
+        "Tasks:    0 successful, 1 total\n" ++
+        "Duration: 1.1s\n";
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "> myapp:lint") != null);
+    try std.testing.expect(std.mem.find(u8, got, "error TS2304") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cache hit") == null);
+    try std.testing.expect(std.mem.find(u8, got, "packages in scope") == null);
+    try std.testing.expect(std.mem.find(u8, got, "Tasks:") == null);
+    try std.testing.expect(got.len < input.len);
 }
 
 test "apply: webpack fixture summarizes assets and drops built module rows" {

@@ -107,12 +107,14 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
 
     var i: usize = 0;
     var have_prev = false;
+    var repeated_rows: usize = 0;
     while (i < stdout.len) {
         const line_start = i;
         while (i < stdout.len and stdout[i] != '\n') i += 1;
         const line = stdout[line_start..i];
 
         if (!lineIsTabular(line)) {
+            try flushRepeatedRows(writer, &repeated_rows);
             // Preamble / blank / single-column line — emit verbatim and reset
             // the RLE baseline so later rows don't elide against a stale row.
             try writer.writeAll(line);
@@ -127,6 +129,14 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
 
         cur_fields.clearRetainingCapacity();
         try splitFields(allocator, line, &cur_fields);
+
+        if (elide_repeated_fields and have_prev and fieldsEqual(prev_fields.items, cur_fields.items)) {
+            repeated_rows += 1;
+            if (i < stdout.len) i += 1;
+            continue;
+        }
+
+        try flushRepeatedRows(writer, &repeated_rows);
 
         var field_idx: usize = 0;
         while (field_idx < cur_fields.items.len) : (field_idx += 1) {
@@ -165,6 +175,36 @@ fn applyInner(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
         cur_fields = tmp;
         have_prev = true;
     }
+    try flushRepeatedRows(writer, &repeated_rows);
+}
+
+fn flushRepeatedRows(writer: *Writer, repeated_rows: *usize) !void {
+    if (repeated_rows.* == 0) return;
+    try writer.writeAll("~ x");
+    try writeDecimal(writer, repeated_rows.*);
+    try writer.writeByte('\n');
+    repeated_rows.* = 0;
+}
+
+fn fieldsEqual(a: []const []const u8, b: []const []const u8) bool {
+    if (a.len != b.len) return false;
+    for (a, b) |left, right| {
+        if (!std.mem.eql(u8, left, right)) return false;
+    }
+    return true;
+}
+
+fn writeDecimal(writer: *Writer, value: usize) !void {
+    var buf: [20]u8 = undefined;
+    var i: usize = buf.len;
+    var n = value;
+    while (true) {
+        i -= 1;
+        buf[i] = @as(u8, @intCast(n % 10)) + '0';
+        n /= 10;
+        if (n == 0) break;
+    }
+    try writer.writeAll(buf[i..]);
 }
 
 /// Truncate path portions in the last field to basename.
@@ -372,6 +412,25 @@ test "encode: every elided field emits ~ sigil, not a blank gap" {
     const out = try applyToString(a, input);
     defer a.free(out);
     try std.testing.expectEqualStrings("C0 C1 C2\nfoo bar baz\n~ qux ~\n", out);
+}
+
+test "encode: repeated full rows collapse to row count" {
+    const a = std.testing.allocator;
+    const input =
+        "USER   PID   COMMAND\n" ++
+        "www    1     python app.py\n" ++
+        "www    1     python app.py\n" ++
+        "www    1     python app.py\n" ++
+        "root   2     nginx\n";
+    const out = try applyToString(a, input);
+    defer a.free(out);
+    try std.testing.expectEqualStrings(
+        "USER PID COMMAND\n" ++
+            "www 1 python app.py\n" ++
+            "~ x2\n" ++
+            "root 2 nginx\n",
+        out,
+    );
 }
 
 test "encode: docker ps compresses" {

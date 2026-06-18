@@ -17,10 +17,10 @@ const Writer = std.Io.Writer;
 // stdout into a single virtual stream before classification.
 //
 // Shape of summary line (emitted once per tool/status that fired at least one
-// progress line): `Compiled N (cargo)` / `Checked N (cargo)` /
-// `Compiled N (make)` / `built N (ninja)` / `Compiled N (go)`. For successful
-// `zig build --summary all`, the original `Build Summary: …` line is forwarded
-// verbatim; no synthesized count line is emitted.
+// progress line): `cargo: N crates` / `Compiled N (make)` /
+// `built N (ninja)` / `Compiled N (go)`. For successful `zig build --summary
+// all`, the original `Build Summary: …` line is forwarded verbatim; no
+// synthesized count line is emitted.
 
 // Source-line prefixes that count as build progress and collapse into a count.
 // Cargo right-aligns status words to 12 columns, so `Compiling` and `Checking`
@@ -94,24 +94,21 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     var make_count: usize = 0;
     var ninja_count: usize = 0;
     var go_count: usize = 0;
+    var cargo_finished_dev = false;
 
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
 
-    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count);
-    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count);
+    try processStream(allocator, stdout, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count, &cargo_finished_dev);
+    try processStream(allocator, stderr, writer, &strip_buf, &cargo_count, &cargo_check_count, &cargo_verbose_count, &make_count, &ninja_count, &go_count, &cargo_finished_dev);
 
-    if (cargo_count > 0) {
-        try writer.writeAll("Compiled ");
-        try ansi.writeDecimal(writer, cargo_count);
-        try writer.writeAll(" (cargo)\n");
-    }
-    if (cargo_check_count > 0) {
-        try writer.writeAll("Checked ");
-        try ansi.writeDecimal(writer, cargo_check_count);
-        try writer.writeAll(" (cargo)\n");
-    }
-    if (cargo_count == 0 and cargo_check_count == 0 and cargo_verbose_count > 0) {
+    const cargo_crates = cargo_count + cargo_check_count;
+    if (cargo_crates > 0) {
+        try writer.writeAll("cargo: ");
+        if (cargo_finished_dev) try writer.writeAll("Finished dev; ");
+        try ansi.writeDecimal(writer, cargo_crates);
+        try writer.writeAll(" crates\n");
+    } else if (cargo_verbose_count > 0) {
         try writer.writeAll("Ran ");
         try ansi.writeDecimal(writer, cargo_verbose_count);
         try writer.writeAll(" rustc invocations (cargo -vv)\n");
@@ -144,6 +141,7 @@ fn processStream(
     make_count: *usize,
     ninja_count: *usize,
     go_count: *usize,
+    cargo_finished_dev: *bool,
 ) !void {
     if (input.len == 0) return;
     // splitScalar yields an empty final element when input ends in '\n'.
@@ -167,6 +165,11 @@ fn processStream(
             },
             .go_progress => go_count.* += 1,
             .warning, .err, .other => {
+                if (std.mem.startsWith(u8, line, "    Finished dev")) {
+                    cargo_finished_dev.* = true;
+                    continue;
+                }
+                if (isCargoGeneratedWarningSummary(line)) continue;
                 try writer.writeAll(line);
                 try writer.writeByte('\n');
             },
@@ -199,6 +202,11 @@ fn isMakeDirNoise(line: []const u8) bool {
     if (!std.mem.startsWith(u8, line, "make")) return false;
     return std.mem.find(u8, line, ": Entering directory") != null or
         std.mem.find(u8, line, ": Leaving directory") != null;
+}
+
+fn isCargoGeneratedWarningSummary(line: []const u8) bool {
+    return std.mem.startsWith(u8, line, "warning: `") and
+        std.mem.find(u8, line, " generated ") != null;
 }
 
 fn findZigSuccessSummary(input: []const u8) ?[]const u8 {
@@ -264,8 +272,7 @@ test "apply: cargo happy path collapses to summary" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 3 (cargo)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 3 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiling") == null);
 }
 
@@ -306,8 +313,7 @@ test "apply: cargo check progress collapses to checked summary" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Checked 2 (cargo)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 2 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "Checking") == null);
 }
 
@@ -323,7 +329,7 @@ test "apply: cargo verbose rustc invocations are dropped" {
     defer out.deinit();
     try apply(std.testing.allocator, "", input, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 2 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: 2 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "rustc --crate-name") == null);
 }
 
@@ -439,7 +445,7 @@ test "apply: no progress, only warning → no summary line" {
     try apply(std.testing.allocator, input, "", &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "warning: unused") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Compiled") == null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo:") == null);
 }
 
 test "apply: compile error block emitted verbatim, no progress collapse inside" {
@@ -459,7 +465,7 @@ test "apply: compile error block emitted verbatim, no progress collapse inside" 
     try std.testing.expect(std.mem.find(u8, got, "error[E0308]: mismatched types") != null);
     try std.testing.expect(std.mem.find(u8, got, "src/lib.rs:3:5") != null);
     try std.testing.expect(std.mem.find(u8, got, "expected `i32`") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: 1 crates") != null);
 }
 
 test "apply: mixed cargo + make emits two summary lines" {
@@ -472,7 +478,7 @@ test "apply: mixed cargo + make emits two summary lines" {
     defer out.deinit();
     try apply(std.testing.allocator, input, "", &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (cargo)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: 1 crates") != null);
     try std.testing.expect(std.mem.find(u8, got, "Compiled 1 (make)") != null);
 }
 
@@ -501,8 +507,7 @@ test "apply: large synthetic cargo fixture reduces ≥ 60%" {
     defer out.deinit();
     try apply(alloc, "", raw, &out.writer);
     const got = out.written();
-    try std.testing.expect(std.mem.find(u8, got, "Compiled 500 (cargo)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "Finished dev") != null);
+    try std.testing.expect(std.mem.find(u8, got, "cargo: Finished dev; 500 crates") != null);
     // Reduction target: ≥ 60%.  got/raw < 0.4 → got * 5 < raw * 2.
     try std.testing.expect(got.len * 5 < raw.len * 2);
 }

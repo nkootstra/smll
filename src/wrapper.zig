@@ -616,6 +616,15 @@ fn runWrapperInner(
         return exit_code;
     }
 
+    if (std.mem.eql(u8, cmd_basename, "turbo")) {
+        if (!lossless and (build_output.matches(stdout_slice) or build_output.matches(stderr_slice))) {
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        } else {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        }
+        return exit_code;
+    }
+
     // composer (PHP) install/require/update/remove — same lossy contract as
     // the JS managers: keep summary + warnings/errors, drop scaffolding.
     if (std.mem.eql(u8, cmd_basename, "composer")) {
