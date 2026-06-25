@@ -8,6 +8,31 @@ pub fn matches(input: []const u8) bool {
     return false;
 }
 
+/// True when any argument is an MSBuild query switch (`-getProperty:`,
+/// `-getItem:`, `-getTargetResult:`). These turn `dotnet build` into a query
+/// that prints only the requested value(s) to stdout — which can legitimately
+/// be empty or arbitrary text, so it must pass through unfiltered. MSBuild
+/// accepts `-`, `--`, or `/` prefixes and matches switch names case-insensitively.
+pub fn isQueryInvocation(argv: []const []const u8) bool {
+    const queries = [_][]const u8{ "getproperty", "getitem", "gettargetresult" };
+    for (argv) |a| {
+        var rest = a;
+        if (std.mem.startsWith(u8, rest, "--")) {
+            rest = rest[2..];
+        } else if (rest.len >= 1 and (rest[0] == '-' or rest[0] == '/')) {
+            rest = rest[1..];
+        } else {
+            continue;
+        }
+        for (queries) |q| {
+            // MSBuild requires the `:` separator immediately after the switch
+            // name, so guard on it to avoid matching unrelated `-getPropertyX`.
+            if (rest.len > q.len and rest[q.len] == ':' and std.ascii.eqlIgnoreCase(rest[0..q.len], q)) return true;
+        }
+    }
+    return false;
+}
+
 pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, writer: *Writer) !void {
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
@@ -66,6 +91,23 @@ fn shouldKeep(line: []const u8) bool {
 
 fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {
     return std.ascii.indexOfIgnoreCase(haystack, needle) != null;
+}
+
+test "isQueryInvocation detects MSBuild query switches" {
+    // Various switch names and prefixes (case-insensitive).
+    try std.testing.expect(isQueryInvocation(&.{ "dotnet", "build", "-getProperty:DefineConstants" }));
+    try std.testing.expect(isQueryInvocation(&.{ "dotnet", "build", "/getProperty:Version" }));
+    try std.testing.expect(isQueryInvocation(&.{ "dotnet", "build", "--getProperty:Version" }));
+    try std.testing.expect(isQueryInvocation(&.{ "dotnet", "build", "-getproperty:Version" }));
+    try std.testing.expect(isQueryInvocation(&.{ "dotnet", "build", "-getItem:Compile" }));
+    try std.testing.expect(isQueryInvocation(&.{ "dotnet", "build", "-getTargetResult:Build" }));
+    // Normal builds are not query invocations.
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build" }));
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "-c", "Release" }));
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "MyGetProperty.csproj" }));
+    // The `:` separator is mandatory; look-alike switches are not queries.
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "-getProperty" }));
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "-getPropertyGroup:X" }));
 }
 
 test "build errors and summary are preserved" {

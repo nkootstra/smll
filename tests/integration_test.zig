@@ -3969,6 +3969,37 @@ test "smoke: dotnet test keeps xunit failure detail" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "Starting test execution") == null);
 }
 
+test "passthrough: dotnet build -getProperty query value is not stripped" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // -getProperty prints only the requested value; it matches no keep-pattern
+    // and would be dropped by the compact filter if it were applied.
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "dotnet", "DEBUG;TRACE\n");
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "dotnet", "build", "-getProperty:DefineConstants" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "DEBUG;TRACE") != null);
+}
+
+test "passthrough: dotnet build -getProperty preserves empty output" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    // An unset property legitimately yields a single empty line.
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "dotnet", "\n");
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "dotnet", "build", "-getProperty:DefineConstants" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("\n", result.stdout);
+}
+
 const gh_fixture = "noise\n✓ build passed\nhttps://github.com/o/r/pull/1\n";
 
 const gh_pr_checks_fixture =
