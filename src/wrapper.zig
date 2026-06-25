@@ -660,7 +660,9 @@ fn runWrapperInner(
     }
 
     if (std.mem.eql(u8, cmd_basename, "dotnet")) {
-        if (!lossless and eqAny(arg1, &.{ "build", "test", "format", "restore" })) {
+        if (!lossless and eqAny(arg1, &.{ "build", "test", "format", "restore" }) and
+            !dotnet_compact.isQueryInvocation(argv))
+        {
             if (!applyFilter(dotnet_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
