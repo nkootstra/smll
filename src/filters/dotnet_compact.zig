@@ -25,7 +25,9 @@ pub fn isQueryInvocation(argv: []const []const u8) bool {
             continue;
         }
         for (queries) |q| {
-            if (rest.len >= q.len and std.ascii.eqlIgnoreCase(rest[0..q.len], q)) return true;
+            // MSBuild requires the `:` separator immediately after the switch
+            // name, so guard on it to avoid matching unrelated `-getPropertyX`.
+            if (rest.len > q.len and rest[q.len] == ':' and std.ascii.eqlIgnoreCase(rest[0..q.len], q)) return true;
         }
     }
     return false;
@@ -103,6 +105,9 @@ test "isQueryInvocation detects MSBuild query switches" {
     try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build" }));
     try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "-c", "Release" }));
     try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "MyGetProperty.csproj" }));
+    // The `:` separator is mandatory; look-alike switches are not queries.
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "-getProperty" }));
+    try std.testing.expect(!isQueryInvocation(&.{ "dotnet", "build", "-getPropertyGroup:X" }));
 }
 
 test "build errors and summary are preserved" {
