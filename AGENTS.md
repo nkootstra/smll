@@ -43,7 +43,7 @@ If release/size behavior is affected, also run:
 zig build release
 ```
 
-The size gate enforces a **368,640 byte (360 KiB)** cap on the Linux x86_64
+The size gate enforces a **393,216 byte (384 KiB)** cap on the Linux x86_64
 release binary (`.github/workflows/ci.yml`). CI measures a **native** x86_64
 build. Cross-compiling from another host (`zig build release
 -Dtarget=x86_64-linux`) produces the right target but runs ~600–700 bytes
