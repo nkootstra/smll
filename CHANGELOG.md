@@ -9,6 +9,27 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-06-30
+
+### Fixed
+
+- `gh api graphql --paginate --jq .data` and related `gh` data-query commands
+  now pass through unchanged instead of being mistaken for compactable `gh`
+  output.
+
+## [1.8.1] - 2026-06-25
+
+### Added
+
+- `dotnet` MSBuild query invocations now pass through unchanged so commands such
+  as `dotnet msbuild -getProperty:TargetFramework` preserve machine-readable
+  output.
+
+### Changed
+
+- Build and process-output compaction received performance and size
+  improvements.
+
 ## [1.8.0] — 2026-06-16
 
 ### Changed
@@ -431,7 +452,9 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.8.2...HEAD
+[1.8.2]: https://github.com/nkootstra/smll/compare/v1.8.1...v1.8.2
+[1.8.1]: https://github.com/nkootstra/smll/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/nkootstra/smll/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/nkootstra/smll/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/nkootstra/smll/compare/v1.5.1...v1.6.0
