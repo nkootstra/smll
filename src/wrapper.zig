@@ -130,6 +130,19 @@ fn findHasTypeFile(argv: []const []const u8) bool {
     return false;
 }
 
+fn ghWantsDataOutput(argv: []const []const u8) bool {
+    for (argv) |arg| {
+        if (std.mem.eql(u8, arg, "--json") or
+            std.mem.eql(u8, arg, "--jq") or
+            std.mem.startsWith(u8, arg, "--json=") or
+            std.mem.startsWith(u8, arg, "--jq="))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -573,6 +586,13 @@ fn runWrapperInner(
         } else if (is_run and std.mem.eql(u8, arg2, "view")) {
             if (!applyFilter(gh_compact.applyRunView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
             try stderr_writer.writeAll(stderr_slice);
+        } else if (ghWantsDataOutput(argv)) {
+            if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
+                if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else {
+                try writer.writeAll(stdout_slice);
+                try stderr_writer.writeAll(stderr_slice);
+            }
         } else {
             if (!try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
                 if (!applyFilter(tool_compact.applyGh, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
