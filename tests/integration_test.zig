@@ -4001,6 +4001,18 @@ test "passthrough: dotnet build -getProperty preserves empty output" {
 }
 
 const gh_fixture = "noise\n✓ build passed\nhttps://github.com/o/r/pull/1\n";
+const gh_created_at_scalar_fixture = "2024-05-27T10:14:00Z\n";
+const gh_repo_view_json_fixture =
+    "{\n" ++
+    "  \"createdAt\": \"2024-05-27T10:14:00Z\"\n" ++
+    "}\n";
+const gh_commit_verification_fixture =
+    "{\n" ++
+    "  \"verified\": true,\n" ++
+    "  \"reason\": \"valid\",\n" ++
+    "  \"signature\": \"-----BEGIN SSH SIGNATURE-----\\nexample\\n-----END SSH SIGNATURE-----\",\n" ++
+    "  \"payload\": \"tree 0000000000000000000000000000000000000000\\n\"\n" ++
+    "}\n";
 
 const gh_pr_checks_fixture =
     "build\tpass\t1m23s\n" ++
@@ -4057,6 +4069,66 @@ test "smoke: gh generic output keeps checks and urls" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualStrings("✓ build passed\nhttps://github.com/o/r/pull/1\n", result.stdout);
+}
+
+test "smoke: gh repo view --json --jq preserves scalar data" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_created_at_scalar_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "gh", "repo", "view", "nkootstra/lumen", "--json", "createdAt", "--jq", ".createdAt" },
+        &.{},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(gh_created_at_scalar_fixture, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "smoke: gh repo view --json minifies json data" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_repo_view_json_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "gh", "repo", "view", "nkootstra/lumen", "--json", "createdAt" },
+        &.{},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("{\"createdAt\":\"2024-05-27T10:14:00Z\"}\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "smoke: gh api --jq minifies json data" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "gh", gh_commit_verification_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "gh", "api", "repos/nkootstra/lumen/commits/29bc4c6177d849b14caafd51aed1a15b91b5de42", "--jq", ".commit.verification" },
+        &.{},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("{\"verified\":true,\"reason\":\"valid\",\"signature\":\"-----BEGIN SSH SIGNATURE-----\\nexample\\n-----END SSH SIGNATURE-----\",\"payload\":\"tree 0000000000000000000000000000000000000000\\n\"}\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
 }
 
 test "smoke: gh pr checks aggregates and keeps non-passing rows" {
