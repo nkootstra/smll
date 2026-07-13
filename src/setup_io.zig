@@ -11,6 +11,28 @@ pub fn concat2(allocator: std.mem.Allocator, a: []const u8, b: []const u8) ![]u8
     return buf;
 }
 
+pub fn shellEscapeAlloc(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var extra: usize = 2;
+    for (value) |c| if (c == '\'') {
+        extra += 3;
+    };
+    const out = try allocator.alloc(u8, value.len + extra);
+    var pos: usize = 0;
+    out[pos] = '\'';
+    pos += 1;
+    for (value) |c| {
+        if (c == '\'') {
+            @memcpy(out[pos .. pos + 4], "'\\''");
+            pos += 4;
+        } else {
+            out[pos] = c;
+            pos += 1;
+        }
+    }
+    out[pos] = '\'';
+    return out;
+}
+
 pub fn readFileOptional(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !?[]u8 {
     const cwd = std.Io.Dir.cwd();
     const data = cwd.readFileAlloc(io, path, allocator, .limited(8 * 1024 * 1024)) catch |err| switch (err) {
@@ -167,4 +189,11 @@ test "conflicting integration detection covers legacy markers" {
     try std.testing.expect(containsConflictingIntegration("rtk-pretooluse.sh"));
     try std.testing.expect(containsConflictingIntegration("agent-rtk-hook"));
     try std.testing.expect(!containsConflictingIntegration("plugin: smll-proxy"));
+}
+
+test "shellEscapeAlloc single-quotes paths for generated hook commands" {
+    const allocator = std.testing.allocator;
+    const escaped = try shellEscapeAlloc(allocator, "/tmp/smll's build/smll");
+    defer allocator.free(escaped);
+    try std.testing.expectEqualStrings("'/tmp/smll'\\''s build/smll'", escaped);
 }

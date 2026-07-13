@@ -312,6 +312,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const smll_version = packageVersion(b);
+    const test_filter = b.option([]const u8, "test-filter", "Run only tests whose names contain this text");
+    const test_filters: []const []const u8 = if (test_filter) |filter| &.{filter} else &.{};
 
     const app_opts = b.addOptions();
     app_opts.addOption([]const u8, "smll_version", smll_version);
@@ -520,19 +522,19 @@ pub fn build(b: *std.Build) void {
     // Per-module tests.
     const test_step = b.step("test", "Run unit tests");
 
-    const exe_tests = b.addTest(.{ .root_module = exe_mod });
+    const exe_tests = b.addTest(.{ .root_module = exe_mod, .filters = test_filters });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     test_step.dependOn(&run_exe_tests.step);
 
     for ([_]*std.Build.Module{ util_mod, stats_mod, history_mod, filter_catalog_mod, setup_mod, setup_hooks_mod, setup_io_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
-        const t = b.addTest(.{ .root_module = mod });
+        const t = b.addTest(.{ .root_module = mod, .filters = test_filters });
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);
     }
 
     for (modules) |m| {
         const mod = registry.get(m.name) orelse unreachable;
-        const t = b.addTest(.{ .root_module = mod });
+        const t = b.addTest(.{ .root_module = mod, .filters = test_filters });
         const run_t = b.addRunArtifact(t);
         test_step.dependOn(&run_t.step);
     }
@@ -574,7 +576,7 @@ pub fn build(b: *std.Build) void {
         });
     }
 
-    const integration_tests = b.addTest(.{ .root_module = integration_mod });
+    const integration_tests = b.addTest(.{ .root_module = integration_mod, .filters = test_filters });
     const run_integration_tests = b.addRunArtifact(integration_tests);
     run_integration_tests.step.dependOn(&exe.step);
     test_step.dependOn(&run_integration_tests.step);

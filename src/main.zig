@@ -22,6 +22,7 @@ const go_test = @import("go_test");
 const npm_install = @import("npm_install");
 const signals = @import("signals");
 const setup = @import("setup.zig");
+const hook_eval = @import("hook_eval.zig");
 
 // The pipe-mode filter chain lives in pipe_filters.zig so both stdin pipe mode
 // (here) and wrapper.zig's `sh -c` re-dispatch share one definition.
@@ -217,6 +218,13 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     const home = environ.get("HOME") orelse "";
+
+    if (try hook_eval.maybeRun(arena_allocator, io, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
+        try stdout_writer.interface.flush();
+        try stderr_writer.interface.flush();
+        exitIfNonzero(code);
+        return;
+    }
 
     if (try maybeRunRewrite(args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
