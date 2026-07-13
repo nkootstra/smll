@@ -110,8 +110,12 @@ What setup does:
 
 Safety behavior:
 - Existing files are backed up as `*.bak.smll` before changes.
-- Setup only writes smll-owned hook entries/scripts and leaves unrelated config
-  fields intact.
+- Setup validates the installed hook evaluator before changing configuration,
+  uses atomic writes, and rolls back multi-file updates on failure.
+- Ownership digests are stored privately under `~/.smll/setup/`. Unsetup only
+  removes the exact hook entries and generated files smll recorded; modified
+  artifacts are left in place with a warning.
+- Unrelated configuration fields and hook handlers remain intact.
 
 ## Local analytics
 

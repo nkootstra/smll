@@ -14,6 +14,11 @@ pub fn maybeRun(
     stderr: *std.Io.Writer,
 ) !?u8 {
     if (args.len < 2 or !std.mem.eql(u8, args[1], "--hook-eval")) return null;
+    if (args.len == 4 and std.mem.eql(u8, args[3], "--self-check")) {
+        const adapter = std.meta.stringToEnum(Adapter, args[2]) orelse return 1;
+        _ = adapter;
+        return if (isEligible("git status")) 0 else 1;
+    }
     if (args.len != 3) return 0;
     const adapter = std.meta.stringToEnum(Adapter, args[2]) orelse return 0;
 
