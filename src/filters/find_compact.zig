@@ -124,6 +124,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
                 try writer.writeAll(basename(entry.path));
                 if (entry.is_dir) try writer.writeByte('/');
             }
+            try writeOmission(writer, count, 3);
             try writer.writeByte(')');
         } else {
             for (entries.items[i..j]) |e| {
@@ -210,6 +211,7 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
                 // examples only need to carry the basename.
                 try writer.writeAll(basename(entry.path));
             }
+            try writeOmission(writer, count, 3);
             try writer.writeByte(')');
         } else {
             for (entries.items[i..j]) |entry| {
@@ -221,6 +223,13 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
         i = j;
     }
     if (!first) try writer.writeByte('\n');
+}
+
+fn writeOmission(writer: *Writer, total: usize, shown: usize) !void {
+    if (total <= shown) return;
+    try writer.writeAll("; ");
+    try ansi.writeDecimal(writer, total - shown);
+    try writer.writeAll(" omitted; --raw for all");
 }
 
 fn writeParentLabel(writer: *Writer, parent: []const u8) !void {
@@ -360,7 +369,7 @@ test "apply: ≥3 entries in same parent collapse to count" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
     try apply(std.testing.allocator, input, &.{}, &out.writer);
-    try std.testing.expectEqualStrings("./ (4 entries: a.txt, b.txt, c.txt)\n", out.written());
+    try std.testing.expectEqualStrings("./ (4 entries: a.txt, b.txt, c.txt; 1 omitted; --raw for all)\n", out.written());
 }
 
 test "apply: small fixture reduces output and keeps paths" {
@@ -386,9 +395,9 @@ test "applyPlainEntries: groups parent directories and preserves small groups" {
     try applyPlainEntries(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
 
-    try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 entries: analyzer.zig, cache.zig, config.zig)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "src/filters/ (12 entries: build_output.zig, cargo_test.zig, find_compact.zig)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (12 entries: build_output.txt, cargo_test_failing.txt, find_plain_many.txt)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 entries: analyzer.zig, cache.zig, config.zig; 9 omitted; --raw for all)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "src/filters/ (12 entries: build_output.zig, cargo_test.zig, find_compact.zig; 9 omitted; --raw for all)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "tests/fixtures/ (12 entries: build_output.txt, cargo_test_failing.txt, find_plain_many.txt; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "README.md\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "build.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "scripts/audit-fixtures.py\n") != null);
@@ -403,6 +412,7 @@ test "applyPlainFiles: -type f uses files noun" {
     try applyPlainFiles(std.testing.allocator, fixture, &.{}, &out.writer);
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "src/core/ (12 files:") != null);
+    try std.testing.expect(std.mem.find(u8, got, "; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "entries:") == null);
 }
 

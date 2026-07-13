@@ -357,6 +357,7 @@ fn writeCollapsedDirLine(
     try writer.writeAll(if (directChildrenAllFiles(entries, idx, end)) "files" else "entries");
     try writer.writeAll(": ");
     try writeDirectExamples(writer, entries, idx, end);
+    try writeOmission(writer, direct_count, 3);
     try writer.writeByte(')');
     first_out.* = false;
 }
@@ -384,7 +385,7 @@ fn writeCollapsedFilesLine(
         try writer.writeAll(entries[i].name);
         written += 1;
     }
-    if (file_count > 3) try writer.writeAll(", ...");
+    try writeOmission(writer, file_count, 3);
     try writer.writeByte(')');
     first_out.* = false;
 }
@@ -404,18 +405,22 @@ fn directChildrenAllFiles(entries: []const TreeEntry, idx: usize, end: usize) bo
 fn writeDirectExamples(writer: *Writer, entries: []const TreeEntry, idx: usize, end: usize) !void {
     const child_depth = entries[idx].depth + 1;
     var written: usize = 0;
-    var total: usize = 0;
     var i = idx + 1;
     while (i < end) : (i += 1) {
         if (entries[i].depth != child_depth) continue;
-        total += 1;
         if (written >= 3) continue;
         if (written > 0) try writer.writeAll(", ");
         try writer.writeAll(entries[i].name);
         if (entries[i].is_dir and !std.mem.endsWith(u8, entries[i].name, "/")) try writer.writeByte('/');
         written += 1;
     }
-    if (total > 3) try writer.writeAll(", ...");
+}
+
+fn writeOmission(writer: *Writer, total: usize, shown: usize) !void {
+    if (total <= shown) return;
+    try writer.writeAll("; ");
+    try ansi.writeDecimal(writer, total - shown);
+    try writer.writeAll(" omitted; --raw for all");
 }
 
 fn writeIndent(writer: *Writer, depth: usize) !void {
@@ -587,11 +592,11 @@ test "applyCompact: large tree keeps structure and collapsed counts" {
     try std.testing.expect(std.mem.find(u8, got, ".\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "  src/\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "  tests/\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig, ...)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    core/ (5 files: analyzer.zig, main.zig, parser.zig, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig; 3 omitted; --raw for all)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    core/ (5 files: analyzer.zig, main.zig, parser.zig; 2 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "    main.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "    wrapper.zig\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    fixtures/ (5 files: find_plain_many.txt, git_diff_simple.txt, git_log_stat.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    fixtures/ (5 files: find_plain_many.txt, git_diff_simple.txt, git_log_stat.txt; 2 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "7 directories, 24 files") != null);
     try std.testing.expect(got.len < fixture_tree_large.len);
 }
@@ -604,11 +609,11 @@ test "applyCompact: depth-1 pure file group collapses to one line" {
     const got = out.written();
     // `scripts/` is a flat depth-1 directory of 4 files; it now collapses onto
     // a single line instead of `scripts/\n  (4 files: …)`.
-    try std.testing.expect(std.mem.find(u8, got, "  scripts/ (4 files: audit.sh, bench.sh, release.sh, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "  scripts/ (4 files: audit.sh, bench.sh, release.sh; 1 omitted; --raw for all)") != null);
     // Mixed top-level dirs keep their per-subdirectory breakdowns: `src/`
     // stays a bare line and its `filters/`/`core/` counts survive.
     try std.testing.expect(std.mem.find(u8, got, "  src/\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig; 3 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "    wrapper.zig\n") != null);
 }
 
@@ -621,12 +626,12 @@ test "applyCompact: ASCII tree keeps structure and collapsed counts" {
 
     try std.testing.expect(std.mem.find(u8, got, ".\n") != null);
     try std.testing.expect(std.mem.find(u8, got, "  .git/\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    hooks/ (14 files: applypatch-msg.sample, commit-msg.sample, fsmonitor-watchman.sample, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    hooks/ (14 files: applypatch-msg.sample, commit-msg.sample, fsmonitor-watchman.sample; 11 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "  docs/\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    guides/ (12 files: file_003.txt, file_009.txt, file_015.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    guides/ (12 files: file_003.txt, file_009.txt, file_015.txt; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "  src/\n") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    core/ (12 files: file_000.txt, file_001.txt, file_003.txt, ...)") != null);
-    try std.testing.expect(std.mem.find(u8, got, "    ui/ (12 files: file_000.txt, file_001.txt, file_002.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    core/ (12 files: file_000.txt, file_001.txt, file_003.txt; 9 omitted; --raw for all)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "    ui/ (12 files: file_000.txt, file_001.txt, file_002.txt; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "167 directories, 166 files") != null);
     try std.testing.expect(got.len <= (fixture_tree_ascii_large.len * 45) / 100);
 }
@@ -640,7 +645,7 @@ test "applyCompact: preserves small tree facts" {
     try std.testing.expect(std.mem.find(u8, got, "src/") != null);
     // `filters/` is a depth-1 pure file group, so it now collapses onto its own
     // line instead of `filters/\n  (19 files: …)`.
-    try std.testing.expect(std.mem.find(u8, got, "  filters/ (19 files: detect.zig, git_add.zig, git_blame.zig, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, got, "  filters/ (19 files: detect.zig, git_add.zig, git_blame.zig; 16 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, got, "main.zig") != null);
     try std.testing.expect(std.mem.find(u8, got, "2 directories, 22 files") != null);
     try std.testing.expect(got.len < fixture_tree_src.len);
