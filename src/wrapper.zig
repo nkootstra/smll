@@ -49,7 +49,9 @@ const pipe_filters = @import("pipe_filters.zig");
 
 const CountingWriter = wrapper_io.CountingWriter;
 const applyFilter = wrapper_io.applyFilter;
+const applyFilterOwned = wrapper_io.applyFilterOwned;
 const drainChildOutput = wrapper_io.drainChildOutput;
+const exitCode = wrapper_io.exitCode;
 const passthrough = wrapper_io.passthrough;
 const envFlagOn = wrapper_util.envFlagOn;
 const teeEnabled = wrapper_util.teeEnabled;
@@ -67,8 +69,6 @@ const AcliFilterFn = *const fn (std.mem.Allocator, []const u8, []const u8, *std.
 // a larger cap because stdout is the response body and may be sizeable JSON.
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CURL_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
-const MAX_OUTPUT_LABEL = "16M+\n";
-const MAX_CURL_OUTPUT_LABEL = "64M+\n";
 
 pub const Result = struct {
     exit_code: u8,
@@ -224,18 +224,21 @@ pub fn run(
     const invocation = wrapper_util.classifyInvocation(argv);
     if (shouldRunStreamFilter(environ, invocation)) {
         var counted_stdout = CountingWriter.init(writer);
+        var counted_stderr = CountingWriter.init(stderr_writer);
         const stream_result = try wrapper_stream.runStreamFilter(
             allocator,
             io,
             argv,
             invocation.logical_argv,
             &counted_stdout.writer,
+            &counted_stderr.writer,
         );
         try counted_stdout.writer.flush();
+        try counted_stderr.writer.flush();
         return .{
             .exit_code = stream_result.exit_code,
             .input_bytes = stream_result.input_bytes,
-            .output_bytes = counted_stdout.count,
+            .output_bytes = counted_stdout.count + counted_stderr.count,
             .filter_name = stream_result.filter_name,
             .record_stats = true,
         };
@@ -250,7 +253,7 @@ pub fn run(
     last_filter_name = "passthrough";
     last_raw_stdout = &.{};
     last_raw_stderr = &.{};
-    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, &counted_stderr.writer);
+    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, writer, &counted_stderr.writer);
     const output = capture.written();
 
     var final_stdout = std.Io.Writer.Allocating.init(allocator);
@@ -307,10 +310,27 @@ pub fn run(
 /// the caller's environment through unchanged. Deliberately bypasses capture,
 /// filtering, tee recovery, and statistics.
 pub fn runRaw(
+    allocator: std.mem.Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
     argv: []const []const u8,
+    stdout_writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !u8 {
+    if (!outputsAreTty()) {
+        var child = try std.process.spawn(io, .{
+            .argv = argv,
+            .stdin = .inherit,
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .environ_map = environ,
+        });
+        defer child.kill(io);
+        const proxied = try wrapper_io.proxyChildOutput(allocator, io, &child, stdout_writer, stderr_writer);
+        if (proxied.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+        return exitCode(proxied.term);
+    }
+
     var child = try std.process.spawn(io, .{
         .argv = argv,
         .stdin = .inherit,
@@ -320,10 +340,7 @@ pub fn runRaw(
     });
     defer child.kill(io);
     const term = try child.wait(io);
-    return switch (term) {
-        .exited => |code| code,
-        .signal, .stopped, .unknown => 1,
-    };
+    return exitCode(term);
 }
 
 fn shouldRunStreamFilter(environ: *const std.process.Environ.Map, invocation: wrapper_util.Invocation) bool {
@@ -338,12 +355,20 @@ fn shouldRunStreamFilter(environ: *const std.process.Environ.Map, invocation: wr
 }
 
 fn stdoutIsTty() bool {
+    return fdIsTty(1);
+}
+
+fn outputsAreTty() bool {
+    return fdIsTty(1) and fdIsTty(2);
+}
+
+fn fdIsTty(fd: std.posix.fd_t) bool {
     if (builtin.os.tag == .linux and !builtin.link_libc) {
         var wsz: std.posix.winsize = undefined;
-        const rc = std.os.linux.syscall3(.ioctl, 1, std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
+        const rc = std.os.linux.syscall3(.ioctl, @intCast(fd), std.os.linux.T.IOCGWINSZ, @intFromPtr(&wsz));
         return std.os.linux.errno(rc) == .SUCCESS;
     }
-    const rc = std.posix.system.isatty(1);
+    const rc = std.posix.system.isatty(fd);
     return std.posix.errno(rc - 1) == .SUCCESS;
 }
 
@@ -416,6 +441,7 @@ fn runWrapperInner(
     environ: *const std.process.Environ.Map,
     original_argv: []const []const u8,
     writer: *std.Io.Writer,
+    raw_stdout_writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !u8 {
     // Spawn the child and drain stdout + stderr concurrently. Many tools write
@@ -462,6 +488,26 @@ fn runWrapperInner(
         last_output_inherited = true;
         last_filter_name = "passthrough";
         last_input_bytes = 0;
+        if (!outputsAreTty()) {
+            var child = std.process.spawn(io, .{
+                .argv = original_argv,
+                .stdin = .inherit,
+                .stdout = .pipe,
+                .stderr = .pipe,
+                .environ_map = spawn_env,
+            }) catch |err| return err;
+            defer child.kill(io);
+            const proxied = try wrapper_io.proxyChildOutput(
+                allocator,
+                io,
+                &child,
+                raw_stdout_writer,
+                stderr_writer,
+            );
+            last_input_bytes = proxied.input_bytes;
+            if (proxied.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+            return exitCode(proxied.term);
+        }
         var child = std.process.spawn(io, .{
             .argv = original_argv,
             .stdin = .inherit,
@@ -471,10 +517,7 @@ fn runWrapperInner(
         }) catch |err| return err;
         defer child.kill(io);
         const term = try child.wait(io);
-        return switch (term) {
-            .exited => |c| c,
-            .signal, .stopped, .unknown => 1,
-        };
+        return exitCode(term);
     }
 
     var child = std.process.spawn(io, .{
@@ -490,28 +533,34 @@ fn runWrapperInner(
         MAX_CURL_OUTPUT_BYTES
     else
         MAX_OUTPUT_BYTES;
-    const max_output_label = if (max_output_bytes == MAX_CURL_OUTPUT_BYTES) MAX_CURL_OUTPUT_LABEL else MAX_OUTPUT_LABEL;
-    const captured = drainChildOutput(allocator, io, &child, max_output_bytes) catch |err| switch (err) {
-        error.StreamTooLong => {
-            last_input_bytes = 0;
-            stderr_writer.writeAll(max_output_label) catch {};
-            return 1;
-        },
-        else => return err,
-    };
+    const captured = try drainChildOutput(
+        allocator,
+        io,
+        &child,
+        max_output_bytes,
+        raw_stdout_writer,
+        stderr_writer,
+    );
     const stdout_slice = captured.stdout;
     const stderr_slice = captured.stderr;
 
     // Record raw stream sizes for stats tracking and empty-output detection.
-    last_input_bytes = stdout_slice.len + stderr_slice.len;
+    last_input_bytes = captured.input_bytes;
     last_raw_stdout = stdout_slice;
     last_raw_stderr = stderr_slice;
 
-    const term = try child.wait(io);
-    const exit_code: u8 = switch (term) {
-        .exited => |c| c,
-        .signal, .stopped, .unknown => 1,
-    };
+    const exit_code = exitCode(captured.term);
+    if (captured.overflowed) {
+        last_output_inherited = true;
+        last_filter_name = "passthrough";
+        if (captured.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+        return exit_code;
+    }
+    if (captured.incomplete) {
+        passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+        try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+        return exit_code;
+    }
 
     // Argv guard: only dispatch through the formatter switch when the outer
     // command is literally "git".  Any other outer command (e.g. "cargo")
@@ -706,14 +755,11 @@ fn runWrapperInner(
         } else if (lossless) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (is_pr and std.mem.eql(u8, arg2, "view")) {
-            if (!applyFilter(gh_compact.applyPrView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
-            try stderr_writer.writeAll(stderr_slice);
+            if (!applyFilterOwned(gh_compact.applyPrView, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (is_pr and std.mem.eql(u8, arg2, "checks")) {
-            if (!applyFilter(gh_compact.applyPrChecks, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
-            try stderr_writer.writeAll(stderr_slice);
+            if (!applyFilterOwned(gh_compact.applyPrChecks, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (is_run and std.mem.eql(u8, arg2, "view")) {
-            if (!applyFilter(gh_compact.applyRunView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
-            try stderr_writer.writeAll(stderr_slice);
+            if (!applyFilterOwned(gh_compact.applyRunView, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (ghWantsDataOutput(argv)) {
             if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
                 if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
@@ -722,10 +768,11 @@ fn runWrapperInner(
                 try stderr_writer.writeAll(stderr_slice);
             }
         } else {
-            if (!try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
-                if (!applyFilter(tool_compact.applyGh, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
+                try stderr_writer.writeAll(stderr_slice);
+            } else {
+                if (!applyFilterOwned(tool_compact.applyGh, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
-            try stderr_writer.writeAll(stderr_slice);
         }
         return exit_code;
     }
@@ -1083,28 +1130,37 @@ fn runWrapperInner(
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
         if (!lossless and is_docker_compose_logs) {
-            if (!applyFilter(docker_logs.applyCompose, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(docker_logs.applyCompose, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and (is_docker_logs or is_kubectl_logs)) {
-            if (!applyFilter(docker_logs.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(docker_logs.apply, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and is_docker_images and docker_compact.matchesImages(stdout_slice)) {
-            if (!applyFilter(docker_compact.applyImages, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(docker_compact.applyImages, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and is_js_build and build_output.matches(stdout_slice)) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(build_output.apply, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and is_js_build and build_output.matches(stderr_slice)) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(build_output.apply, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and is_js_install and npm_install.matches(stdout_slice)) {
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(npm_install.apply, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and is_js_install and npm_install.matches(stderr_slice)) {
             // Several managers write progress + warnings to stderr (npm classic, yarn,
             // pnpm). Dispatch off stderr when stdout doesn't match but stderr does.
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(npm_install.apply, .filter, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             return exit_code;
         } else if (!lossless and (is_docker_cmd or is_docker_compose_v1) and docker_compact.matches(stdout_slice)) {
-            if (!applyFilter(docker_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(docker_compact.apply, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
-            if (!applyFilter(kubectl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(kubectl_compact.apply, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else if (!lossless and columnar.matches(stdout_slice)) {
-            if (!applyFilter(columnar.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            if (!applyFilterOwned(columnar.apply, .caller, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
+            return exit_code;
         } else {
             // No bespoke filter matched within the columnar block.
             // Known-text command class (docker/kubectl/etc.) — use the lower gate.

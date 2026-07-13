@@ -244,7 +244,14 @@ pub fn main(init: std.process.Init.Minimal) !void {
             std.process.exit(2);
         }
 
-        const code = try wrapper.runRaw(io, environ, args[child_start..]);
+        const code = try wrapper.runRaw(
+            arena_allocator,
+            io,
+            environ,
+            args[child_start..],
+            &stdout_writer.interface,
+            &stderr_writer.interface,
+        );
         try stdout_writer.interface.flush();
         try stderr_writer.interface.flush();
         exitIfNonzero(code);
