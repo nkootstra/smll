@@ -143,6 +143,17 @@ fn ghWantsDataOutput(argv: []const []const u8) bool {
     return false;
 }
 
+fn hasPackagePrelude(input: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |raw| {
+        const line = std.mem.trim(u8, raw, " \t\r");
+        inline for (.{ "Installed ", "Resolved ", "Prepared ", "Downloaded " }) |prefix| {
+            if (std.mem.startsWith(u8, line, prefix) and std.mem.indexOf(u8, line[prefix.len..], " package") != null) return true;
+        }
+    }
+    return false;
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -151,12 +162,14 @@ pub fn run(
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !Result {
-    if (shouldRunStreamFilter(environ, argv)) {
+    const invocation = wrapper_util.classifyInvocation(argv);
+    if (shouldRunStreamFilter(environ, invocation)) {
         var counted_stdout = CountingWriter.init(writer);
         const stream_result = try wrapper_stream.runStreamFilter(
             allocator,
             io,
             argv,
+            invocation.logical_argv,
             &counted_stdout.writer,
         );
         try counted_stdout.writer.flush();
@@ -220,8 +233,10 @@ pub fn run(
     };
 }
 
-fn shouldRunStreamFilter(environ: *const std.process.Environ.Map, argv: []const []const u8) bool {
+fn shouldRunStreamFilter(environ: *const std.process.Environ.Map, invocation: wrapper_util.Invocation) bool {
+    const argv = invocation.logical_argv;
     if (argv.len == 0) return false;
+    if (invocation.passthrough_reason != null) return false;
     if (envFlagOn(environ, "SMLL_LOSSLESS")) return false;
     if (!envFlagOn(environ, "SMLL_STREAM")) return false;
     if (stdoutIsTty()) return false;
@@ -303,7 +318,7 @@ fn runWrapperInner(
     allocator: std.mem.Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
-    argv: []const []const u8,
+    original_argv: []const []const u8,
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !u8 {
@@ -315,6 +330,8 @@ fn runWrapperInner(
     // shape ("Apr 22") regardless of the user's system locale. Without this,
     // non-English locales produce different date formats that shift the field
     // count and cause extractName() to return null for every line.
+    const invocation = wrapper_util.classifyInvocation(original_argv);
+    const argv = invocation.logical_argv;
     const outer_cmd = argv[0];
     const cmd_basename = if (std.mem.findScalarLast(u8, outer_cmd, '/')) |idx|
         outer_cmd[idx + 1 ..]
@@ -342,13 +359,13 @@ fn runWrapperInner(
     // curl where stdout may be an API body, archive, or install script.
     const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
     const is_raw_curl = std.mem.eql(u8, cmd_basename, "curl") and !curl_compact.hasVerboseFlag(argv);
-    const is_streaming = lossless or isStreamingCommand(cmd_basename, argv) or is_raw_curl;
+    const is_streaming = lossless or invocation.passthrough_reason != null or isStreamingCommand(cmd_basename, argv) or is_raw_curl;
     if (is_streaming) {
         last_output_inherited = true;
         last_filter_name = "passthrough";
         last_input_bytes = 0;
         var child = std.process.spawn(io, .{
-            .argv = argv,
+            .argv = original_argv,
             .stdin = .inherit,
             .stdout = .inherit,
             .stderr = .inherit,
@@ -363,7 +380,7 @@ fn runWrapperInner(
     }
 
     var child = std.process.spawn(io, .{
-        .argv = argv,
+        .argv = original_argv,
         .stdin = .inherit,
         .stdout = .pipe,
         .stderr = .pipe,
@@ -408,6 +425,19 @@ fn runWrapperInner(
     const arg1 = if (has_arg1) argv[1] else "";
     const arg2 = if (argv.len >= 3) argv[2] else "";
     const arg3 = if (argv.len >= 4) argv[3] else "";
+
+    // Transparent package runners can emit their own setup prelude before the
+    // inner tool starts. In that specific shape, preserve the established
+    // package error filter instead of handing runner diagnostics to the inner
+    // pytest/ruff/etc. parser. Ordinary inner failures have no package prelude
+    // and continue through their dedicated filter.
+    const is_transparent_runner = argv.ptr != original_argv.ptr;
+    if (!lossless and is_transparent_runner and
+        (hasPackagePrelude(stdout_slice) or hasPackagePrelude(stderr_slice)))
+    {
+        if (!applyFilter(tool_compact.applyPackage, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        return exit_code;
+    }
 
     // Path-list wrappers (rg --files, find): path-per-line output, compresses
     // via dirname RLE. `find -ls` goes through find_compact instead
