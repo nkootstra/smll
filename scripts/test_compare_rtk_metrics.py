@@ -89,6 +89,26 @@ class CompareRtkMetricTests(unittest.TestCase):
         self.assertEqual(stats["smll_stats"]["role"], "native_estimate_diagnostic")
         self.assertEqual(stats["rtk_gain"]["role"], "native_estimate_diagnostic")
 
+    def test_smll_native_estimate_excludes_declared_omissions(self) -> None:
+        cases = [
+            {
+                "name": "declared",
+                "raw": {"bytes": 100, "stderr_bytes": 0, "tokens": 25},
+                "smll": {"bytes": 20, "stderr_bytes": 0, "tokens": 5, "declared_omission": True},
+                "rtk": {"bytes": 20, "tokens": 5},
+            },
+            {
+                "name": "formatted",
+                "raw": {"bytes": 100, "stderr_bytes": 0, "tokens": 25},
+                "smll": {"bytes": 40, "stderr_bytes": 0, "tokens": 10, "declared_omission": False},
+                "rtk": {"bytes": 40, "tokens": 10},
+            },
+        ]
+        stats = compare.build_stats_models(cases, raw_tokens=50, smll_tokens=20, rtk_tokens=20)
+        self.assertEqual(stats["smll_stats"]["omitted_bytes"], 80)
+        self.assertEqual(stats["smll_stats"]["saved_bytes"], 60)
+        self.assertEqual(stats["smll_stats"]["estimated_tokens_saved"], 15)
+
 
 if __name__ == "__main__":
     unittest.main()

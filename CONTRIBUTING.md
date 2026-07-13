@@ -75,6 +75,7 @@ zig build test         # full test suite (~770 tests)
 zig build release      # ReleaseSmall + strip, output at zig-out/release/smll
 scripts/audit-fixtures.py           # fixture references + generated drift
 python3 scripts/test_compare_rtk_metrics.py  # benchmark metric contract
+python3 scripts/test_bench_hardening.py      # median/p95 regression math
 scripts/smoke-supported-commands.py  # isolated wrapper dispatch smoke
 ```
 
@@ -86,6 +87,7 @@ remain green.
 
 ```sh
 scripts/measure.sh           # latency + compression ratio per fixture
+scripts/bench-hardening.py --baseline-bin /path/to/pre-change/smll  # warm startup, hooks, pipe filter, concurrent state writes
 scripts/generate_large_fixtures.sh   # regenerate large fixtures
 scripts/audit-fixtures.py            # verify committed fixtures stay coherent
 scripts/compare-rtk-container.sh     # Dockerized default agent-profile comparison vs rtk
@@ -96,6 +98,11 @@ scripts/compare-rtk-container.sh --profile all     # every committed case
 
 The large fixtures are committed and reproducible; regenerate them only
 when adding a new one.
+
+`bench-hardening.py` interleaves the candidate and pre-change binaries on the
+same host, reports median and p95 latency, and fails if either regresses by
+more than 10%. Use release binaries for both sides; do not compare committed
+absolute timings across machines.
 
 The rtk comparison is intentionally container-first so contributors do not need
 rtk, Rust, Zig, or tokenizer packages installed locally. It pins rtk to

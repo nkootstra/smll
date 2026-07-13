@@ -94,27 +94,28 @@ smll --unsetup opencode --dry-run
 ```
 
 What setup does:
-- `claude`: writes `~/.claude/hooks/smll-pretooluse.sh` and adds a `PreToolUse`
-  hook in `~/.claude/settings.json` that blocks noisy Bash commands unless they
-  are prefixed with `smll`.
-- `opencode`: writes `~/.config/opencode/plugins/smll-proxy.js` and enables it
-  in `~/.config/opencode/opencode.json`; the plugin rewrites matching Bash
-  commands to `smll <command>`.
-- `cursor`: writes `~/.cursor/hooks.json` with a `preToolUse` hook and
-  `~/.cursor/hooks/smll-pretooluse.sh`; blocks noisy Shell commands unless
-  prefixed with `smll`.
-- `codex`: writes `~/.codex/hooks.json` with a `PreToolUse` hook and
-  `~/.codex/hooks/smll-pretooluse.sh`; rewrites noisy Bash commands to
-  `smll <command>`. Codex may ask you to review and trust the hook via
-  `/hooks` before it runs.
+- `claude`: adds a `PreToolUse` entry to `~/.claude/settings.json`. Eligible
+  simple Bash commands are blocked with instructions to rerun through smll.
+- `opencode`: installs the `smll-proxy` package under
+  `~/.config/opencode/plugins/` and enables it in `opencode.json`. Eligible
+  simple shell commands are rewritten with the absolute installed smll path.
+- `cursor`: adds a `preToolUse` entry to `~/.cursor/hooks.json`. Eligible
+  simple Shell commands receive Cursor's native deny response and rerun guidance.
+- `codex`: adds a `PreToolUse` entry to `~/.codex/hooks.json`. Eligible simple
+  Bash commands are denied with rerun guidance; smll never approves or rewrites
+  Codex tool input. Codex may ask you to trust the hook via `/hooks`.
+
+Every hook invokes smll's internal evaluator by its absolute, shell-escaped
+path. Compound, unsupported, already-wrapped, or ambiguous shell commands emit
+no decision and remain subject to the agent's normal permission flow.
 
 Safety behavior:
 - Existing files are backed up as `*.bak.smll` before changes.
 - Setup validates the installed hook evaluator before changing configuration,
   uses atomic writes, and rolls back multi-file updates on failure.
 - Ownership digests are stored privately under `~/.smll/setup/`. Unsetup only
-  removes the exact hook entries and generated files smll recorded; modified
-  artifacts are left in place with a warning.
+  removes exact hook entries and OpenCode package files smll recorded; modified
+  or unknown legacy artifacts are left in place with a warning.
 - Unrelated configuration fields and hook handlers remain intact.
 
 ## Local analytics
@@ -131,10 +132,10 @@ smll stats
 
   --------------------------------------
   Commands:      760
-  Input:         ~36.4M tokens
-  Output:        ~27.5M tokens
-  Saved:         ~8.8M tokens (24%)
-  Raw bytes saved: 35.4M bytes
+  Raw:           ~36.4M tokens
+  Displayed:     ~27.5M tokens
+  Format saved:  ~8.8M tokens (24%)
+  Formatting bytes saved: 35.4M bytes
 ```
 
 Useful views:
@@ -144,7 +145,7 @@ smll --stats --verbose             # exact byte counts + bytes / 4 formula
 smll --stats --since 7d            # also supports 24h, 30d, etc.
 smll --stats --project             # current nearest .git project only
 smll --stats --by-command          # command labels sorted by tokens saved
-smll --stats --reset --all         # remove stats, history, locks, and tee files
+smll --stats --reset --all         # remove stats, history, subordinate locks, and tee files
 smll --discover --since 7d         # low-savings, passthrough, top raw output
 smll --discover --project
 smll --filters                     # supported filters and auto-wrap commands
@@ -156,14 +157,21 @@ Reset counters:
 smll --stats --reset
 ```
 
-Stats are stored locally in `~/.smll/stats.json` for backward-compatible
-cumulative totals and `~/.smll/history.jsonl` for append-only per-command
-history. The history stores command labels like `git status`, not full argv, so
-secrets in flags are not captured by default. No network calls are made.
+Stats use a versioned schema in `~/.smll/stats.json`; unversioned v1 totals are
+migrated on the next write. `~/.smll/history.jsonl` stores append-only,
+versioned per-command records. Both separate raw bytes, displayed bytes,
+declared omissions, wrapper-generated diagnostics, and formatting savings.
+Legacy reductions remain unclassified instead of being relabeled as verified
+formatting savings.
+When an output declares an omission with a `--raw` recovery path, smll
+conservatively attributes the whole reduction to omission. Tee breadcrumbs,
+no-output hints, and incomplete captures never count as formatting savings.
+The history stores command labels like `git status`, not full argv, so secrets
+in flags are not captured by default. No network calls are made.
 The `~/.smll` directory is private to the current user (`0700` on POSIX), and
 stats, history, lock, and failure-recovery files use `0600` permissions.
-Wrapper mode records raw stdout+stderr input bytes and compact stdout+stderr
-output bytes. Best-effort — if the files can't be read or written, smll
+Wrapper mode records raw stdout+stderr and the complete agent-visible stream.
+Best-effort — if the files can't be read or written, smll
 silently skips stats and the wrapped command runs normally. Pipe mode (stdin)
 does not record stats. Set `DO_NOT_TRACK=1` to skip local stats/history writes.
 

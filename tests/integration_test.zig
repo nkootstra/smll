@@ -1271,9 +1271,13 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
 
     const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(1024));
     defer allocator.free(stats_json);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"input_bytes\":15") != null);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"output_bytes\":15") != null);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"noisy\":{\"n\":1,\"in\":15,\"out\":15}") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"v\":2") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"raw_bytes\":15") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"displayed_bytes\":15") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"omitted_bytes\":0") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"diagnostic_bytes\":0") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"formatting_saved_bytes\":0") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"noisy\":{\"n\":1,\"raw\":15,\"displayed\":15,\"omitted\":0,\"diagnostics\":0,\"saved\":0}") != null);
 
     const history = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(2048));
     defer allocator.free(history);
@@ -1281,8 +1285,99 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     try std.testing.expect(std.mem.find(u8, history, "\"filter\":\"noisy\"") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"exit\":0") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"raw\":15") != null);
-    try std.testing.expect(std.mem.find(u8, history, "\"compact\":15") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"displayed\":15") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"omitted\":0") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"diagnostics\":0") != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"saved\":0") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"duration_ms\":") != null);
+}
+
+test "wrapper: tee breadcrumb is diagnostic rather than formatting savings" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "failer",
+        \\#!/bin/sh
+        \\printf 'failure\n'
+        \\exit 1
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "1");
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "failer" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{ .stdout = result.stdout, .stderr = result.stderr, .term = result.term };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, wrapped.term);
+    try std.testing.expect(std.mem.startsWith(u8, wrapped.stdout, "failure\n"));
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "full output saved") != null);
+    const breadcrumb_bytes = wrapped.stdout.len - "failure\n".len;
+
+    const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(stats_json);
+    const displayed_field = try std.fmt.allocPrint(allocator, "\"displayed_bytes\":{d}", .{wrapped.stdout.len});
+    defer allocator.free(displayed_field);
+    const diagnostics_field = try std.fmt.allocPrint(allocator, "\"diagnostic_bytes\":{d}", .{breadcrumb_bytes});
+    defer allocator.free(diagnostics_field);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"raw_bytes\":8") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, displayed_field) != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, diagnostics_field) != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"formatting_saved_bytes\":0") != null);
+}
+
+test "wrapper: declared find omissions are not formatting savings" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    const fixture = "./a\n./b\n./c\n./zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n";
+    const script = try std.fmt.allocPrint(allocator, "#!/bin/sh\nprintf '%s' '{s}'\n", .{fixture});
+    defer allocator.free(script);
+    try writeFakeScript(tmp.dir, "find", script);
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_path,
+        &.{ "find", "." },
+        &.{.{ "HOME", home_path }},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "1 omitted; --raw for all") != null);
+    const omitted = fixture.len - result.stdout.len;
+    try std.testing.expect(omitted > 0);
+    const omitted_field = try std.fmt.allocPrint(allocator, "\"omitted_bytes\":{d}", .{omitted});
+    defer allocator.free(omitted_field);
+    const history_omitted = try std.fmt.allocPrint(allocator, "\"omitted\":{d}", .{omitted});
+    defer allocator.free(history_omitted);
+    const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, omitted_field) != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"formatting_saved_bytes\":0") != null);
+    const history = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(4096));
+    defer allocator.free(history);
+    try std.testing.expect(std.mem.find(u8, history, history_omitted) != null);
+    try std.testing.expect(std.mem.find(u8, history, "\"saved\":0") != null);
 }
 
 test "wrapper: concurrent stats writers preserve every update" {
@@ -3465,6 +3560,69 @@ test "wrapper: plain ls column output normalizes to one name per line" {
     try std.testing.expect(std.mem.find(u8, result.stdout, "wrapper.zig\n") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "\t") == null);
     try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "metadata and lossless ls preserve the caller locale" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFakeScript(tmp.dir, "ls",
+        \\#!/bin/sh
+        \\printf '%s|%s\n' "$LC_ALL" "$LANG"
+    );
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    const locale = &.{ .{ "LC_ALL", "POSIX" }, .{ "LANG", "POSIX" } };
+
+    var metadata = try runSmllWrapperEnv(allocator, bin_dir, &.{ "ls", "-l" }, locale);
+    defer metadata.deinit(allocator);
+    try std.testing.expectEqualStrings("POSIX|POSIX\n", metadata.stdout);
+
+    var lossless = try runSmllWrapperEnv(
+        allocator,
+        bin_dir,
+        &.{ "ls", "-C" },
+        &.{ .{ "LC_ALL", "POSIX" }, .{ "LANG", "POSIX" }, .{ "SMLL_LOSSLESS", "1" } },
+    );
+    defer lossless.deinit(allocator);
+    try std.testing.expectEqualStrings("POSIX|POSIX\n", lossless.stdout);
+}
+
+test "nonzero pre-commit never emits a synthetic success verdict" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFakeScript(tmp.dir, "pre-commit",
+        \\#!/bin/sh
+        \\printf 'Passed\n'
+        \\exit 7
+    );
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "pre-commit", "run" }, &.{});
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 7 }, result.term);
+    try std.testing.expectEqualStrings("Passed\n", result.stdout);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "all hooks passed") == null);
+}
+
+test "nonzero git output is preserved before success compaction" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeFakeScript(tmp.dir, "git",
+        \\#!/bin/sh
+        \\printf 'Already up to date.\n'
+        \\exit 7
+    );
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "git", "pull" }, &.{});
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 7 }, result.term);
+    try std.testing.expectEqualStrings("Already up to date.\n", result.stdout);
 }
 
 test "wrapper: plain find groups dense parent directories" {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const accounting = @import("accounting.zig");
 const history = @import("history.zig");
 const state_io = @import("state_io.zig");
 const util = @import("util");
@@ -10,24 +11,34 @@ const Writer = std.Io.Writer;
 /// Best-effort: stats failures never block command execution.
 const stats_dir = ".smll";
 const stats_file = ".smll/stats.json";
+const state_lock_file = ".smll/state.lock";
 const stats_lock_file = ".smll/stats.lock";
 const history_lock_file = ".smll/history.lock";
 const tee_dir = ".smll/tee";
 const MAX_TRACKED_CMDS = 32;
 const MAX_JSON_SIZE = 32 * 1024;
+const STATS_SCHEMA_VERSION = 2;
 
 pub const RecordOptions = history.RecordOptions;
+pub const Bytes = accounting.Bytes;
 
 pub const CmdStats = struct {
     n: u64 = 0,
-    in_bytes: u64 = 0,
-    out_bytes: u64 = 0,
+    raw_bytes: u64 = 0,
+    displayed_bytes: u64 = 0,
+    omitted_bytes: u64 = 0,
+    diagnostic_bytes: u64 = 0,
+    formatting_saved_bytes: u64 = 0,
 };
 
 pub const Stats = struct {
+    schema_version: u64 = STATS_SCHEMA_VERSION,
     commands: u64 = 0,
-    input_bytes: u64 = 0,
-    output_bytes: u64 = 0,
+    raw_bytes: u64 = 0,
+    displayed_bytes: u64 = 0,
+    omitted_bytes: u64 = 0,
+    diagnostic_bytes: u64 = 0,
+    formatting_saved_bytes: u64 = 0,
     by_cmd: [MAX_TRACKED_CMDS]CmdEntry = [_]CmdEntry{.{}} ** MAX_TRACKED_CMDS,
     cmd_count: usize = 0,
 };
@@ -53,11 +64,10 @@ pub fn record(
     io: Io,
     home: []const u8,
     argv: []const []const u8,
-    input_bytes: usize,
-    output_bytes: usize,
+    bytes: Bytes,
     options: RecordOptions,
 ) bool {
-    recordInner(allocator, io, home, argv, input_bytes, output_bytes, options) catch return false;
+    recordInner(allocator, io, home, argv, bytes, options) catch return false;
     return true;
 }
 
@@ -66,30 +76,32 @@ fn recordInner(
     io: Io,
     home: []const u8,
     argv: []const []const u8,
-    input_bytes: usize,
-    output_bytes: usize,
+    bytes: Bytes,
     options: RecordOptions,
 ) !void {
     const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
     const dir_path = try joinPath(allocator, home, stats_dir);
     defer allocator.free(dir_path);
-    const lock_path = try joinPath(allocator, home, stats_lock_file);
-    defer allocator.free(lock_path);
+    const state_lock_path = try joinPath(allocator, home, state_lock_file);
+    defer allocator.free(state_lock_path);
 
     try state_io.ensurePrivateDir(io, dir_path);
+    const state_lock = try state_io.openExclusivePrivateLock(io, state_lock_path);
+    defer if (state_lock) |file| file.close(io);
 
     var label_buf: [64]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
 
     {
-        const lock_file = try state_io.openExclusivePrivateLock(io, lock_path);
-        defer if (lock_file) |file| file.close(io);
-
         var s = load(allocator, io, path);
+        s.schema_version = STATS_SCHEMA_VERSION;
         s.commands += 1;
-        s.input_bytes += input_bytes;
-        s.output_bytes += output_bytes;
+        addBytes(&s.raw_bytes, bytes.raw_bytes);
+        addBytes(&s.displayed_bytes, bytes.displayed_bytes);
+        addBytes(&s.omitted_bytes, bytes.omitted_bytes);
+        addBytes(&s.diagnostic_bytes, bytes.diagnostic_bytes);
+        addBytes(&s.formatting_saved_bytes, bytes.formatting_saved_bytes);
 
         var found: ?*CmdEntry = null;
         for (s.by_cmd[0..s.cmd_count]) |*entry| {
@@ -108,13 +120,21 @@ fn recordInner(
         }
         if (found) |entry| {
             entry.stats.n += 1;
-            entry.stats.in_bytes += input_bytes;
-            entry.stats.out_bytes += output_bytes;
+            addBytes(&entry.stats.raw_bytes, bytes.raw_bytes);
+            addBytes(&entry.stats.displayed_bytes, bytes.displayed_bytes);
+            addBytes(&entry.stats.omitted_bytes, bytes.omitted_bytes);
+            addBytes(&entry.stats.diagnostic_bytes, bytes.diagnostic_bytes);
+            addBytes(&entry.stats.formatting_saved_bytes, bytes.formatting_saved_bytes);
         }
 
         try saveJson(allocator, io, dir_path, path, s);
-        try history.append(allocator, io, home, dir_path, label, input_bytes, output_bytes, options);
     }
+
+    try history.appendUnderStateLock(allocator, io, home, dir_path, label, bytes, options);
+}
+
+fn addBytes(total: *u64, value: usize) void {
+    total.* +|= std.math.cast(u64, value) orelse std.math.maxInt(u64);
 }
 
 pub fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
@@ -160,10 +180,21 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
     defer allocator.free(data);
 
     var s: Stats = .{};
-    // Hand-rolled parser for the fixed stats JSON schema.
+    // Hand-rolled parser for the fixed stats JSON schema. Version 1 had no
+    // explicit schema marker and stored only input/output byte totals.
+    s.schema_version = util.findJsonU64Opt(data, "\"v\":") orelse 1;
     s.commands = findJsonU64(data, "\"commands\":");
-    s.input_bytes = findJsonU64(data, "\"input_bytes\":");
-    s.output_bytes = findJsonU64(data, "\"output_bytes\":");
+    if (s.schema_version >= 2) {
+        s.raw_bytes = findJsonU64(data, "\"raw_bytes\":");
+        s.displayed_bytes = findJsonU64(data, "\"displayed_bytes\":");
+        s.omitted_bytes = findJsonU64(data, "\"omitted_bytes\":");
+        s.diagnostic_bytes = findJsonU64(data, "\"diagnostic_bytes\":");
+        s.formatting_saved_bytes = findJsonU64(data, "\"formatting_saved_bytes\":");
+    } else {
+        s.raw_bytes = findJsonU64(data, "\"input_bytes\":");
+        s.displayed_bytes = findJsonU64(data, "\"output_bytes\":");
+        s.formatting_saved_bytes = 0;
+    }
     const by_cmd_marker = "\"by_cmd\":{";
     const by_cmd_start = std.mem.find(u8, data, by_cmd_marker) orelse return s;
     var pos = by_cmd_start + by_cmd_marker.len;
@@ -190,8 +221,17 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
         }
         const obj_slice = data[obj_start..pos];
         entry.stats.n = findJsonU64(obj_slice, "\"n\":");
-        entry.stats.in_bytes = findJsonU64(obj_slice, "\"in\":");
-        entry.stats.out_bytes = findJsonU64(obj_slice, "\"out\":");
+        if (s.schema_version >= 2) {
+            entry.stats.raw_bytes = findJsonU64(obj_slice, "\"raw\":");
+            entry.stats.displayed_bytes = findJsonU64(obj_slice, "\"displayed\":");
+            entry.stats.omitted_bytes = findJsonU64(obj_slice, "\"omitted\":");
+            entry.stats.diagnostic_bytes = findJsonU64(obj_slice, "\"diagnostics\":");
+            entry.stats.formatting_saved_bytes = findJsonU64(obj_slice, "\"saved\":");
+        } else {
+            entry.stats.raw_bytes = findJsonU64(obj_slice, "\"in\":");
+            entry.stats.displayed_bytes = findJsonU64(obj_slice, "\"out\":");
+            entry.stats.formatting_saved_bytes = 0;
+        }
         s.cmd_count += 1;
     }
     return s;
@@ -207,12 +247,20 @@ fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
     const w = &out.writer;
-    try w.writeAll("{\"commands\":");
+    try w.writeAll("{\"v\":");
+    try writeU64(w, STATS_SCHEMA_VERSION);
+    try w.writeAll(",\"commands\":");
     try writeU64(w, s.commands);
-    try w.writeAll(",\"input_bytes\":");
-    try writeU64(w, s.input_bytes);
-    try w.writeAll(",\"output_bytes\":");
-    try writeU64(w, s.output_bytes);
+    try w.writeAll(",\"raw_bytes\":");
+    try writeU64(w, s.raw_bytes);
+    try w.writeAll(",\"displayed_bytes\":");
+    try writeU64(w, s.displayed_bytes);
+    try w.writeAll(",\"omitted_bytes\":");
+    try writeU64(w, s.omitted_bytes);
+    try w.writeAll(",\"diagnostic_bytes\":");
+    try writeU64(w, s.diagnostic_bytes);
+    try w.writeAll(",\"formatting_saved_bytes\":");
+    try writeU64(w, s.formatting_saved_bytes);
     if (s.cmd_count > 0) {
         try w.writeAll(",\"by_cmd\":{");
         for (s.by_cmd[0..s.cmd_count], 0..) |entry, i| {
@@ -220,10 +268,16 @@ fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8
             try history.writeJsonString(w, entry.nameSlice());
             try w.writeAll(":{\"n\":");
             try writeU64(w, entry.stats.n);
-            try w.writeAll(",\"in\":");
-            try writeU64(w, entry.stats.in_bytes);
-            try w.writeAll(",\"out\":");
-            try writeU64(w, entry.stats.out_bytes);
+            try w.writeAll(",\"raw\":");
+            try writeU64(w, entry.stats.raw_bytes);
+            try w.writeAll(",\"displayed\":");
+            try writeU64(w, entry.stats.displayed_bytes);
+            try w.writeAll(",\"omitted\":");
+            try writeU64(w, entry.stats.omitted_bytes);
+            try w.writeAll(",\"diagnostics\":");
+            try writeU64(w, entry.stats.diagnostic_bytes);
+            try w.writeAll(",\"saved\":");
+            try writeU64(w, entry.stats.formatting_saved_bytes);
             try w.writeByte('}');
         }
         try w.writeByte('}');
@@ -323,11 +377,10 @@ fn reset(allocator: Allocator, io: Io, home: []const u8, all: bool) !void {
     const dir_path = try joinPath(allocator, home, stats_dir);
     defer allocator.free(dir_path);
     try state_io.ensurePrivateDir(io, dir_path);
-
-    const lock_path = try joinPath(allocator, home, stats_lock_file);
-    defer allocator.free(lock_path);
-    const lock_file = try state_io.openExclusivePrivateLock(io, lock_path);
-    defer if (lock_file) |file| file.close(io);
+    const state_lock_path = try joinPath(allocator, home, state_lock_file);
+    defer allocator.free(state_lock_path);
+    const state_lock = try state_io.openExclusivePrivateLock(io, state_lock_path);
+    defer if (state_lock) |file| file.close(io);
 
     const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
@@ -335,6 +388,9 @@ fn reset(allocator: Allocator, io: Io, home: []const u8, all: bool) !void {
     try history.reset(allocator, io, home);
     if (!all) return;
 
+    const stats_lock_path = try joinPath(allocator, home, stats_lock_file);
+    defer allocator.free(stats_lock_path);
+    Io.Dir.cwd().deleteFile(io, stats_lock_path) catch {};
     const history_lock_path = try joinPath(allocator, home, history_lock_file);
     defer allocator.free(history_lock_path);
     Io.Dir.cwd().deleteFile(io, history_lock_path) catch {};
@@ -349,7 +405,7 @@ fn displayStats(allocator: Allocator, io: Io, home: []const u8, opts: QueryOptio
     const use_history = opts.since_ms != null or opts.project_only;
     if (use_history) {
         const agg = try history.aggregate(allocator, io, home, opts);
-        try writeAggregateStats(stdout, agg.commands, agg.input_bytes, agg.output_bytes, opts.verbose);
+        try writeAggregateStats(stdout, agg.commands, agg.raw_bytes, agg.displayed_bytes, agg.omitted_bytes, agg.diagnostic_bytes, agg.formatting_saved_bytes, opts.verbose);
         if (opts.by_command) try history.writeByCommand(stdout, agg);
         return;
     }
@@ -360,7 +416,7 @@ fn displayStats(allocator: Allocator, io: Io, home: []const u8, opts: QueryOptio
         return;
     }
 
-    try writeAggregateStats(stdout, s.commands, s.input_bytes, s.output_bytes, opts.verbose);
+    try writeAggregateStats(stdout, s.commands, s.raw_bytes, s.displayed_bytes, s.omitted_bytes, s.diagnostic_bytes, s.formatting_saved_bytes, opts.verbose);
     if (opts.by_command or s.cmd_count > 0 and opts.verbose) try writeStatsByCommand(stdout, s);
 }
 
@@ -372,57 +428,71 @@ fn displayDiscover(allocator: Allocator, io: Io, home: []const u8, opts: QueryOp
     try history.displayDiscover(allocator, io, home, opts, stdout);
 }
 
-fn writeAggregateStats(stdout: *Writer, commands: u64, input_bytes: u64, output_bytes: u64, verbose: bool) !void {
+fn writeAggregateStats(
+    stdout: *Writer,
+    commands: u64,
+    raw_bytes: u64,
+    displayed_bytes: u64,
+    omitted_bytes: u64,
+    diagnostic_bytes: u64,
+    formatting_saved_bytes: u64,
+    verbose: bool,
+) !void {
     if (commands == 0) {
         try stdout.writeAll("no commands recorded yet\n");
         return;
     }
-    const saved = savedBytes(input_bytes, output_bytes);
-    const pct = percentSaved(input_bytes, output_bytes);
-    const input_tokens = input_bytes / 4;
-    const output_tokens = output_bytes / 4;
-    const tokens_saved = saved / 4;
+    const pct = percentSaved(raw_bytes, formatting_saved_bytes);
+    const input_tokens = raw_bytes / 4;
+    const output_tokens = displayed_bytes / 4;
+    const tokens_saved = formatting_saved_bytes / 4;
 
     try stdout.writeAll("\n  smll stats\n");
     try stdout.writeAll("  --------------------------------------\n");
     try stdout.writeAll("  Commands:      ");
     try writeU64(stdout, commands);
     try stdout.writeByte('\n');
-    try stdout.writeAll("  Input:         ~");
+    try stdout.writeAll("  Raw:           ~");
     try writeHumanCount(stdout, input_tokens);
     try stdout.writeAll(" tokens");
     if (verbose) {
         try stdout.writeAll(" (");
-        try writeGroupedU64(stdout, input_bytes);
+        try writeGroupedU64(stdout, raw_bytes);
         try stdout.writeAll(" bytes)");
     }
-    try stdout.writeAll("\n  Output:        ~");
+    try stdout.writeAll("\n  Displayed:     ~");
     try writeHumanCount(stdout, output_tokens);
     try stdout.writeAll(" tokens");
     if (verbose) {
         try stdout.writeAll(" (");
-        try writeGroupedU64(stdout, output_bytes);
+        try writeGroupedU64(stdout, displayed_bytes);
         try stdout.writeAll(" bytes)");
     }
-    try stdout.writeAll("\n  Saved:         ~");
+    try stdout.writeAll("\n  Format saved:  ~");
     try writeHumanCount(stdout, tokens_saved);
     try stdout.writeAll(" tokens (");
     try writeU64(stdout, pct);
     try stdout.writeAll("%)");
     if (verbose) {
         try stdout.writeAll(" (");
-        try writeGroupedU64(stdout, saved);
+        try writeGroupedU64(stdout, formatting_saved_bytes);
         try stdout.writeAll(" bytes)");
     }
-    try stdout.writeAll("\n  Raw bytes saved: ");
-    try writeHumanDecimal(stdout, saved);
+    try stdout.writeAll("\n  Formatting bytes saved: ");
+    try writeHumanDecimal(stdout, formatting_saved_bytes);
     try stdout.writeAll(" bytes\n");
-    if (verbose) try stdout.writeAll("  Token estimate: bytes / 4\n");
+    if (verbose) {
+        try stdout.writeAll("  Declared omitted: ");
+        try writeGroupedU64(stdout, omitted_bytes);
+        try stdout.writeAll(" bytes\n  Wrapper diagnostics: ");
+        try writeGroupedU64(stdout, diagnostic_bytes);
+        try stdout.writeAll(" bytes\n  Token estimate: bytes / 4\n");
+    }
 }
 
 fn writeStatsByCommand(stdout: *Writer, s: Stats) !void {
     if (s.cmd_count > 0) {
-        try stdout.writeAll("\n  Command              Runs     Input    Output   Saved\n");
+        try stdout.writeAll("\n  Command              Runs       Raw  Displayed   Saved\n");
         try stdout.writeAll("  ------------------------------------------------------\n");
 
         var indices: [MAX_TRACKED_CMDS]usize = undefined;
@@ -442,12 +512,8 @@ fn writeStatsByCommand(stdout: *Writer, s: Stats) !void {
         for (indices[0..s.cmd_count]) |idx| {
             const entry = &s.by_cmd[idx];
             if (entry.stats.n == 0) continue;
-            const cmd_saved = if (entry.stats.in_bytes > entry.stats.out_bytes)
-                entry.stats.in_bytes - entry.stats.out_bytes
-            else
-                0;
-            const cmd_pct = if (entry.stats.in_bytes > 0)
-                (cmd_saved * 100) / entry.stats.in_bytes
+            const cmd_pct = if (entry.stats.raw_bytes > 0)
+                (entry.stats.formatting_saved_bytes * 100) / entry.stats.raw_bytes
             else
                 0;
 
@@ -461,9 +527,9 @@ fn writeStatsByCommand(stdout: *Writer, s: Stats) !void {
             try stdout.writeByte(' ');
             try writeU64(stdout, entry.stats.n);
             try stdout.writeByte('\t');
-            try writeHumanBytes(stdout, entry.stats.in_bytes);
+            try writeHumanBytes(stdout, entry.stats.raw_bytes);
             try stdout.writeByte('\t');
-            try writeHumanBytes(stdout, entry.stats.out_bytes);
+            try writeHumanBytes(stdout, entry.stats.displayed_bytes);
             try stdout.writeByte('\t');
             try writeU64(stdout, cmd_pct);
             try stdout.writeAll("%\n");
@@ -472,25 +538,13 @@ fn writeStatsByCommand(stdout: *Writer, s: Stats) !void {
     try stdout.writeByte('\n');
 }
 
-fn savedBytes(input_bytes: u64, output_bytes: u64) u64 {
-    return if (input_bytes > output_bytes) input_bytes - output_bytes else 0;
-}
-
-fn percentSaved(input_bytes: u64, output_bytes: u64) u64 {
-    if (input_bytes == 0) return 0;
-    return (savedBytes(input_bytes, output_bytes) * 100) / input_bytes;
+fn percentSaved(raw_bytes: u64, formatting_saved_bytes: u64) u64 {
+    if (raw_bytes == 0) return 0;
+    return (formatting_saved_bytes * 100) / raw_bytes;
 }
 
 fn cmpBySaved(entries: []const CmdEntry, a: usize, b: usize) bool {
-    const saved_a = if (entries[a].stats.in_bytes > entries[a].stats.out_bytes)
-        entries[a].stats.in_bytes - entries[a].stats.out_bytes
-    else
-        0;
-    const saved_b = if (entries[b].stats.in_bytes > entries[b].stats.out_bytes)
-        entries[b].stats.in_bytes - entries[b].stats.out_bytes
-    else
-        0;
-    return saved_a > saved_b;
+    return entries[a].stats.formatting_saved_bytes > entries[b].stats.formatting_saved_bytes;
 }
 
 fn writeHumanBytes(w: *Writer, bytes: u64) !void {
@@ -626,7 +680,11 @@ test "record appends history without full argv" {
     const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home);
 
-    const recorded = record(allocator, std.testing.io, home, &.{ "git", "status", "--secret-token=abc123" }, 120, 40, .{
+    const recorded = record(allocator, std.testing.io, home, &.{ "git", "status", "--secret-token=abc123" }, .{
+        .raw_bytes = 120,
+        .displayed_bytes = 40,
+        .formatting_saved_bytes = 80,
+    }, .{
         .exit_code = 7,
         .filter_name = "git_status",
         .duration_ms = 12,
@@ -639,7 +697,8 @@ test "record appends history without full argv" {
     try std.testing.expect(std.mem.find(u8, history_data, "\"filter\":\"git_status\"") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "\"exit\":7") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "\"raw\":120") != null);
-    try std.testing.expect(std.mem.find(u8, history_data, "\"compact\":40") != null);
+    try std.testing.expect(std.mem.find(u8, history_data, "\"displayed\":40") != null);
+    try std.testing.expect(std.mem.find(u8, history_data, "\"saved\":80") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "\"duration_ms\":12") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "secret-token") == null);
 }
@@ -651,7 +710,11 @@ test "stats command keys are JSON escaped and round trip" {
     const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home);
 
-    const recorded = record(allocator, std.testing.io, home, &.{ "git", "sta\"tus\nline\x01\xff" }, 12, 4, .{});
+    const recorded = record(allocator, std.testing.io, home, &.{ "git", "sta\"tus\nline\x01\xff" }, .{
+        .raw_bytes = 12,
+        .displayed_bytes = 4,
+        .formatting_saved_bytes = 8,
+    }, .{});
     try std.testing.expect(recorded);
 
     const json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
@@ -674,12 +737,16 @@ test "record creates private state directories and files" {
     const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home);
 
-    try std.testing.expect(record(allocator, std.testing.io, home, &.{"git"}, 12, 4, .{}));
+    try std.testing.expect(record(allocator, std.testing.io, home, &.{"git"}, .{
+        .raw_bytes = 12,
+        .displayed_bytes = 4,
+        .formatting_saved_bytes = 8,
+    }, .{}));
 
     var state_dir = try tmp.dir.openDir(std.testing.io, ".smll", .{ .iterate = true });
     defer state_dir.close(std.testing.io);
     try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try state_dir.stat(std.testing.io)).permissions.toMode() & 0o777);
-    inline for (.{ "stats.json", "stats.lock", "history.jsonl", "history.lock" }) |name| {
+    inline for (.{ "state.lock", "stats.json", "history.jsonl" }) |name| {
         const st = try state_dir.statFile(std.testing.io, name, .{});
         try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), st.permissions.toMode() & 0o777);
     }
@@ -700,7 +767,7 @@ test "reset deletes stats and history" {
     try expectMissing(tmp.dir, ".smll/history.jsonl");
 }
 
-test "reset waits for the stats writer lock" {
+test "reset waits for the state writer lock" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -709,7 +776,7 @@ test "reset waits for the stats writer lock" {
     defer allocator.free(home);
     try tmp.dir.createDirPath(io, ".smll");
 
-    const lock_path = try joinPath(allocator, home, stats_lock_file);
+    const lock_path = try joinPath(allocator, home, state_lock_file);
     defer allocator.free(lock_path);
     const maybe_lock = try state_io.openExclusivePrivateLock(io, lock_path);
     if (maybe_lock == null) return;
@@ -747,7 +814,7 @@ test "reset waits for the stats writer lock" {
     try std.testing.expect(finished.load(.acquire));
 }
 
-test "reset all deletes state and tee while retaining the coordination lock" {
+test "reset all deletes data and subordinate locks while retaining state lock" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -759,11 +826,11 @@ test "reset all deletes state and tee while retaining the coordination lock" {
     }
 
     try reset(allocator, std.testing.io, home, true);
-    inline for (.{ ".smll/stats.json", ".smll/history.jsonl", ".smll/history.lock" }) |name| {
+    inline for (.{ ".smll/stats.json", ".smll/stats.lock", ".smll/history.jsonl", ".smll/history.lock" }) |name| {
         try expectMissing(tmp.dir, name);
     }
-    const stats_lock = try tmp.dir.openFile(std.testing.io, ".smll/stats.lock", .{});
-    stats_lock.close(std.testing.io);
+    const state_lock = try tmp.dir.openFile(std.testing.io, ".smll/state.lock", .{});
+    state_lock.close(std.testing.io);
     tmp.dir.access(std.testing.io, ".smll/tee", .{}) catch |err| {
         try std.testing.expectEqual(error.FileNotFound, err);
         return;
@@ -782,16 +849,64 @@ test "stats reset all is accepted only with reset" {
 test "stats output is token-first with verbose exact bytes" {
     var out = Writer.Allocating.init(std.testing.allocator);
     defer out.deinit();
-    try writeAggregateStats(&out.writer, 760, 145_648_029, 110_199_423, false);
-    try std.testing.expect(std.mem.find(u8, out.written(), "Input:         ~36.4M tokens") != null);
-    try std.testing.expect(std.mem.find(u8, out.written(), "Saved:         ~8.8M tokens") != null);
+    try writeAggregateStats(&out.writer, 760, 145_648_029, 110_199_423, 0, 0, 35_448_606, false);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Raw:           ~36.4M tokens") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Format saved:  ~8.8M tokens") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "33.8 MB") == null);
 
     var verbose = Writer.Allocating.init(std.testing.allocator);
     defer verbose.deinit();
-    try writeAggregateStats(&verbose.writer, 760, 145_648_029, 110_199_423, true);
+    try writeAggregateStats(&verbose.writer, 760, 145_648_029, 110_199_423, 4_000, 800, 35_448_606, true);
     try std.testing.expect(std.mem.find(u8, verbose.written(), "(145,648,029 bytes)") != null);
+    try std.testing.expect(std.mem.find(u8, verbose.written(), "Declared omitted: 4,000 bytes") != null);
+    try std.testing.expect(std.mem.find(u8, verbose.written(), "Wrapper diagnostics: 800 bytes") != null);
     try std.testing.expect(std.mem.find(u8, verbose.written(), "Token estimate: bytes / 4") != null);
+}
+
+test "stats schema v2 separates honest byte categories" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+
+    try std.testing.expect(record(allocator, std.testing.io, home, &.{ "git", "status" }, .{
+        .raw_bytes = 1_000,
+        .displayed_bytes = 460,
+        .omitted_bytes = 300,
+        .diagnostic_bytes = 60,
+        .formatting_saved_bytes = 300,
+    }, .{}));
+
+    const json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(json);
+    try std.testing.expect(std.mem.find(u8, json, "\"v\":2") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"raw_bytes\":1000") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"displayed_bytes\":460") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"omitted_bytes\":300") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"diagnostic_bytes\":60") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"formatting_saved_bytes\":300") != null);
+}
+
+test "stats loader keeps v1 reductions out of verified formatting savings" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = "stats-v1.json",
+        .data = "{\"commands\":2,\"input_bytes\":1000,\"output_bytes\":400,\"by_cmd\":{\"rg\":{\"n\":2,\"in\":1000,\"out\":400}}}\n",
+    });
+    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "stats-v1.json", allocator);
+    defer allocator.free(path);
+
+    const loaded = load(allocator, std.testing.io, path);
+    try std.testing.expectEqual(@as(u64, 1), loaded.schema_version);
+    try std.testing.expectEqual(@as(u64, 1_000), loaded.raw_bytes);
+    try std.testing.expectEqual(@as(u64, 400), loaded.displayed_bytes);
+    try std.testing.expectEqual(@as(u64, 0), loaded.formatting_saved_bytes);
+    try std.testing.expectEqual(@as(u64, 0), loaded.omitted_bytes);
+    try std.testing.expectEqual(@as(u64, 0), loaded.diagnostic_bytes);
+    try std.testing.expectEqual(@as(u64, 0), loaded.by_cmd[0].stats.formatting_saved_bytes);
 }
 
 fn expectMissing(dir: Io.Dir, path: []const u8) !void {
