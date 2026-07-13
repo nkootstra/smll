@@ -140,6 +140,7 @@ smll --stats --verbose             # exact byte counts + bytes / 4 formula
 smll --stats --since 7d            # also supports 24h, 30d, etc.
 smll --stats --project             # current nearest .git project only
 smll --stats --by-command          # command labels sorted by tokens saved
+smll --stats --reset --all         # remove stats, history, locks, and tee files
 smll --discover --since 7d         # low-savings, passthrough, top raw output
 smll --discover --project
 smll --filters                     # supported filters and auto-wrap commands
@@ -155,6 +156,8 @@ Stats are stored locally in `~/.smll/stats.json` for backward-compatible
 cumulative totals and `~/.smll/history.jsonl` for append-only per-command
 history. The history stores command labels like `git status`, not full argv, so
 secrets in flags are not captured by default. No network calls are made.
+The `~/.smll` directory is private to the current user (`0700` on POSIX), and
+stats, history, lock, and failure-recovery files use `0600` permissions.
 Wrapper mode records raw stdout+stderr input bytes and compact stdout+stderr
 output bytes. Best-effort — if the files can't be read or written, smll
 silently skips stats and the wrapped command runs normally. Pipe mode (stdin)
@@ -164,7 +167,7 @@ does not record stats. Set `DO_NOT_TRACK=1` to skip local stats/history writes.
 
 When a wrapped command exits non-zero, the compacted output an agent sees may
 have already collapsed the warnings or stack frames that explain the failure.
-smll persists the *raw* stdout+stderr to `~/.smll/tee/<timestamp>_<cmd>.log`
+smll persists the *raw* stdout+stderr to `~/.smll/tee/<unique-id>_<cmd>.log`
 and appends a one-line breadcrumb so the agent can fetch the full bytes:
 
 ```
@@ -176,7 +179,9 @@ fatal: not a git repository (or any of the parent directories): .git
 Only failed runs are recorded; successful commands write nothing. The newest
 20 logs are kept; older ones are deleted automatically. Best-effort — any I/O
 failure is swallowed so the wrapped command's exit path is never disturbed.
-Disable with `SMLL_TEE=0` or `DO_NOT_TRACK=1`.
+Secret-bearing argv values are redacted in the log header, but the command's
+raw output may itself contain secrets. Disable with `SMLL_TEE=0` or
+`DO_NOT_TRACK=1`.
 
 Opt in to streaming compaction for supported follow-mode logs and watch-mode
 diagnostics with `SMLL_STREAM=1`. Supported paths include `docker logs -f`,

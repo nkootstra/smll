@@ -1,5 +1,6 @@
 const std = @import("std");
 const history = @import("history.zig");
+const state_io = @import("state_io.zig");
 const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -9,6 +10,9 @@ const Writer = std.Io.Writer;
 /// Best-effort: stats failures never block command execution.
 const stats_dir = ".smll";
 const stats_file = ".smll/stats.json";
+const stats_lock_file = ".smll/stats.lock";
+const history_lock_file = ".smll/history.lock";
+const tee_dir = ".smll/tee";
 const MAX_TRACKED_CMDS = 32;
 const MAX_JSON_SIZE = 32 * 1024;
 
@@ -91,37 +95,47 @@ fn recordInner(
     defer allocator.free(path);
     const dir_path = try joinPath(allocator, home, stats_dir);
     defer allocator.free(dir_path);
+    const lock_path = try joinPath(allocator, home, stats_lock_file);
+    defer allocator.free(lock_path);
 
-    var s = load(allocator, io, path);
-    s.commands += 1;
-    s.input_bytes += input_bytes;
-    s.output_bytes += output_bytes;
+    try state_io.ensurePrivateDir(io, dir_path);
 
     var label_buf: [64]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
 
-    var found: ?*CmdEntry = null;
-    for (s.by_cmd[0..s.cmd_count]) |*entry| {
-        if (std.mem.eql(u8, entry.nameSlice(), label)) {
-            found = entry;
-            break;
+    {
+        const lock_file = try state_io.openExclusivePrivateLock(io, lock_path);
+        defer if (lock_file) |file| file.close(io);
+
+        var s = load(allocator, io, path);
+        s.commands += 1;
+        s.input_bytes += input_bytes;
+        s.output_bytes += output_bytes;
+
+        var found: ?*CmdEntry = null;
+        for (s.by_cmd[0..s.cmd_count]) |*entry| {
+            if (std.mem.eql(u8, entry.nameSlice(), label)) {
+                found = entry;
+                break;
+            }
         }
-    }
-    if (found == null and s.cmd_count < MAX_TRACKED_CMDS) {
-        const entry = &s.by_cmd[s.cmd_count];
-        const copy_len = @min(label.len, entry.name.len);
-        @memcpy(entry.name[0..copy_len], label[0..copy_len]);
-        entry.name_len = copy_len;
-        s.cmd_count += 1;
-        found = entry;
-    }
-    if (found) |entry| {
-        entry.stats.n += 1;
-        entry.stats.in_bytes += input_bytes;
-        entry.stats.out_bytes += output_bytes;
+        if (found == null and s.cmd_count < MAX_TRACKED_CMDS) {
+            const entry = &s.by_cmd[s.cmd_count];
+            const copy_len = @min(label.len, entry.name.len);
+            @memcpy(entry.name[0..copy_len], label[0..copy_len]);
+            entry.name_len = copy_len;
+            s.cmd_count += 1;
+            found = entry;
+        }
+        if (found) |entry| {
+            entry.stats.n += 1;
+            entry.stats.in_bytes += input_bytes;
+            entry.stats.out_bytes += output_bytes;
+        }
+
+        try saveJson(allocator, io, dir_path, path, s);
     }
 
-    try saveJson(allocator, io, dir_path, path, s);
     try history.append(allocator, io, home, dir_path, label, input_bytes, output_bytes, options);
 }
 
@@ -179,11 +193,8 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
         while (pos < data.len and (data[pos] == ' ' or data[pos] == ',' or data[pos] == '\n' or data[pos] == '\r' or data[pos] == '\t')) pos += 1;
         if (pos >= data.len or data[pos] == '}') break;
         if (data[pos] != '"') break;
-        pos += 1;
-        const key_start = pos;
-        while (pos < data.len and data[pos] != '"') pos += 1;
-        const key = data[key_start..pos];
-        if (pos < data.len) pos += 1;
+        var entry = &s.by_cmd[s.cmd_count];
+        entry.name_len = readJsonStringAt(data, &pos, &entry.name) orelse break;
         while (pos < data.len and data[pos] != '{') pos += 1;
         if (pos >= data.len) break;
         const obj_start = pos;
@@ -200,10 +211,6 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
             }
         }
         const obj_slice = data[obj_start..pos];
-        var entry = &s.by_cmd[s.cmd_count];
-        const copy_len = @min(key.len, entry.name.len);
-        @memcpy(entry.name[0..copy_len], key[0..copy_len]);
-        entry.name_len = copy_len;
         entry.stats.n = findJsonU64(obj_slice, "\"n\":");
         entry.stats.in_bytes = findJsonU64(obj_slice, "\"in\":");
         entry.stats.out_bytes = findJsonU64(obj_slice, "\"out\":");
@@ -216,9 +223,74 @@ fn findJsonU64(data: []const u8, key: []const u8) u64 {
     return util.findJsonU64Opt(data, key) orelse 0;
 }
 
+fn readJsonStringAt(data: []const u8, pos_ptr: *usize, out: []u8) ?usize {
+    var pos = pos_ptr.*;
+    if (pos >= data.len or data[pos] != '"') return null;
+    pos += 1;
+    var len: usize = 0;
+    while (pos < data.len) : (pos += 1) {
+        const c = data[pos];
+        if (c == '"') {
+            pos_ptr.* = pos + 1;
+            return len;
+        }
+        const decoded = if (c == '\\') blk: {
+            pos += 1;
+            if (pos >= data.len) return null;
+            break :blk switch (data[pos]) {
+                '"', '\\', '/' => data[pos],
+                'b' => 0x08,
+                'f' => 0x0c,
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                'u' => unicode: {
+                    if (pos + 4 >= data.len or data[pos + 1] != '0' or data[pos + 2] != '0') return null;
+                    const high = hexValue(data[pos + 3]) orelse return null;
+                    const low = hexValue(data[pos + 4]) orelse return null;
+                    pos += 4;
+                    break :unicode high * 16 + low;
+                },
+                else => return null,
+            };
+        } else c;
+        if (len < out.len) {
+            out[len] = decoded;
+            len += 1;
+        }
+    }
+    return null;
+}
+
+fn writeJsonString(w: *Writer, s: []const u8) !void {
+    try w.writeByte('"');
+    for (s) |c| switch (c) {
+        '"' => try w.writeAll("\\\""),
+        '\\' => try w.writeAll("\\\\"),
+        '\n' => try w.writeAll("\\n"),
+        '\r' => try w.writeAll("\\r"),
+        '\t' => try w.writeAll("\\t"),
+        else => if (c < 0x20 or c >= 0x80) {
+            const hex = "0123456789abcdef";
+            try w.writeAll("\\u00");
+            try w.writeByte(hex[c >> 4]);
+            try w.writeByte(hex[c & 0x0f]);
+        } else try w.writeByte(c),
+    };
+    try w.writeByte('"');
+}
+
+fn hexValue(c: u8) ?u8 {
+    return switch (c) {
+        '0'...'9' => c - '0',
+        'a'...'f' => c - 'a' + 10,
+        'A'...'F' => c - 'A' + 10,
+        else => null,
+    };
+}
+
 fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8, s: Stats) !void {
-    const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, dir_path);
+    try state_io.ensurePrivateDir(io, dir_path);
 
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
@@ -233,9 +305,8 @@ fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8
         try w.writeAll(",\"by_cmd\":{");
         for (s.by_cmd[0..s.cmd_count], 0..) |entry, i| {
             if (i > 0) try w.writeByte(',');
-            try w.writeByte('"');
-            try w.writeAll(entry.nameSlice());
-            try w.writeAll("\":{\"n\":");
+            try writeJsonString(w, entry.nameSlice());
+            try w.writeAll(":{\"n\":");
             try writeU64(w, entry.stats.n);
             try w.writeAll(",\"in\":");
             try writeU64(w, entry.stats.in_bytes);
@@ -247,20 +318,7 @@ fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8
     }
     try w.writeAll("}\n");
 
-    // Atomic write: stage to <path>.tmp then rename. Avoids leaving a
-    // half-written stats file if the process is interrupted, and gives
-    // last-writer-wins semantics under concurrent invocations rather than
-    // arbitrary interleavings of two partial writes.
-    const tmp_path = try allocator.alloc(u8, path.len + 4);
-    defer allocator.free(tmp_path);
-    @memcpy(tmp_path[0..path.len], path);
-    @memcpy(tmp_path[path.len..], ".tmp");
-
-    try cwd.writeFile(io, .{ .sub_path = tmp_path, .data = out.written() });
-    cwd.rename(tmp_path, cwd, path, io) catch |err| {
-        cwd.deleteFile(io, tmp_path) catch {};
-        return err;
-    };
+    try state_io.writePrivateFileAtomic(io, path, out.written());
 }
 
 fn pathBasename(path: []const u8) []const u8 {
@@ -287,14 +345,14 @@ pub fn maybeRun(
         return null;
 
     const opts = parseQueryOptions(args[2..], mode) catch {
-        try stdout.writeAll("usage: smll --stats [--reset] [--verbose] [--by-command] [--since <24h|7d|30d>] [--project]\n");
+        try stdout.writeAll("usage: smll --stats [--reset [--all]] [--verbose] [--by-command] [--since <24h|7d|30d>] [--project]\n");
         try stdout.writeAll("       smll --discover [--since <24h|7d|30d>] [--project]\n");
         return 2;
     };
 
     if (opts.reset) {
-        try reset(allocator, io, home);
-        try stdout.writeAll("stats reset\n");
+        try reset(allocator, io, home, opts.all);
+        try stdout.writeAll(if (opts.all) "all local state reset\n" else "stats reset\n");
         return 0;
     }
 
@@ -312,6 +370,8 @@ fn parseQueryOptions(args: []const []const u8, mode: QueryMode) !QueryOptions {
         const arg = args[i];
         if (std.mem.eql(u8, arg, "--reset") and mode == .stats) {
             opts.reset = true;
+        } else if (std.mem.eql(u8, arg, "--all") and mode == .stats) {
+            opts.all = true;
         } else if (std.mem.eql(u8, arg, "--verbose") and mode == .stats) {
             opts.verbose = true;
         } else if (std.mem.eql(u8, arg, "--by-command") and mode == .stats) {
@@ -328,6 +388,7 @@ fn parseQueryOptions(args: []const []const u8, mode: QueryMode) !QueryOptions {
             return error.InvalidArgs;
         }
     }
+    if (opts.all and !opts.reset) return error.InvalidArgs;
     if (opts.reset and (opts.verbose or opts.by_command or opts.project_only or opts.since_ms != null)) return error.InvalidArgs;
     return opts;
 }
@@ -346,11 +407,21 @@ fn parseDurationMs(s: []const u8) !i64 {
     return std.math.cast(i64, ms) orelse return error.InvalidArgs;
 }
 
-fn reset(allocator: Allocator, io: Io, home: []const u8) !void {
+fn reset(allocator: Allocator, io: Io, home: []const u8, all: bool) !void {
     const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
     Io.Dir.cwd().deleteFile(io, path) catch {};
     try history.reset(allocator, io, home);
+    if (!all) return;
+
+    inline for (.{ stats_lock_file, history_lock_file }) |relative| {
+        const lock_path = try joinPath(allocator, home, relative);
+        defer allocator.free(lock_path);
+        Io.Dir.cwd().deleteFile(io, lock_path) catch {};
+    }
+    const tee_path = try joinPath(allocator, home, tee_dir);
+    defer allocator.free(tee_path);
+    Io.Dir.cwd().deleteTree(io, tee_path) catch {};
 }
 
 fn displayStats(allocator: Allocator, io: Io, home: []const u8, opts: QueryOptions, stdout: *Writer) !void {
@@ -686,6 +757,47 @@ test "record appends history without full argv" {
     try std.testing.expect(std.mem.find(u8, history_data, "secret-token") == null);
 }
 
+test "stats command keys are JSON escaped and round trip" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+
+    const recorded = record(allocator, std.testing.io, home, &.{ "git", "sta\"tus\nline\x01\xff" }, 12, 4, .{});
+    try std.testing.expect(recorded);
+
+    const json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(json);
+    try std.testing.expect(std.mem.find(u8, json, "git sta\\\"tus\\nline\\u0001\\u00ff") != null);
+
+    const path = try joinPath(allocator, home, stats_file);
+    defer allocator.free(path);
+    const loaded = load(allocator, std.testing.io, path);
+    try std.testing.expectEqual(@as(usize, 1), loaded.cmd_count);
+    try std.testing.expectEqualSlices(u8, "git sta\"tus\nline\x01\xff", loaded.by_cmd[0].nameSlice());
+}
+
+test "record creates private state directories and files" {
+    if (@import("builtin").os.tag == .windows) return;
+
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+
+    try std.testing.expect(record(allocator, std.testing.io, home, &.{"git"}, 12, 4, .{}));
+
+    var state_dir = try tmp.dir.openDir(std.testing.io, ".smll", .{ .iterate = true });
+    defer state_dir.close(std.testing.io);
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try state_dir.stat(std.testing.io)).permissions.toMode() & 0o777);
+    inline for (.{ "stats.json", "stats.lock", "history.jsonl", "history.lock" }) |name| {
+        const st = try state_dir.statFile(std.testing.io, name, .{});
+        try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), st.permissions.toMode() & 0o777);
+    }
+}
+
 test "reset deletes stats and history" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -696,9 +808,39 @@ test "reset deletes stats and history" {
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll/stats.json", .data = "{}\n" });
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll/history.jsonl", .data = "{}\n" });
 
-    try reset(allocator, std.testing.io, home);
+    try reset(allocator, std.testing.io, home, false);
     try expectMissing(tmp.dir, ".smll/stats.json");
     try expectMissing(tmp.dir, ".smll/history.jsonl");
+}
+
+test "reset all deletes stats history locks and tee files" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".smll/tee");
+    inline for (.{ "stats.json", "stats.lock", "history.jsonl", "history.lock", "tee/failure.log" }) |name| {
+        try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll/" ++ name, .data = "state\n" });
+    }
+
+    try reset(allocator, std.testing.io, home, true);
+    inline for (.{ ".smll/stats.json", ".smll/stats.lock", ".smll/history.jsonl", ".smll/history.lock" }) |name| {
+        try expectMissing(tmp.dir, name);
+    }
+    tmp.dir.access(std.testing.io, ".smll/tee", .{}) catch |err| {
+        try std.testing.expectEqual(error.FileNotFound, err);
+        return;
+    };
+    return error.UnexpectedTeeDirectory;
+}
+
+test "stats reset all is accepted only with reset" {
+    const opts = try parseQueryOptions(&.{ "--reset", "--all" }, .stats);
+    try std.testing.expect(opts.reset);
+    try std.testing.expect(opts.all);
+    try std.testing.expectError(error.InvalidArgs, parseQueryOptions(&.{"--all"}, .stats));
+    try std.testing.expectError(error.InvalidArgs, parseQueryOptions(&.{ "--reset", "--all", "--verbose" }, .stats));
 }
 
 test "stats output is token-first with verbose exact bytes" {
