@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("ansi");
 const signals = @import("signals");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -70,7 +71,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll("all tests passed\n");
         return;
     }
-    try writer.writeAll(scratch.items);
+    try util.writeHeadTail(writer, scratch.items, 120, 80);
 }
 
 fn hasFailureMarker(s: []const u8) bool {
@@ -99,7 +100,6 @@ fn hasFailureMarker(s: []const u8) bool {
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     // Sticky context: after a FAILED/ERROR line, keep subsequent lines
@@ -107,7 +107,6 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
     // a non-indented non-error line.
     var in_error_context = false;
     while (lines.next()) |raw| {
-        if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) {
@@ -219,4 +218,22 @@ test "apply: strips ANSI from kept lines" {
     const got = out.written();
     try std.testing.expect(std.mem.find(u8, got, "\x1b") == null);
     try std.testing.expect(std.mem.find(u8, got, "FAILED") != null);
+}
+
+test "apply: large failure output keeps head and tail with an exact omission marker" {
+    var input: std.ArrayList(u8) = .empty;
+    defer input.deinit(std.testing.allocator);
+    for (0..205) |i| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "FAILED tests/test_{d}.py::test_case_{d}\n", .{ i, i });
+        defer std.testing.allocator.free(line);
+        try input.appendSlice(std.testing.allocator, line);
+    }
+
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try apply(std.testing.allocator, input.items, &.{}, &out.writer);
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "test_case_119\n(smll: omitted 5 relevant lines; rerun with smll --raw)\nFAILED tests/test_125.py") != null);
+    try std.testing.expect(std.mem.find(u8, got, "test_case_120\n") == null);
+    try std.testing.expect(std.mem.endsWith(u8, got, "FAILED tests/test_204.py::test_case_204\n"));
 }

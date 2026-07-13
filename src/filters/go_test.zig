@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("ansi");
 const signals = @import("signals");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -56,7 +57,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
     try scanAndKeep(allocator, stderr, &scratch, &kept_lines, &has_bench_or_fuzz);
 
     if (has_bench_or_fuzz or hasFailureMarker(scratch.items)) {
-        try writer.writeAll(scratch.items);
+        try util.writeHeadTail(writer, scratch.items, 120, 80);
         return;
     }
     try writer.writeAll("all tests passed\n");
@@ -100,7 +101,6 @@ fn isFuzzLine(line: []const u8) bool {
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize, has_bench_or_fuzz: *bool) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 200;
     var pending: std.ArrayList(u8) = .empty;
     defer pending.deinit(allocator);
     var strip_buf: std.ArrayList(u8) = .empty;
@@ -111,7 +111,6 @@ fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8),
     defer last_fuzz_progress.deinit(allocator);
 
     while (lines.next()) |raw| {
-        if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;

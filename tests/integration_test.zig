@@ -2197,6 +2197,91 @@ test "wrapper: SMLL_LOSSLESS preserves mixed streams and child exit code" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, wrapped.term);
 }
 
+test "wrapper: --raw passes both streams through byte-identically and preserves exit" {
+    const allocator = std.testing.allocator;
+
+    var result = try runSmllWrapper(allocator, &.{
+        "--raw",
+        "--",
+        "sh",
+        "-c",
+        "printf 'raw  out\\n'; printf 'raw  err\\n' >&2; exit 23",
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("raw  out\n", result.stdout);
+    try std.testing.expectEqualStrings("raw  err\n", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, result.term);
+}
+
+test "wrapper: --raw does not inject SMLL_LOSSLESS into the child" {
+    const allocator = std.testing.allocator;
+    var result = try runSmllWrapper(allocator, &.{
+        "--raw",
+        "sh",
+        "-c",
+        "if [ -z \"${SMLL_LOSSLESS+x}\" ]; then printf 'unset\\n'; else printf '%s\\n' \"$SMLL_LOSSLESS\"; fi",
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("unset\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "wrapper: nonzero pytest cannot synthesize a passing verdict" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const raw =
+        "============ test session starts ============\n" ++
+        "collected 1 item\n" ++
+        "tests/test_x.py . [100%]\n" ++
+        "================ 1 passed in 0.01s ================\n";
+    try writeFakeScript(tmp.dir, "pytest",
+        \\#!/bin/sh
+        \\printf '%s' '============ test session starts ============
+        \\collected 1 item
+        \\tests/test_x.py . [100%]
+        \\================ 1 passed in 0.01s ================
+        \\'
+        \\exit 2
+    );
+
+    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{"pytest"}, 4096);
+    defer result.deinit(allocator);
+    try std.testing.expectEqualStrings(raw, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+}
+
+test "pipe-mode: --raw preserves arbitrary input byte-identically" {
+    const allocator = std.testing.allocator;
+    const input = "raw  spacing\n\xff\x00tail\n";
+    var result = try runSmllWrapperWithStdin(allocator, &.{"--raw"}, input);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, input, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+}
+
+test "meta: --raw separator without a command is a usage error" {
+    const allocator = std.testing.allocator;
+    var result = try runSmllWrapper(allocator, &.{ "--raw", "--" });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings(
+        "usage: smll --raw [--] <cmd...>\n       <cmd> | smll --raw\n",
+        result.stderr,
+    );
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+}
+
 test "wrapper: pre-capture streaming bypass with no output does not append hint" {
     const allocator = std.testing.allocator;
 
@@ -4552,7 +4637,7 @@ test "smoke: bun script echo compacted to no output emits success hint" {
     try std.testing.expectEqualStrings("", result.stderr);
 }
 
-test "smoke: bun failing script echo compacted to no output emits failure hint" {
+test "smoke: bun failing script echo falls open to raw failure output" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4569,8 +4654,8 @@ test "smoke: bun failing script echo compacted to no output emits failure hint" 
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 7 }, result.term);
-    try std.testing.expectEqualStrings("(smll: bun exited 7 with no output)\n", result.stdout);
-    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("$ exit 7\n", result.stderr);
 }
 
 test "smoke: bun actionable stderr remains visible without no-output hint" {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const ansi = @import("ansi");
 const signals = @import("signals");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -66,7 +67,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll("all tests passed\n");
         return;
     }
-    try writer.writeAll(scratch.items);
+    try util.writeHeadTail(writer, scratch.items, 120, 80);
 }
 
 fn hasFailureMarker(s: []const u8) bool {
@@ -93,14 +94,12 @@ fn hasFailureMarker(s: []const u8) bool {
 fn scanAndKeep(allocator: Allocator, input: []const u8, out: *std.ArrayList(u8), kept: *usize) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     // Sticky context: after a FAIL/error line, keep subsequent lines
     // (stack traces, expect/received, diffs) until blank or PASS line.
     var in_error_context = false;
     while (lines.next()) |raw| {
-        if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) {
