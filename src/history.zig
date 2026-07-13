@@ -1,4 +1,5 @@
 const std = @import("std");
+const state_io = @import("state_io.zig");
 const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -21,6 +22,7 @@ pub const QueryOptions = struct {
     by_command: bool = false,
     project_only: bool = false,
     reset: bool = false,
+    all: bool = false,
     since_ms: ?i64 = null,
 };
 
@@ -83,8 +85,7 @@ pub fn append(
     output_bytes: usize,
     options: RecordOptions,
 ) !void {
-    const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, dir_path);
+    try state_io.ensurePrivateDir(io, dir_path);
 
     const history_path = try joinPath(allocator, home, history_file);
     defer allocator.free(history_path);
@@ -179,12 +180,11 @@ const HistoryData = struct {
 fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, lock_path: []const u8, line: []const u8, max_size: usize) !void {
     if (line.len > max_size) return;
 
-    const cwd = Io.Dir.cwd();
     const lock_file = try openLockFile(io, lock_path);
     defer if (lock_file) |file| file.close(io);
 
     {
-        var file = try cwd.createFile(io, history_path, .{ .read = true, .truncate = false });
+        var file = try state_io.createPrivateFile(io, history_path, .{ .read = true, .truncate = false });
         defer file.close(io);
         const st = try file.stat(io);
         if (st.size + line.len <= max_size) {
@@ -205,21 +205,14 @@ fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, loc
     defer if (maybe_tail) |t| allocator.free(t.owned);
     const tail_lines: []const u8 = if (maybe_tail) |t| t.lines else "";
 
-    var file = try cwd.createFile(io, history_path, .{ .read = true, .truncate = true });
+    var file = try state_io.createPrivateFile(io, history_path, .{ .read = true, .truncate = true });
     defer file.close(io);
     try file.writePositionalAll(io, tail_lines, 0);
     try file.writePositionalAll(io, line, tail_lines.len);
 }
 
 fn openLockFile(io: Io, lock_path: []const u8) !?Io.File {
-    return Io.Dir.cwd().createFile(io, lock_path, .{
-        .read = true,
-        .truncate = false,
-        .lock = .exclusive,
-    }) catch |err| switch (err) {
-        error.FileLocksUnsupported => return null,
-        else => |e| return e,
-    };
+    return state_io.openExclusivePrivateLock(io, lock_path);
 }
 
 fn readHistoryData(allocator: Allocator, io: Io, history_path: []const u8, max_size: usize) !HistoryData {
