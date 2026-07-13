@@ -1604,6 +1604,20 @@ test "hook setup codex invokes the absolute smll evaluator without a generated s
     return error.UnexpectedHookScript;
 }
 
+test "hook evaluator self-check validates the installed entrypoint" {
+    const allocator = std.testing.allocator;
+    const run = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--hook-eval", "codex", "--self-check" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+    });
+    defer allocator.free(run.stdout);
+    defer allocator.free(run.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, run.term);
+    try std.testing.expectEqualStrings("", run.stdout);
+    try std.testing.expectEqualStrings("", run.stderr);
+}
+
 test "wrapper: large stderr does not deadlock while stdout is still open" {
     const allocator = std.testing.allocator;
     const script =

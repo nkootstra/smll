@@ -95,6 +95,7 @@ pub fn setup(
 
     const executable_path = try std.process.executablePathAlloc(io, allocator);
     defer allocator.free(executable_path);
+    if (!try setup_io.validateHookEvaluator(allocator, io, executable_path, spec.target, stderr)) return 1;
     const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
     defer allocator.free(escaped_executable);
     const eval_suffix = try std.fmt.allocPrint(allocator, " --hook-eval {s}", .{spec.target});
@@ -103,6 +104,13 @@ pub fn setup(
     defer allocator.free(hook_command);
     const legacy_hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
     defer allocator.free(legacy_hook_command);
+
+    var ownership = setup_io.readOwnership(allocator, io, home, spec.target) catch setup_io.Ownership.missing;
+    defer ownership.deinit(allocator);
+    if (ownership == .modified) {
+        try stderr.writeAll("smll setup ownership record was modified; configuration left untouched\n");
+        return 1;
+    }
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
     defer if (existing) |buf| allocator.free(buf);
@@ -117,18 +125,32 @@ pub fn setup(
 
     const pa = config_json.arena.allocator();
     const removed_legacy = try removeHook(&config_json.value, spec.hook, legacy_hook_command);
+    const removed_owned = if (ownership.validPayload()) |owned_command|
+        if (!std.mem.eql(u8, owned_command, hook_command)) try removeHook(&config_json.value, spec.hook, owned_command) else false
+    else
+        false;
     const already_installed = try ensureHook(pa, &config_json.value, spec.hook, hook_command);
+    const config_changed = !already_installed or removed_legacy or removed_owned;
 
-    if (!already_installed or removed_legacy) {
+    if (config_changed) {
         try setup_io.writeBackupIfExists(allocator, io, config_path, dry_run);
         try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
     } else {
         try stdout.writeAll("already installed\n");
     }
 
+    if (dry_run) {
+        try stdout.writeAll("[dry-run] would record smll hook ownership\n");
+    } else {
+        setup_io.writeOwnership(allocator, io, home, spec.target, hook_command) catch |err| {
+            if (config_changed) try setup_io.restoreOptional(io, config_path, existing);
+            return err;
+        };
+    }
+
     const existing_hook = try setup_io.readFileOptional(allocator, io, hook_script_path);
     defer if (existing_hook) |buf| allocator.free(buf);
-    if (existing_hook != null) try setup_io.deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
+    if (existing_hook != null) try stderr.writeAll("legacy hook script left untouched because its ownership is unknown\n");
 
     if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
@@ -149,44 +171,44 @@ pub fn unsetup(
     const hook_script_path = try setup_io.concat2(allocator, home, spec.script_path_suffix);
     defer allocator.free(hook_script_path);
 
-    const executable_path = try std.process.executablePathAlloc(io, allocator);
-    defer allocator.free(executable_path);
-    const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
-    defer allocator.free(escaped_executable);
-    const eval_suffix = try std.fmt.allocPrint(allocator, " --hook-eval {s}", .{spec.target});
-    defer allocator.free(eval_suffix);
-    const hook_command = try setup_io.concat2(allocator, escaped_executable, eval_suffix);
-    defer allocator.free(hook_command);
-    const legacy_hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
-    defer allocator.free(legacy_hook_command);
+    var ownership = setup_io.readOwnership(allocator, io, home, spec.target) catch setup_io.Ownership.missing;
+    defer ownership.deinit(allocator);
+
+    const owned_command = ownership.validPayload();
+    if (owned_command == null) {
+        try stderr.writeAll(if (ownership == .modified)
+            "smll hook ownership record was modified; no hook was removed\n"
+        else
+            "smll hook ownership record not found; no hook was removed\n");
+    }
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
     defer if (existing) |buf| allocator.free(buf);
 
-    if (existing) |_| {
+    var removed_owned = false;
+    if (existing != null and owned_command != null) {
         var config_json = setup_json.loadOrCreateObject(allocator, existing, spec.needs_version) catch {
             try setup_io.writeJsonError(stderr, spec.config_file);
             return 1;
         };
         defer config_json.deinit();
 
-        const changed = try removeHook(&config_json.value, spec.hook, hook_command);
-        const removed_legacy = try removeHook(&config_json.value, spec.hook, legacy_hook_command);
-        if (changed or removed_legacy) {
+        removed_owned = try removeHook(&config_json.value, spec.hook, owned_command.?);
+        if (removed_owned) {
             try setup_io.writeBackupIfExists(allocator, io, config_path, dry_run);
             try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
         } else {
-            try stdout.writeAll("no hook found\n");
+            try stderr.writeAll("smll-owned hook entry was modified or removed; configuration left untouched\n");
         }
-    } else {
+    } else if (existing == null) {
         try stdout.writeAll("not found\n");
     }
 
+    if (removed_owned and !dry_run) try setup_io.deleteOwnership(allocator, io, home, spec.target);
+
     const existing_hook = try setup_io.readFileOptional(allocator, io, hook_script_path);
     defer if (existing_hook) |buf| allocator.free(buf);
-    if (existing_hook != null) {
-        try setup_io.deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
-    }
+    if (existing_hook != null) try stderr.writeAll("legacy hook script left untouched because its ownership is unknown\n");
 
     if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
@@ -248,13 +270,43 @@ fn removeNestedCommandHook(root: *JValue, cfg: NestedCommandHook, hook_command: 
     var changed = false;
     var i: usize = 0;
     while (i < event_val.array.items.len) {
-        const entry = event_val.array.items[i];
-        if (!isNestedCommandHookForCommand(entry, hook_command)) {
+        var entry = &event_val.array.items[i];
+        if (entry.* != .object) {
             i += 1;
             continue;
         }
-        _ = event_val.array.swapRemove(i);
-        changed = true;
+        const handlers = entry.object.getPtr("hooks") orelse {
+            i += 1;
+            continue;
+        };
+        if (handlers.* != .array) {
+            i += 1;
+            continue;
+        }
+
+        var handler_index: usize = 0;
+        while (handler_index < handlers.array.items.len) {
+            const handler = handlers.array.items[handler_index];
+            if (handler != .object) {
+                handler_index += 1;
+                continue;
+            }
+            const command = handler.object.get("command") orelse {
+                handler_index += 1;
+                continue;
+            };
+            if (command != .string or !std.mem.eql(u8, command.string, hook_command)) {
+                handler_index += 1;
+                continue;
+            }
+            _ = handlers.array.swapRemove(handler_index);
+            changed = true;
+        }
+        if (handlers.array.items.len == 0) {
+            _ = event_val.array.swapRemove(i);
+        } else {
+            i += 1;
+        }
     }
 
     return changed;
@@ -418,6 +470,57 @@ test "unsetup codex removes PreToolUse hook and script" {
     return error.UnexpectedHookScript;
 }
 
+test "unsetup leaves a modified owned hook entry and warns" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+
+    var stdout = std.Io.Writer.Allocating.init(allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(allocator);
+    defer stderr.deinit();
+    try std.testing.expectEqual(@as(u8, 0), try setup(allocator, std.testing.io, home_path, codexSpec(), false, &stdout.writer, &stderr.writer));
+
+    const config_path = try setup_io.concat2(allocator, home_path, codexSpec().config_path_suffix);
+    defer allocator.free(config_path);
+    const original = try setup_io.readFileOptional(allocator, std.testing.io, config_path);
+    defer allocator.free(original.?);
+    const marker = " --hook-eval codex";
+    const at = std.mem.find(u8, original.?, marker) orelse return error.MissingHookCommand;
+    const modified = try std.mem.concat(allocator, u8, &.{ original.?[0 .. at + marker.len], " --modified", original.?[at + marker.len ..] });
+    defer allocator.free(modified);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = config_path, .data = modified });
+
+    try std.testing.expectEqual(@as(u8, 0), try unsetup(allocator, std.testing.io, home_path, codexSpec(), false, &stdout.writer, &stderr.writer));
+    const after = try setup_io.readFileOptional(allocator, std.testing.io, config_path);
+    defer allocator.free(after.?);
+    try std.testing.expect(std.mem.find(u8, after.?, "--hook-eval codex --modified") != null);
+    try std.testing.expect(std.mem.find(u8, stderr.written(), "modified") != null);
+}
+
+test "setup rolls back config when ownership cannot be recorded" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll", .data = "blocks ownership directory\n" });
+
+    var stdout = std.Io.Writer.Allocating.init(allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(allocator);
+    defer stderr.deinit();
+    if (setup(allocator, std.testing.io, home_path, codexSpec(), false, &stdout.writer, &stderr.writer)) |_| {
+        return error.ExpectedSetupFailure;
+    } else |_| {}
+
+    const config_path = try setup_io.concat2(allocator, home_path, codexSpec().config_path_suffix);
+    defer allocator.free(config_path);
+    try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, config_path)) == null);
+}
+
 test "setup and unsetup cursor preserves flat hook shape" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -450,4 +553,19 @@ test "setup and unsetup cursor preserves flat hook shape" {
     const updated_json = try tmp.dir.readFileAlloc(std.testing.io, ".cursor/hooks.json", allocator, .limited(4096));
     defer allocator.free(updated_json);
     try std.testing.expect(std.mem.find(u8, updated_json, "--hook-eval cursor") == null);
+}
+
+test "nested hook removal preserves unrelated handlers in the same matcher" {
+    const allocator = std.testing.allocator;
+    var parsed = try setup_json.parse(allocator,
+        \\{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"smll-owned"},{"type":"command","command":"keep-me"}]}]}}
+    );
+    defer parsed.deinit();
+
+    try std.testing.expect(try removeHook(&parsed.value, codexSpec().hook, "smll-owned"));
+    var rendered = std.Io.Writer.Allocating.init(allocator);
+    defer rendered.deinit();
+    try setup_json.writeValue(&rendered.writer, parsed.value);
+    try std.testing.expect(std.mem.find(u8, rendered.written(), "smll-owned") == null);
+    try std.testing.expect(std.mem.find(u8, rendered.written(), "keep-me") != null);
 }
