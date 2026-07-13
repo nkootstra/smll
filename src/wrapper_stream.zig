@@ -4,13 +4,12 @@ const ansi = @import("ansi");
 const docker_logs = @import("docker_logs");
 const jest = @import("jest");
 const tsc = @import("tsc");
+const wrapper_io = @import("wrapper_io.zig");
 const wrapper_util = @import("wrapper_util.zig");
+const exitCode = wrapper_io.exitCode;
 
 const max_line_bytes: usize = 64 * 1024;
-const idle_flush_timeout: std.Io.Timeout = .{ .duration = .{
-    .raw = .fromSeconds(2),
-    .clock = .awake,
-} };
+const idle_flush_ns = 2 * std.time.ns_per_s;
 
 pub const Result = struct {
     exit_code: u8,
@@ -336,18 +335,19 @@ pub fn runStreamFilter(
     original_argv: []const []const u8,
     logical_argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     const cmd = commandBasename(logical_argv) orelse "";
     if (wrapper_util.isTscWatch(cmd, logical_argv)) {
-        return runTscWatch(allocator, io, original_argv, writer);
+        return runTscWatch(allocator, io, original_argv, writer, stderr_writer);
     }
     if (wrapper_util.isJsTestWatch(cmd, logical_argv)) {
-        return runJestWatch(allocator, io, original_argv, writer);
+        return runJestWatch(allocator, io, original_argv, writer, stderr_writer);
     }
     if (wrapper_util.isGhRunWatch(cmd, logical_argv)) {
-        return runGhRunWatch(allocator, io, original_argv, writer);
+        return runGhRunWatch(allocator, io, original_argv, writer, stderr_writer);
     }
-    return runFollowLogs(allocator, io, original_argv, logical_argv, writer);
+    return runFollowLogs(allocator, io, original_argv, logical_argv, writer, stderr_writer);
 }
 
 pub fn runFollowLogs(
@@ -356,13 +356,14 @@ pub fn runFollowLogs(
     original_argv: []const []const u8,
     logical_argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     const mode: docker_logs.Mode = if (isComposeInvocation(logical_argv)) .compose else .plain;
     var stdout_side = LogStreamSide.init(allocator, mode);
     defer stdout_side.deinit(allocator);
     var stderr_side = LogStreamSide.init(allocator, mode);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, original_argv, writer, &stdout_side, &stderr_side, if (isDockerInvocation(logical_argv)) "stream:docker_logs" else "stream:logs");
+    return runPipedStream(allocator, io, original_argv, writer, stderr_writer, &stdout_side, &stderr_side, if (isDockerInvocation(logical_argv)) "stream:docker_logs" else "stream:logs");
 }
 
 fn runTscWatch(
@@ -370,12 +371,13 @@ fn runTscWatch(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     var stdout_side = TscWatchSide.init(allocator);
     defer stdout_side.deinit(allocator);
     var stderr_side = TscWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:tsc_watch");
+    return runPipedStream(allocator, io, argv, writer, stderr_writer, &stdout_side, &stderr_side, "stream:tsc_watch");
 }
 
 fn runJestWatch(
@@ -383,12 +385,13 @@ fn runJestWatch(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     var stdout_side = JestWatchSide.init(allocator);
     defer stdout_side.deinit(allocator);
     var stderr_side = JestWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:js_test_watch");
+    return runPipedStream(allocator, io, argv, writer, stderr_writer, &stdout_side, &stderr_side, "stream:js_test_watch");
 }
 
 fn runGhRunWatch(
@@ -396,12 +399,13 @@ fn runGhRunWatch(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     var stdout_side = GhRunWatchSide.init(allocator);
     defer stdout_side.deinit(allocator);
     var stderr_side = GhRunWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:gh_run_watch");
+    return runPipedStream(allocator, io, argv, writer, stderr_writer, &stdout_side, &stderr_side, "stream:gh_run_watch");
 }
 
 fn runPipedStream(
@@ -409,6 +413,7 @@ fn runPipedStream(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
     stdout_side: anytype,
     stderr_side: anytype,
     filter_name: []const u8,
@@ -421,6 +426,9 @@ fn runPipedStream(
     }) catch |err| return err;
     defer child.kill(io);
 
+    var watcher: wrapper_io.ChildExitWatcher = .{};
+    defer if (watcher.reaped) wrapper_io.closeChildPipes(&child, io);
+
     var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
     var multi_reader: std.Io.File.MultiReader = undefined;
     multi_reader.init(
@@ -432,22 +440,37 @@ fn runPipedStream(
     defer multi_reader.deinit();
 
     var input_bytes: usize = 0;
+    var incomplete = false;
+    var last_activity: std.Io.Clock.Timestamp = .now(io, .awake);
     while (true) {
-        multi_reader.fill(64, idle_flush_timeout) catch |err| switch (err) {
+        var received_data = true;
+        multi_reader.fill(64, wrapper_io.drain_poll_timeout) catch |err| switch (err) {
             error.Timeout => {
-                try stdout_side.idleFlush(writer);
-                try stderr_side.idleFlush(writer);
-                try writer.flush();
-                continue;
+                received_data = false;
             },
             error.EndOfStream => break,
             else => |e| return e,
         };
-        input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
-        input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
-        try writer.flush();
+
+        if (received_data) {
+            input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
+            input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
+            try writer.flush();
+            last_activity = .now(io, .awake);
+        } else if (last_activity.untilNow(io).raw.nanoseconds >= idle_flush_ns) {
+            try stdout_side.idleFlush(writer);
+            try stderr_side.idleFlush(writer);
+            try writer.flush();
+            last_activity = .now(io, .awake);
+        }
+
+        try watcher.poll(&child, io);
+        if (watcher.graceExpired(io)) {
+            incomplete = true;
+            break;
+        }
     }
-    try multi_reader.checkAnyError();
+    if (!incomplete) try multi_reader.checkAnyError();
 
     input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
     input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
@@ -455,12 +478,11 @@ fn runPipedStream(
     try stderr_side.endFlush(writer);
     try writer.flush();
 
-    const term = try child.wait(io);
+    if (incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+
+    const term = try watcher.finish(&child, io);
     return .{
-        .exit_code = switch (term) {
-            .exited => |c| c,
-            .signal, .stopped, .unknown => 1,
-        },
+        .exit_code = exitCode(term),
         .input_bytes = input_bytes,
         .filter_name = filter_name,
     };
