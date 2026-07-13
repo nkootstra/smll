@@ -394,6 +394,7 @@ fn flushSegment(writer: *Writer, header: ?[]const u8, entries: []const []const u
             try writer.writeAll(e);
             shown += 1;
         }
+        if (real > shown) try writer.print("; {d} omitted; --raw for all", .{real - shown});
         try writer.writeByte(')');
     } else {
         for (entries) |e| {
@@ -629,8 +630,8 @@ test "applyPlain: multi-operand blocks collapse each dir (≥3)" {
     const got = out.written();
     // docs: 7 entries, src: 18 entries — both ≥3 → collapse with 3 examples.
     try std.testing.expectEqualStrings(
-        "docs/ (7 entries: audits, brainstorms, drafts)\n" ++
-            "src/ (18 entries: filter_catalog.zig, filters, history.zig)\n",
+        "docs/ (7 entries: audits, brainstorms, drafts; 4 omitted; --raw for all)\n" ++
+            "src/ (18 entries: filter_catalog.zig, filters, history.zig; 15 omitted; --raw for all)\n",
         got,
     );
 }
@@ -647,6 +648,7 @@ test "applyPlain: ls -R headerless top stays full, subdir collapses" {
     // Subdir block collapses under its full-path header.
     try std.testing.expect(std.mem.find(u8, got, "src/filters/ (") != null);
     try std.testing.expect(std.mem.find(u8, got, " entries: ansi.zig, ") != null);
+    try std.testing.expect(std.mem.find(u8, got, " omitted; --raw for all)") != null);
     try std.testing.expect(got.len < fixture.len);
 }
 

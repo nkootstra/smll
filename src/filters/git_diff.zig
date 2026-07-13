@@ -23,8 +23,6 @@ const Writer = std.Io.Writer;
 //   copy to ...         (captured in d <old> -> <new>)
 //   --- a/...           (path in d line, --- noise)
 //   +++ b/...           (path in d line, +++ noise)
-//   \ No newline at end of file
-//                       (rarely actionable; agents don't need this)
 //
 // Collapsed:
 //   Binary files a/X and b/Y differ  →  B  (path already in d line)
@@ -69,25 +67,21 @@ fn applyInner(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         // Fast path for content lines (+/-, context) — the majority of diff lines.
         // Check before metadata to avoid the startsWith cascade for common cases.
-        if (line.len > 1) {
+        if (line.len > 0) {
             const c = line[0];
-            if (c == '+' and line[1] != '+') {
+            if (c == '+' and (line.len == 1 or line[1] != '+')) {
                 if (!first_out) try writer.writeByte('\n');
                 try writer.writeAll(line);
                 first_out = false;
                 continue;
             }
-            if (c == '-' and line[1] != '-') {
+            if (c == '-' and (line.len == 1 or line[1] != '-')) {
                 if (!first_out) try writer.writeByte('\n');
                 try writer.writeAll(line);
                 first_out = false;
                 continue;
             }
         }
-        // Drop context lines (leading space) and empty +/- lines.
-        if (line.len > 0 and line[0] == ' ') continue;
-        if (line.len == 1 and (line[0] == '+' or line[0] == '-')) continue;
-
         // diff --git a/<old> b/<new> — emit d sigil
         if (std.mem.startsWith(u8, line, "diff --git a/")) {
             // Parse paths from "diff --git a/<path_a> b/<path_b>"
@@ -153,10 +147,7 @@ fn applyInner(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
                     try writer.writeAll(coords);
                 }
                 if (ctx.len > 0) {
-                    // Truncate function context to save tokens while
-                    // keeping enough for agents to identify the function.
-                    const max_ctx = @min(ctx.len, 30);
-                    try writer.writeAll(ctx[0..max_ctx]);
+                    try writer.writeAll(ctx);
                 }
                 first_out = false;
             } else {
@@ -181,8 +172,6 @@ fn applyInner(allocator: Allocator, stdout: []const u8, writer: *Writer) !void {
         if (std.mem.startsWith(u8, line, "rename to ")) continue;
         if (std.mem.startsWith(u8, line, "copy from ")) continue;
         if (std.mem.startsWith(u8, line, "copy to ")) continue;
-        if (std.mem.startsWith(u8, line, "\\ No newline at end of file")) continue;
-
         // Binary files a/X and b/Y differ  →  B
         // The path is already on the preceding `d` line, so the marker
         // can shrink to a single byte without losing actionable signal.
@@ -285,12 +274,11 @@ test "apply: preserves every + line on simple" {
     try std.testing.expect(std.mem.find(u8, out, "+line three") != null);
 }
 
-test "apply: drops context lines in lossy mode" {
+test "apply: preserves context lines" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
     defer allocator.free(out);
-    // Context lines are dropped; only +/- and headers remain
-    try std.testing.expect(std.mem.find(u8, out, " line one") == null);
+    try std.testing.expect(std.mem.find(u8, out, " line one") != null);
     // But +/- lines are preserved
     try std.testing.expect(std.mem.find(u8, out, "+") != null);
 }
@@ -325,13 +313,12 @@ test "apply: preserves +/- content lines on multi" {
     try std.testing.expect(std.mem.find(u8, out, "+TWO") != null);
 }
 
-test "apply: drops context lines on multi" {
+test "apply: preserves context lines on multi" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, multi_fixture);
     defer allocator.free(out);
-    // Context lines dropped
-    try std.testing.expect(std.mem.find(u8, out, " red") == null);
-    try std.testing.expect(std.mem.find(u8, out, " one") == null);
+    try std.testing.expect(std.mem.find(u8, out, " red") != null);
+    try std.testing.expect(std.mem.find(u8, out, " one") != null);
     // +/- lines preserved
     try std.testing.expect(std.mem.find(u8, out, "+") != null or std.mem.find(u8, out, "-") != null);
 }
@@ -414,38 +401,6 @@ test "apply: directional compression on multi (byte count)" {
     try std.testing.expect(out.len < multi_fixture.len);
 }
 
-test "apply: R3 gate — simple fixture ≤ 80% of raw" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, simple_fixture);
-    defer allocator.free(out);
-    const target = (simple_fixture.len * 80) / 100;
-    try std.testing.expect(out.len <= target);
-}
-
-test "apply: R3 gate — multi fixture ≤ 80% of raw" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, multi_fixture);
-    defer allocator.free(out);
-    const target = (multi_fixture.len * 80) / 100;
-    try std.testing.expect(out.len <= target);
-}
-
-test "apply: R3 gate — rename fixture ≤ 80% of raw" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, rename_fixture);
-    defer allocator.free(out);
-    const target = (rename_fixture.len * 80) / 100;
-    try std.testing.expect(out.len <= target);
-}
-
-test "apply: R3 gate — rename+modify fixture ≤ 80% of raw" {
-    const allocator = std.testing.allocator;
-    const out = try applyToString(allocator, rename_modify_fixture);
-    defer allocator.free(out);
-    const target = (rename_modify_fixture.len * 80) / 100;
-    try std.testing.expect(out.len <= target);
-}
-
 test "apply: preserves trailing newline when input has one" {
     const allocator = std.testing.allocator;
     const out = try applyToString(allocator, simple_fixture);
@@ -482,23 +437,28 @@ test "apply: collapses Binary files for new binary file" {
     try std.testing.expect(std.mem.find(u8, out, "Binary files") == null);
 }
 
-test "apply: drops No newline at end of file marker" {
+test "apply: preserves empty changes full hunk context and no-newline markers" {
     const allocator = std.testing.allocator;
     const input =
         "diff --git a/x b/x\n" ++
         "index abc..def 100644\n" ++
         "--- a/x\n" ++
         "+++ b/x\n" ++
-        "@@ -1 +1 @@\n" ++
+        "@@ -1 +1 @@ function_with_a_context_name_longer_than_thirty_bytes\n" ++
         "-old\n" ++
         "\\ No newline at end of file\n" ++
+        "-\n" ++
         "+new\n" ++
+        "+\n" ++
         "\\ No newline at end of file\n";
     const out = try applyToString(allocator, input);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "No newline") == null);
+    try std.testing.expect(std.mem.find(u8, out, "function_with_a_context_name_longer_than_thirty_bytes") != null);
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, out, "\\ No newline at end of file"));
     try std.testing.expect(std.mem.find(u8, out, "-old") != null);
     try std.testing.expect(std.mem.find(u8, out, "+new") != null);
+    try std.testing.expect(std.mem.find(u8, out, "\n-\n") != null);
+    try std.testing.expect(std.mem.find(u8, out, "\n+\n") != null);
 }
 
 test "pipe-mode idempotence: v0.4 diff output piped again is unchanged" {
