@@ -92,9 +92,9 @@ pub fn dispatch(
             if (hasArg(git_argv, "--porcelain") or hasArg(git_argv, "-z")) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else if (hasArg(git_argv, "--short") or hasArg(git_argv, "-s")) {
-                if (!applyFilter(git_status.applyShort, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_status.applyShort, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
-                if (!applyFilter(git_status.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_status.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
         },
         .diff => {
@@ -112,7 +112,7 @@ pub fn dispatch(
             if (diff_summary_mode) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
-                if (!applyFilter(git_diff.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_diff.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
         },
         .log => {
@@ -136,9 +136,9 @@ pub fn dispatch(
             if (log_custom_format or log_custom_format2) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else if (has_stat) {
-                if (!applyFilter(git_log.applyStatCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_log.applyStatCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
-                if (!applyFilter(git_log.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_log.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
         },
         .show => {
@@ -165,67 +165,67 @@ pub fn dispatch(
             if (show_summary_mode or show_custom_format or show_blob) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else if (has_stat) {
-                if (!applyFilter(git_show.applyStatCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_show.applyStatCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
-                if (!applyFilter(git_show.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_show.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
         },
         .add => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_add.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_add.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .commit => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_commit.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_commit.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .push => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_push.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_push.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .pull => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_pull.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_pull.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .fetch => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_fetch.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_fetch.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .merge => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_merge.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_merge.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .rebase => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_rebase.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_rebase.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .checkout => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_checkout.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_checkout.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .@"switch" => {
             // `git switch` confirmation output ("Switched to branch 'x'") is
             // identical to checkout — reuse the checkout filter.
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_checkout.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_checkout.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .branch => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_branch.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_branch.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .stash => {
             if (lossless) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-            } else if (!applyFilter(git_stash.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            } else if (!applyFilter(git_stash.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         },
         .blame => {
             // -s suppresses author+timestamp (compact format the filter doesn't parse).
@@ -243,7 +243,7 @@ pub fn dispatch(
             if (blame_alt_format) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else {
-                if (!applyFilter(git_blame.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_blame.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
         },
         .grep => {
@@ -251,7 +251,7 @@ pub fn dispatch(
             // rg pattern mode. Compress with path-prefix RLE when the output
             // matches; passthrough otherwise (e.g. git grep without -n).
             if (rg.matchesPattern(stdout_slice)) {
-                if (!applyFilter(rg.applyPattern, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(rg.applyPattern, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             }
@@ -263,7 +263,7 @@ pub fn dispatch(
             if (hasFormatOrPrettyArg(git_argv)) {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             } else if (git_reflog.matches(stdout_slice)) {
-                if (!applyFilter(git_reflog.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(git_reflog.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
             }

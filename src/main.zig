@@ -130,6 +130,7 @@ const help_text =
     \\Usage:
     \\smll|smll <cmd...>|<cmd>|smll
     \\-h --help --version --filters
+    \\--raw [--] <cmd...>|<cmd>|smll --raw
     \\--explain|--err|--test|--rewrite <cmd...>
     \\--stats [--reset|--verbose|--by-command|--since <24h|7d|30d>|--project]
     \\--discover [--since <24h|7d|30d>|--project]
@@ -218,6 +219,37 @@ pub fn main(init: std.process.Init.Minimal) !void {
     }
 
     const home = environ.get("HOME") orelse "";
+
+    if (std.mem.eql(u8, args[1], "--raw")) {
+        if (args.len == 2) {
+            if (stdinIsTty()) {
+                try stderr_writer.interface.writeAll("usage: smll --raw [--] <cmd...>\n       <cmd> | smll --raw\n");
+                try stderr_writer.interface.flush();
+                std.process.exit(2);
+            }
+            var pipe_out_buf: [32768]u8 = undefined;
+            var pipe_stdout_writer = stdout_file.writer(io, &pipe_out_buf);
+            var in_buf: [4096]u8 = undefined;
+            var stdin_file = std.Io.File.stdin();
+            var stdin_reader = stdin_file.reader(io, &in_buf);
+            try copyRaw(&stdin_reader.interface, &pipe_stdout_writer.interface);
+            try pipe_stdout_writer.interface.flush();
+            return;
+        }
+
+        const child_start: usize = if (std.mem.eql(u8, args[2], "--")) 3 else 2;
+        if (child_start == args.len) {
+            try stderr_writer.interface.writeAll("usage: smll --raw [--] <cmd...>\n       <cmd> | smll --raw\n");
+            try stderr_writer.interface.flush();
+            std.process.exit(2);
+        }
+
+        const code = try wrapper.runRaw(io, environ, args[child_start..]);
+        try stdout_writer.interface.flush();
+        try stderr_writer.interface.flush();
+        exitIfNonzero(code);
+        return;
+    }
 
     if (try hook_eval.maybeRun(arena_allocator, io, args, &stdout_writer.interface, &stderr_writer.interface)) |code| {
         try stdout_writer.interface.flush();
@@ -458,6 +490,17 @@ fn exitIfNonzero(code: u8) void {
 
 fn printHelp(stdout: *std.Io.Writer) !void {
     try stdout.writeAll(help_text);
+}
+
+fn copyRaw(reader: *std.Io.Reader, writer: *std.Io.Writer) !void {
+    var buf: [32768]u8 = undefined;
+    while (true) {
+        const got = reader.readSliceShort(&buf) catch |err| switch (err) {
+            error.ReadFailed => return err,
+        };
+        if (got == 0) return;
+        try writer.writeAll(buf[0..got]);
+    }
 }
 
 fn stdinIsTty() bool {

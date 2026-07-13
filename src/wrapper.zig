@@ -107,19 +107,48 @@ fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code
     try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
 }
 
+fn isSyntheticSuccess(output: []const u8) bool {
+    const trimmed = std.mem.trim(u8, output, " \t\r\n");
+    return eqAny(trimmed, &.{
+        "all tests passed",
+        "all hooks passed",
+        "no type errors",
+        "lint ok",
+        "build complete",
+        "up to date",
+        "plan ok",
+        "gradle ok",
+        "maven ok",
+        "ok",
+    });
+}
+
+test "all synthesized success sentinels are recognized" {
+    inline for (.{
+        "all tests passed",
+        "all hooks passed",
+        "no type errors",
+        "lint ok",
+        "build complete",
+        "up to date",
+        "plan ok",
+        "gradle ok",
+        "maven ok",
+        "ok",
+    }) |sentinel| {
+        try std.testing.expect(isSyntheticSuccess(sentinel));
+    }
+}
+
 fn applyAcliFilter(
-    apply: AcliFilterFn,
+    comptime apply: AcliFilterFn,
     allocator: std.mem.Allocator,
     stdout_slice: []const u8,
     stderr_slice: []const u8,
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) bool {
-    apply(allocator, stdout_slice, stderr_slice, writer) catch {
-        passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-        return false;
-    };
-    return true;
+    return applyFilter(apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer);
 }
 
 fn findHasTypeFile(argv: []const []const u8) bool {
@@ -128,6 +157,36 @@ fn findHasTypeFile(argv: []const []const u8) bool {
         if (std.mem.eql(u8, argv[i], "-type") and std.mem.eql(u8, argv[i + 1], "f")) return true;
     }
     return false;
+}
+
+fn lsRequestsExactOutput(argv: []const []const u8) bool {
+    var parse_options = true;
+    for (argv[1..]) |arg| {
+        if (!parse_options) continue;
+        if (std.mem.eql(u8, arg, "--")) {
+            parse_options = false;
+            continue;
+        }
+        if (arg.len < 2 or arg[0] != '-') continue;
+        if (arg[1] == '-') {
+            if (eqAny(arg, &.{ "--all", "--almost-all", "--directory", "--recursive", "--classify" }) or
+                std.mem.startsWith(u8, arg, "--classify=") or
+                std.mem.startsWith(u8, arg, "--indicator-style=") or
+                isHumanLsFormat(arg)) continue;
+            return true;
+        }
+        for (arg[1..]) |flag| switch (flag) {
+            '1', 'A', 'C', 'F', 'R', 'a', 'd', 'm', 'p', 'x' => {},
+            else => return true,
+        };
+    }
+    return false;
+}
+
+fn isHumanLsFormat(arg: []const u8) bool {
+    if (!std.mem.startsWith(u8, arg, "--format=")) return false;
+    const format = arg["--format=".len..];
+    return eqAny(format, &.{ "across", "commas", "horizontal", "single-column", "vertical" });
 }
 
 fn ghWantsDataOutput(argv: []const []const u8) bool {
@@ -197,13 +256,24 @@ pub fn run(
     var final_stdout = std.Io.Writer.Allocating.init(allocator);
     defer final_stdout.deinit();
 
+    // A child failure is authoritative. If a lossy filter found no diagnostic
+    // or emitted one of its success-only summaries, fall open to the raw
+    // streams instead of contradicting the process status.
+    const failed_filter_output = exit_code != 0 and !last_output_inherited and
+        ((output.len == 0 and (last_raw_stdout.len > 0 or last_raw_stderr.len > 0)) or
+            isSyntheticSuccess(output));
+    if (failed_filter_output) {
+        try final_stdout.writer.writeAll(last_raw_stdout);
+        if (counted_stderr.count == 0) try counted_stderr.writer.writeAll(last_raw_stderr);
+    }
+
     // When both captured stdout and stderr are empty, emit a contextual hint
     // so agents don't loop retrying the command. Streaming commands inherit
     // stdio directly, so their output bypasses this capture buffer and must
     // not get an extra hint appended.
-    if (output.len == 0 and counted_stderr.count == 0 and !last_output_inherited) {
+    if (!failed_filter_output and output.len == 0 and counted_stderr.count == 0 and !last_output_inherited) {
         try writeNoOutputHint(&final_stdout.writer, argv, exit_code);
-    } else {
+    } else if (!failed_filter_output) {
         try final_stdout.writer.writeAll(output);
     }
 
@@ -230,6 +300,29 @@ pub fn run(
         .output_bytes = final_stdout_bytes + counted_stderr.count,
         .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
+    };
+}
+
+/// Public `--raw` execution path. Inherit all three standard streams and pass
+/// the caller's environment through unchanged. Deliberately bypasses capture,
+/// filtering, tee recovery, and statistics.
+pub fn runRaw(
+    io: std.Io,
+    environ: *const std.process.Environ.Map,
+    argv: []const []const u8,
+) !u8 {
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .inherit,
+        .stdout = .inherit,
+        .stderr = .inherit,
+        .environ_map = environ,
+    });
+    defer child.kill(io);
+    const term = try child.wait(io);
+    return switch (term) {
+        .exited => |code| code,
+        .signal, .stopped, .unknown => 1,
     };
 }
 
@@ -292,10 +385,13 @@ fn writeWithFallbackImpl(allocator: std.mem.Allocator, stdout_slice: []const u8,
     if (try writeGenericTableIfUseful(allocator, stdout_slice, writer)) return;
     const should_compact = if (known_text) generic_compact.matchesText(stdout_slice) else generic_compact.matches(stdout_slice);
     if (should_compact) {
-        generic_compact.apply(allocator, stdout_slice, writer) catch {
+        var compact = std.Io.Writer.Allocating.init(allocator);
+        defer compact.deinit();
+        generic_compact.apply(allocator, stdout_slice, &compact.writer) catch {
             try writer.writeAll(stdout_slice);
             return;
         };
+        try writer.writeAll(compact.written());
     } else {
         try writer.writeAll(stdout_slice);
     }
@@ -339,11 +435,14 @@ fn runWrapperInner(
         outer_cmd;
     last_filter_name = cmd_basename;
 
+    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
     var ls_env_map = std.process.Environ.Map.init(allocator);
     var ls_env_map_active = false;
     defer if (ls_env_map_active) ls_env_map.deinit();
     const spawn_env: ?*const std.process.Environ.Map = blk: {
-        if (std.mem.eql(u8, cmd_basename, "ls")) {
+        if (std.mem.eql(u8, cmd_basename, "ls") and
+            !lossless and invocation.passthrough_reason == null and !lsRequestsExactOutput(argv))
+        {
             ls_env_map = environ.clone(allocator) catch break :blk null;
             ls_env_map_active = true;
             ls_env_map.put("LC_ALL", "C") catch break :blk null;
@@ -357,7 +456,6 @@ fn runWrapperInner(
     // inherited directly — no capture, no filtering, no size cap. This includes
     // explicit lossless mode, streaming/interactive commands, and non-verbose
     // curl where stdout may be an API body, archive, or install script.
-    const lossless = envFlagOn(environ, "SMLL_LOSSLESS");
     const is_raw_curl = std.mem.eql(u8, cmd_basename, "curl") and !curl_compact.hasVerboseFlag(argv);
     const is_streaming = lossless or invocation.passthrough_reason != null or isStreamingCommand(cmd_basename, argv) or is_raw_curl;
     if (is_streaming) {
@@ -435,7 +533,7 @@ fn runWrapperInner(
     if (!lossless and is_transparent_runner and
         (hasPackagePrelude(stdout_slice) or hasPackagePrelude(stderr_slice)))
     {
-        if (!applyFilter(tool_compact.applyPackage, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        if (!applyFilter(tool_compact.applyPackage, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         return exit_code;
     }
 
@@ -461,17 +559,17 @@ fn runWrapperInner(
         if (lossless) {
             try writer.writeAll(stdout_slice);
         } else if (is_find_ls and find_compact.matches(stdout_slice)) {
-            if (!applyFilter(find_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(find_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (is_find_plain and !is_find_print0 and find_compact.matchesPlain(stdout_slice)) {
             if (findHasTypeFile(argv)) {
-                if (!applyFilter(find_compact.applyPlainFiles, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(find_compact.applyPlainFiles, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
-                if (!applyFilter(find_compact.applyPlainEntries, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(find_compact.applyPlainEntries, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
         } else if (rg.matchesPattern(stdout_slice)) {
-            if (!applyFilter(rg.applyPattern, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(rg.applyPattern, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if ((is_rg_files_mode or is_find_plain) and rg.matches(stdout_slice)) {
-            if (!applyFilter(rg.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(rg.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
         }
@@ -488,7 +586,7 @@ fn runWrapperInner(
         !lossless and
         package_tree.matches(stdout_slice))
     {
-        if (!applyFilter(package_tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        if (!applyFilter(package_tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         return exit_code;
     }
 
@@ -501,7 +599,7 @@ fn runWrapperInner(
             (std.mem.eql(u8, cmd_basename, "yarn") and std.mem.eql(u8, arg1, "list"))) and
         package_tree.matches(stdout_slice))
     {
-        if (!applyFilter(package_tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+        if (!applyFilter(package_tree.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         return exit_code;
     }
 
@@ -512,7 +610,7 @@ fn runWrapperInner(
         std.mem.eql(u8, cmd_basename, "bun"))
     {
         if (tree.matches(stdout_slice)) {
-            if (!applyFilter(tree.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(tree.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
             return exit_code;
         }
@@ -542,27 +640,27 @@ fn runWrapperInner(
     if (is_pytest or is_cargo_test or is_jest or is_js_test or is_tsc or is_go_test) {
         if (!lossless) {
             if (is_pytest and (pytest.matches(stdout_slice) or pytest.matches(stderr_slice))) {
-                if (!applyFilter(pytest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(pytest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
                 return exit_code;
             }
             if (is_cargo_test and (cargo_test.matches(stdout_slice) or cargo_test.matches(stderr_slice))) {
-                if (!applyFilter(cargo_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(cargo_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
                 return exit_code;
             }
             if (is_jest and (jest.matches(stdout_slice) or jest.matches(stderr_slice))) {
-                if (!applyFilter(jest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(jest.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
                 return exit_code;
             }
             if (is_js_test and (js_test.matches(stdout_slice) or js_test.matches(stderr_slice))) {
-                if (!applyFilter(js_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(js_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
                 return exit_code;
             }
             if (is_tsc and (tsc.matches(stdout_slice) or tsc.matches(stderr_slice))) {
-                if (!applyFilter(tsc.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(tsc.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
                 return exit_code;
             }
             if (is_go_test and (go_test.matches(stdout_slice) or go_test.matches(stderr_slice))) {
-                if (!applyFilter(go_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(go_test.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
                 return exit_code;
             }
         }
@@ -575,7 +673,7 @@ fn runWrapperInner(
     // chatter/table padding.
     if (std.mem.eql(u8, cmd_basename, "mypy")) {
         if (!lossless) {
-            if (!applyFilter(mypy_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(mypy_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -584,7 +682,7 @@ fn runWrapperInner(
 
     if (std.mem.eql(u8, cmd_basename, "ruff")) {
         if (!lossless) {
-            if (!applyFilter(ruff_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(ruff_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -608,24 +706,24 @@ fn runWrapperInner(
         } else if (lossless) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (is_pr and std.mem.eql(u8, arg2, "view")) {
-            if (!applyFilter(gh_compact.applyPrView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(gh_compact.applyPrView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else if (is_pr and std.mem.eql(u8, arg2, "checks")) {
-            if (!applyFilter(gh_compact.applyPrChecks, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(gh_compact.applyPrChecks, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else if (is_run and std.mem.eql(u8, arg2, "view")) {
-            if (!applyFilter(gh_compact.applyRunView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(gh_compact.applyRunView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else if (ghWantsDataOutput(argv)) {
             if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
-                if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             } else {
                 try writer.writeAll(stdout_slice);
                 try stderr_writer.writeAll(stderr_slice);
             }
         } else {
             if (!try writeGenericTableIfUseful(allocator, stdout_slice, writer)) {
-                if (!applyFilter(tool_compact.applyGh, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+                if (!applyFilter(tool_compact.applyGh, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             }
             try stderr_writer.writeAll(stderr_slice);
         }
@@ -646,20 +744,20 @@ fn runWrapperInner(
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
         if (!lossless and is_build_subcmd and build_output.matches(stdout_slice)) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             return exit_code;
         } else if (!lossless and is_build_subcmd and build_output.matches(stderr_slice)) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             return exit_code;
         }
         if (exit_code != 0 and stderr_slice.len > 0 and !isBunScriptEchoOnly(cmd_basename, stderr_slice)) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless and is_js_install_subcmd and npm_install.matches(stdout_slice)) {
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_js_install_subcmd and npm_install.matches(stderr_slice)) {
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless) {
-            if (!applyFilter(tool_compact.applyPackage, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(tool_compact.applyPackage, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -668,7 +766,7 @@ fn runWrapperInner(
 
     if (std.mem.eql(u8, cmd_basename, "turbo")) {
         if (!lossless and (build_output.matches(stdout_slice) or build_output.matches(stderr_slice))) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -689,9 +787,9 @@ fn runWrapperInner(
             // Genuine failure with no recognized error markers — let the user see it raw.
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless and is_composer_install_subcmd and npm_install.matches(stdout_slice)) {
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_composer_install_subcmd and npm_install.matches(stderr_slice)) {
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -702,7 +800,7 @@ fn runWrapperInner(
         if (exit_code != 0 and stderr_slice.len > 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (!lossless) {
-            if (!applyFilter(tool_compact.applyAppleBuild, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(tool_compact.applyAppleBuild, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -713,7 +811,7 @@ fn runWrapperInner(
         if (!lossless and eqAny(arg1, &.{ "build", "test", "format", "restore" }) and
             !dotnet_compact.isQueryInvocation(argv))
         {
-            if (!applyFilter(dotnet_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(dotnet_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -722,7 +820,7 @@ fn runWrapperInner(
 
     if (eqAny(cmd_basename, &.{ "gradle", "gradlew" })) {
         if (!lossless and (gradle_compact.matches(stdout_slice) or gradle_compact.matches(stderr_slice))) {
-            if (!applyFilter(gradle_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(gradle_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -731,7 +829,7 @@ fn runWrapperInner(
 
     if (eqAny(cmd_basename, &.{ "mvn", "mvnw" })) {
         if (!lossless and (maven_compact.matches(stdout_slice) or maven_compact.matches(stderr_slice))) {
-            if (!applyFilter(maven_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(maven_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -740,7 +838,7 @@ fn runWrapperInner(
 
     if (std.mem.eql(u8, cmd_basename, "pre-commit")) {
         if (!lossless and (precommit_compact.matches(stdout_slice) or precommit_compact.matches(stderr_slice))) {
-            if (!applyFilter(precommit_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(precommit_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -749,7 +847,7 @@ fn runWrapperInner(
 
     if (std.mem.eql(u8, cmd_basename, "prettier")) {
         if (!lossless) {
-            if (!applyFilter(prettier_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(prettier_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -758,7 +856,7 @@ fn runWrapperInner(
 
     if (eqAny(cmd_basename, &.{ "eslint", "biome" })) {
         if (!lossless and (lint_compact.matches(stdout_slice) or lint_compact.matches(stderr_slice))) {
-            if (!applyFilter(lint_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(lint_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
@@ -770,7 +868,7 @@ fn runWrapperInner(
         const is_pip_table = eqAny(arg1, &.{ "list", "outdated" });
         const is_pip_install = eqAny(arg1, &.{ "install", "download", "wheel" });
         if (!lossless and (is_pip_table or (is_pip_install and (pip_compact.matches(stdout_slice) or pip_compact.matches(stderr_slice))))) {
-            if (!applyFilter(pip_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(pip_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -779,7 +877,7 @@ fn runWrapperInner(
 
     if (std.mem.eql(u8, cmd_basename, "webpack")) {
         if (!lossless and (build_output.matches(stdout_slice) or build_output.matches(stderr_slice))) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
@@ -789,7 +887,7 @@ fn runWrapperInner(
 
     if (std.mem.eql(u8, cmd_basename, "next") and std.mem.eql(u8, arg1, "build")) {
         if (!lossless and (build_output.matches(stdout_slice) or build_output.matches(stderr_slice))) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
@@ -799,7 +897,7 @@ fn runWrapperInner(
 
     if (eqAny(cmd_basename, &.{ "terraform", "tofu" }) and std.mem.eql(u8, arg1, "plan")) {
         if (!lossless and (plan_compact.matches(stdout_slice) or plan_compact.matches(stderr_slice))) {
-            if (!applyFilter(plan_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(plan_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
@@ -809,7 +907,7 @@ fn runWrapperInner(
 
     if (eqAny(cmd_basename, &.{ "aws", "jq" })) {
         if (!lossless and stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
-            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
@@ -821,9 +919,9 @@ fn runWrapperInner(
         if (lossless or exit_code != 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
-            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (tool_compact.matchesPupTable(stdout_slice)) {
-            if (!applyFilter(tool_compact.applyPupTable, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(tool_compact.applyPupTable, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
@@ -839,18 +937,18 @@ fn runWrapperInner(
         if (lossless or exit_code != 0) {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         } else if (stderr_slice.len == 0 and json_compact.matches(stdout_slice)) {
-            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(json_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (is_jira_workitem and std.mem.eql(u8, arg3, "search")) {
-            if (!applyAcliFilter(acli_compact.applyJiraWorkitemSearch, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyAcliFilter(acli_compact.applyJiraWorkitemSearch, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else if (is_jira_workitem and std.mem.eql(u8, arg3, "view")) {
-            if (!applyAcliFilter(acli_compact.applyJiraWorkitemView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyAcliFilter(acli_compact.applyJiraWorkitemView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else if (is_confluence_page and std.mem.eql(u8, arg3, "view")) {
-            if (!applyAcliFilter(acli_compact.applyConfluencePageView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyAcliFilter(acli_compact.applyConfluencePageView, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else if (is_confluence_space and std.mem.eql(u8, arg3, "list")) {
-            if (!applyAcliFilter(acli_compact.applyConfluenceSpaceList, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyAcliFilter(acli_compact.applyConfluenceSpaceList, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
         } else {
             try writeWithFallbackText(allocator, stdout_slice, writer);
@@ -864,7 +962,7 @@ fn runWrapperInner(
     // child command and its stdout should keep the command's semantics.
     if (std.mem.eql(u8, cmd_basename, "env") and isEnvListingInvocation(argv)) {
         if (!lossless) {
-            if (!applyFilter(env_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(env_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -874,7 +972,7 @@ fn runWrapperInner(
     // wc wrapper — collapse padding while preserving counts, filenames, and stderr.
     if (std.mem.eql(u8, cmd_basename, "wc")) {
         if (!lossless) {
-            if (!applyFilter(wc_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(wc_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -888,7 +986,7 @@ fn runWrapperInner(
     // or other data consumed by downstream tools.
     if (std.mem.eql(u8, cmd_basename, "curl")) {
         if (curl_compact.hasVerboseFlag(argv) and !lossless and curl_compact.matches(stderr_slice) and !curlBodyLooksBinary(stdout_slice, stderr_slice)) {
-            if (!applyFilter(curl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(curl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         }
@@ -901,10 +999,13 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "du")) {
         if (!lossless and du_compact.matches(stdout_slice)) {
             const sort_desc = du_compact.hasSummarizeFlag(argv);
-            du_compact.apply(allocator, stdout_slice, stderr_slice, writer, sort_desc) catch {
+            var compact = std.Io.Writer.Allocating.init(allocator);
+            defer compact.deinit();
+            du_compact.apply(allocator, stdout_slice, stderr_slice, &compact.writer, sort_desc) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-                return 1;
+                return exit_code;
             };
+            try writer.writeAll(compact.written());
         } else {
             try writeWithFallback(allocator, stdout_slice, writer);
         }
@@ -917,26 +1018,36 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "ls")) {
         if (!lossless and ls_compact.matches(stdout_slice)) {
             // Long format (`ls -l`/`-la`): filenames-only summary.
-            ls_compact.apply(allocator, stdout_slice, stderr_slice, writer) catch |err| {
+            var compact = std.Io.Writer.Allocating.init(allocator);
+            defer compact.deinit();
+            ls_compact.apply(allocator, stdout_slice, stderr_slice, &compact.writer) catch |err| {
                 if (err == error.ParsedNothing) {
                     try writeWithFallback(allocator, stdout_slice, writer);
                 } else {
                     passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-                    return 1;
+                    return exit_code;
                 }
+                try stderr_writer.writeAll(stderr_slice);
+                return exit_code;
             };
+            try writer.writeAll(compact.written());
         } else if (!lossless) {
             // Plain `ls` (no `-l`): one-name-per-line normalization, `.`/`..`
             // dropped, multi-directory listings collapsed per dir. Argv proves
             // the source, so `-C`/`-x`/`-m` column splitting is safe here.
-            ls_compact.applyPlain(allocator, stdout_slice, stderr_slice, writer, ls_compact.wantsColumns(argv)) catch |err| {
+            var compact = std.Io.Writer.Allocating.init(allocator);
+            defer compact.deinit();
+            ls_compact.applyPlain(allocator, stdout_slice, stderr_slice, &compact.writer, ls_compact.wantsColumns(argv)) catch |err| {
                 if (err == error.ParsedNothing) {
                     try writeWithFallback(allocator, stdout_slice, writer);
                 } else {
                     passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-                    return 1;
+                    return exit_code;
                 }
+                try stderr_writer.writeAll(stderr_slice);
+                return exit_code;
             };
+            try writer.writeAll(compact.written());
         } else {
             try writeWithFallback(allocator, stdout_slice, writer);
         }
@@ -972,28 +1083,28 @@ fn runWrapperInner(
             (std.mem.eql(u8, arg1, "build") or
                 (std.mem.eql(u8, arg1, "run") and argv.len >= 3 and std.mem.eql(u8, argv[2], "build")));
         if (!lossless and is_docker_compose_logs) {
-            if (!applyFilter(docker_logs.applyCompose, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(docker_logs.applyCompose, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and (is_docker_logs or is_kubectl_logs)) {
-            if (!applyFilter(docker_logs.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(docker_logs.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_docker_images and docker_compact.matchesImages(stdout_slice)) {
-            if (!applyFilter(docker_compact.applyImages, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(docker_compact.applyImages, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_js_build and build_output.matches(stdout_slice)) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_js_build and build_output.matches(stderr_slice)) {
-            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_output.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_js_install and npm_install.matches(stdout_slice)) {
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and is_js_install and npm_install.matches(stderr_slice)) {
             // Several managers write progress + warnings to stderr (npm classic, yarn,
             // pnpm). Dispatch off stderr when stdout doesn't match but stderr does.
-            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(npm_install.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             return exit_code;
         } else if (!lossless and (is_docker_cmd or is_docker_compose_v1) and docker_compact.matches(stdout_slice)) {
-            if (!applyFilter(docker_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(docker_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and std.mem.eql(u8, cmd_basename, "kubectl") and kubectl_compact.matches(stdout_slice)) {
-            if (!applyFilter(kubectl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(kubectl_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (!lossless and columnar.matches(stdout_slice)) {
-            if (!applyFilter(columnar.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(columnar.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             // No bespoke filter matched within the columnar block.
             // Known-text command class (docker/kubectl/etc.) — use the lower gate.
@@ -1023,7 +1134,7 @@ fn runWrapperInner(
     const is_zig_build = is_build_subcmd and std.mem.eql(u8, cmd_basename, "zig");
     if (is_make or is_ninja or is_cargo_build or is_go_build or is_zig_build) {
         if (!lossless and build_compact.matches(stdout_slice, stderr_slice)) {
-            if (!applyFilter(build_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return 1;
+            if (!applyFilter(build_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else {
             try writeWithFallback(allocator, stdout_slice, writer);
             try stderr_writer.writeAll(stderr_slice);
@@ -1034,10 +1145,13 @@ fn runWrapperInner(
     // cat wrapper: compress code output, pass through data files.
     if (std.mem.eql(u8, cmd_basename, "cat")) {
         if (!lossless and cat_compact.matches(stdout_slice)) {
-            cat_compact.apply(allocator, stdout_slice, stderr_slice, writer, argv) catch {
+            var compact = std.Io.Writer.Allocating.init(allocator);
+            defer compact.deinit();
+            cat_compact.apply(allocator, stdout_slice, stderr_slice, &compact.writer, argv) catch {
                 passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-                return 1;
+                return exit_code;
             };
+            try writer.writeAll(compact.written());
         } else {
             try writeWithFallback(allocator, stdout_slice, writer);
         }

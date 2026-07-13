@@ -218,6 +218,41 @@ pub noinline fn conflictPath(line: []const u8) []const u8 {
     return "";
 }
 
+/// Write every line when it fits the budget. Otherwise retain the first
+/// `head_lines` and final `tail_lines`, with an exact and recoverable omission
+/// marker between them. `data` may end with or without a newline.
+pub fn writeHeadTail(
+    writer: *std.Io.Writer,
+    data: []const u8,
+    head_lines: usize,
+    tail_lines: usize,
+) !void {
+    const newline_count = std.mem.count(u8, data, "\n");
+    const line_count = newline_count + @intFromBool(data.len > 0 and data[data.len - 1] != '\n');
+    if (line_count <= head_lines + tail_lines) {
+        try writer.writeAll(data);
+        return;
+    }
+
+    const omitted = line_count - head_lines - tail_lines;
+    const head_end = byteAfterLines(data, head_lines);
+    const tail_start = byteAfterLines(data, line_count - tail_lines);
+    try writer.writeAll(data[0..head_end]);
+    try writer.print("(smll: omitted {d} relevant lines; rerun with smll --raw)\n", .{omitted});
+    try writer.writeAll(data[tail_start..]);
+}
+
+fn byteAfterLines(data: []const u8, line_count: usize) usize {
+    if (line_count == 0) return 0;
+    var seen: usize = 0;
+    for (data, 0..) |c, i| {
+        if (c != '\n') continue;
+        seen += 1;
+        if (seen == line_count) return i + 1;
+    }
+    return data.len;
+}
+
 test "isHex40: exact 40-char hex returns true" {
     try std.testing.expect(isHex40("95cbeda7f53ff8b55d96fa2b5a6ffda1d2da0f37"));
     try std.testing.expect(isHex40("0123456789abcdef0123456789ABCDEF01234567"));
@@ -244,4 +279,23 @@ test "sha7: extracts first 7 chars of a 40-char SHA" {
 test "sha7: works on exactly-7-char input" {
     const short = sha7("abc1234");
     try std.testing.expectEqualSlices(u8, "abc1234", &short);
+}
+
+test "writeHeadTail keeps 120 head and 80 tail lines with exact omission marker" {
+    var input: std.ArrayList(u8) = .empty;
+    defer input.deinit(std.testing.allocator);
+    for (0..205) |i| {
+        const line = try std.fmt.allocPrint(std.testing.allocator, "line-{d}\n", .{i});
+        defer std.testing.allocator.free(line);
+        try input.appendSlice(std.testing.allocator, line);
+    }
+
+    var out = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try writeHeadTail(&out.writer, input.items, 120, 80);
+
+    const got = out.written();
+    try std.testing.expect(std.mem.find(u8, got, "line-119\n(smll: omitted 5 relevant lines; rerun with smll --raw)\nline-125\n") != null);
+    try std.testing.expect(std.mem.find(u8, got, "line-120\n") == null);
+    try std.testing.expect(std.mem.endsWith(u8, got, "line-204\n"));
 }
