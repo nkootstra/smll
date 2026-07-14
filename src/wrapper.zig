@@ -141,7 +141,7 @@ test "all synthesized success sentinels are recognized" {
 }
 
 fn applyAcliFilter(
-    comptime apply: AcliFilterFn,
+    apply: AcliFilterFn,
     allocator: std.mem.Allocator,
     stdout_slice: []const u8,
     stderr_slice: []const u8,

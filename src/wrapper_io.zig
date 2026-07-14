@@ -45,8 +45,10 @@ pub noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Write
     stderr_writer.writeAll(stderr_slice) catch {};
 }
 
+pub const FilterFn = *const fn (std.mem.Allocator, []const u8, []const u8, *std.Io.Writer) anyerror!void;
+
 pub fn applyFilter(
-    comptime apply: anytype,
+    apply: FilterFn,
     allocator: std.mem.Allocator,
     stdout_slice: []const u8,
     stderr_slice: []const u8,
