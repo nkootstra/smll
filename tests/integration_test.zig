@@ -1213,6 +1213,12 @@ test "hook eval ignores unsafe or ambiguous shell shapes" {
         "{\"tool_input\":{\"command\":\"git status \\\"unterminated\"}}\n",
         "{\"tool_input\":{\"command\":\"git status $REF\"}}\n",
         "{\"tool_input\":{\"command\":\"git status ${REF}\"}}\n",
+        "{\"tool_input\":{\"command\":\"git checkout {main,dev}\"}}\n",
+        "{\"tool_input\":{\"command\":\"find . -name *.py\"}}\n",
+        "{\"tool_input\":{\"command\":\"find . -name file?.py\"}}\n",
+        "{\"tool_input\":{\"command\":\"find . -name [ab].py\"}}\n",
+        "{\"tool_input\":{\"command\":\"git checkout ~/repo\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status # inspect repository\"}}\n",
         "{\"tool_input\":{\"command\":\"smll git status\"}}\n",
         "{\"tool_input\":{\"command\":\"python script.py\"}}\n",
     };

@@ -29,8 +29,6 @@ pub fn maybeRun(
     const command = eventCommand(parsed.value) orelse return 0;
     if (!isEligible(command)) return 0;
 
-    const guidance = try std.fmt.allocPrint(allocator, "rerun through smll: smll {s}", .{command});
-    defer allocator.free(guidance);
     return switch (adapter) {
         .claude => blk: {
             try stderr.writeAll("smll hook: wrap noisy command with smll (example: smll ");
@@ -39,6 +37,8 @@ pub fn maybeRun(
             break :blk 2;
         },
         .cursor => blk: {
+            const guidance = try std.fmt.allocPrint(allocator, "rerun through smll: smll {s}", .{command});
+            defer allocator.free(guidance);
             try stdout.writeAll("{\"permission\":\"deny\",\"user_message\":");
             const user_message = try std.fmt.allocPrint(allocator, "wrap with smll: smll {s}", .{command});
             defer allocator.free(user_message);
@@ -49,6 +49,8 @@ pub fn maybeRun(
             break :blk 0;
         },
         .codex => blk: {
+            const guidance = try std.fmt.allocPrint(allocator, "rerun through smll: smll {s}", .{command});
+            defer allocator.free(guidance);
             try stdout.writeAll("{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":");
             try setup_json.writeValue(stdout, .{ .string = guidance });
             try stdout.writeAll("}}\n");
@@ -127,7 +129,9 @@ fn isEligible(command: []const u8) bool {
                     continue;
                 }
                 if (c == ';' or c == '|' or c == '&' or c == '<' or c == '>' or
-                    c == '`' or c == '(' or c == ')') return false;
+                    c == '`' or c == '(' or c == ')' or c == '{' or c == '}' or
+                    c == '*' or c == '?' or c == '[' or c == ']' or c == '~' or
+                    c == '#') return false;
                 if (c == '$') return false;
                 if (c == '\'') {
                     if (!finished) started = true;
