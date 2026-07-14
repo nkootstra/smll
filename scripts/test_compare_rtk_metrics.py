@@ -44,6 +44,27 @@ def row(
 
 
 class CompareRtkMetricTests(unittest.TestCase):
+    def test_declared_omission_recognizes_only_smll_marker_lines(self) -> None:
+        self.assertTrue(
+            compare.has_declared_omission(
+                b"(smll: omitted 5 relevant lines; rerun with smll --raw)\n"
+            )
+        )
+        self.assertTrue(
+            compare.has_declared_omission(
+                b"src/ (4 entries: a, b, c; 1 omitted; --raw for all)\n"
+            )
+        )
+        self.assertFalse(compare.has_declared_omission(b"--raw flag was omitted\n"))
+        self.assertFalse(
+            compare.has_declared_omission(b"child; 1 omitted; --raw for all)\n")
+        )
+        self.assertFalse(
+            compare.has_declared_omission(
+                b"(smll: omitted many relevant lines; rerun with smll --raw)\n"
+            )
+        )
+
     def test_benchmark_savings_are_unclamped(self) -> None:
         self.assertEqual(compare.benchmark_saved_tokens(100, 125), -25)
         self.assertEqual(compare.benchmark_savings_pct(100, 125), -25.0)

@@ -359,14 +359,59 @@ pub fn run(
 }
 
 fn hasDeclaredOmission(output: []const u8) bool {
-    return std.mem.indexOf(u8, output, "omitted") != null and
-        std.mem.indexOf(u8, output, "--raw") != null;
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, "\r");
+        if (hasNumberedSuffix(
+            line,
+            "(smll: omitted ",
+            " relevant lines; rerun with smll --raw)",
+        )) return true;
+
+        if (hasGroupedOmissionLine(line)) return true;
+    }
+    return false;
 }
 
-test "declared omission detection requires a recovery path" {
+fn hasGroupedOmissionLine(line: []const u8) bool {
+    const suffix = " omitted; --raw for all)";
+    if (!std.mem.endsWith(u8, line, suffix)) return false;
+
+    const before_suffix = line[0 .. line.len - suffix.len];
+    const omission_separator = std.mem.lastIndexOf(u8, before_suffix, "; ") orelse return false;
+    if (!isDecimal(before_suffix[omission_separator + 2 ..])) return false;
+
+    const summary = before_suffix[0..omission_separator];
+    const summary_start = std.mem.lastIndexOf(u8, summary, "/ (") orelse return false;
+    const descriptor = summary[summary_start + 3 ..];
+    const count_end = std.mem.indexOfScalar(u8, descriptor, ' ') orelse return false;
+    if (!isDecimal(descriptor[0..count_end])) return false;
+
+    const examples = descriptor[count_end + 1 ..];
+    if (std.mem.startsWith(u8, examples, "entries: ")) return examples.len > "entries: ".len;
+    if (std.mem.startsWith(u8, examples, "files: ")) return examples.len > "files: ".len;
+    return false;
+}
+
+fn hasNumberedSuffix(line: []const u8, prefix: []const u8, suffix: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, prefix) or !std.mem.endsWith(u8, line, suffix)) return false;
+    return isDecimal(line[prefix.len .. line.len - suffix.len]);
+}
+
+fn isDecimal(value: []const u8) bool {
+    if (value.len == 0) return false;
+    for (value) |c| if (!std.ascii.isDigit(c)) return false;
+    return true;
+}
+
+test "declared omission detection recognizes only smll marker lines" {
     try std.testing.expect(hasDeclaredOmission("(smll: omitted 5 relevant lines; rerun with smll --raw)\n"));
+    try std.testing.expect(hasDeclaredOmission("src/ (4 entries: a, b, c; 1 omitted; --raw for all)\n"));
     try std.testing.expect(!hasDeclaredOmission("5 lines omitted by child\n"));
     try std.testing.expect(!hasDeclaredOmission("rerun with smll --raw\n"));
+    try std.testing.expect(!hasDeclaredOmission("--raw flag was omitted\n"));
+    try std.testing.expect(!hasDeclaredOmission("child; 1 omitted; --raw for all)\n"));
+    try std.testing.expect(!hasDeclaredOmission("(smll: omitted many relevant lines; rerun with smll --raw)\n"));
 }
 
 /// Public `--raw` execution path. Inherit all three standard streams and pass

@@ -1364,7 +1364,7 @@ test "wrapper: declared find omissions are not formatting savings" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(std.mem.find(u8, result.stdout, "1 omitted; --raw for all") != null);
-    const omitted = fixture.len - result.stdout.len;
+    const omitted = fixture.len -| result.stdout.len;
     try std.testing.expect(omitted > 0);
     const omitted_field = try std.fmt.allocPrint(allocator, "\"omitted_bytes\":{d}", .{omitted});
     defer allocator.free(omitted_field);
