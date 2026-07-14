@@ -454,14 +454,14 @@ fn isHintLine(line: []const u8) bool {
 
 fn isOperationState(line: []const u8) bool {
     const state = std.mem.trim(u8, line, " \t\r");
-    return std.mem.startsWith(u8, state, "interactive rebase in progress") or
-        std.mem.startsWith(u8, state, "You are currently rebasing") or
-        std.mem.startsWith(u8, state, "You are currently editing a commit while rebasing") or
-        std.mem.startsWith(u8, state, "All conflicts fixed but you are still merging") or
-        std.mem.startsWith(u8, state, "You have unmerged paths") or
-        std.mem.startsWith(u8, state, "You are currently cherry-picking") or
-        std.mem.startsWith(u8, state, "You are currently reverting") or
-        std.mem.startsWith(u8, state, "You are currently bisecting");
+    if (state.len == 0) return false;
+    return switch (state[0]) {
+        'i' => std.mem.startsWith(u8, state, "interactive rebase in progress"),
+        'A' => std.mem.startsWith(u8, state, "All conflicts fixed but you are still merging"),
+        'Y' => std.mem.startsWith(u8, state, "You have unmerged paths") or
+            std.mem.startsWith(u8, state, "You are currently "),
+        else => false,
+    };
 }
 
 /// Extract the number following `marker` in `line` (e.g. "by 2 commits." → "2").

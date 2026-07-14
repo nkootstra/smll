@@ -1,5 +1,25 @@
 const std = @import("std");
 
+pub noinline fn writeDecimal(writer: *std.Io.Writer, value: usize) !void {
+    var buf: [20]u8 = undefined;
+    var n = value;
+    var i: usize = buf.len;
+    if (n == 0) return writer.writeByte('0');
+    while (n > 0) {
+        i -= 1;
+        buf[i] = @intCast('0' + n % 10);
+        n /= 10;
+    }
+    try writer.writeAll(buf[i..]);
+}
+
+pub noinline fn writeOmission(writer: *std.Io.Writer, total: usize, shown: usize) !void {
+    if (total <= shown) return;
+    try writer.writeAll("; ");
+    try writeDecimal(writer, total - shown);
+    try writer.writeAll(" omitted; --raw for all");
+}
+
 /// True when `line` is a git transfer progress line that should be filtered.
 pub fn isGitProgressLine(line: []const u8) bool {
     if (line.len == 0) return false;
@@ -238,7 +258,9 @@ pub fn writeHeadTail(
     const head_end = byteAfterLines(data, head_lines);
     const tail_start = byteAfterLines(data, line_count - tail_lines);
     try writer.writeAll(data[0..head_end]);
-    try writer.print("(smll: omitted {d} relevant lines; rerun with smll --raw)\n", .{omitted});
+    try writer.writeAll("(smll: omitted ");
+    try writeDecimal(writer, omitted);
+    try writer.writeAll(" relevant lines; rerun with smll --raw)\n");
     try writer.writeAll(data[tail_start..]);
 }
 

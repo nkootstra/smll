@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -124,7 +125,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
                 try writer.writeAll(basename(entry.path));
                 if (entry.is_dir) try writer.writeByte('/');
             }
-            try writeOmission(writer, count, 3);
+            try util.writeOmission(writer, count, 3);
             try writer.writeByte(')');
         } else {
             for (entries.items[i..j]) |e| {
@@ -211,7 +212,7 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
                 // examples only need to carry the basename.
                 try writer.writeAll(basename(entry.path));
             }
-            try writeOmission(writer, count, 3);
+            try util.writeOmission(writer, count, 3);
             try writer.writeByte(')');
         } else {
             for (entries.items[i..j]) |entry| {
@@ -223,13 +224,6 @@ fn applyPlain(allocator: Allocator, stdout: []const u8, stderr: []const u8, writ
         i = j;
     }
     if (!first) try writer.writeByte('\n');
-}
-
-fn writeOmission(writer: *Writer, total: usize, shown: usize) !void {
-    if (total <= shown) return;
-    try writer.writeAll("; ");
-    try ansi.writeDecimal(writer, total - shown);
-    try writer.writeAll(" omitted; --raw for all");
 }
 
 fn writeParentLabel(writer: *Writer, parent: []const u8) !void {

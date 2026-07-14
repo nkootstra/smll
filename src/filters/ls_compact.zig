@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const util = @import("util");
 
 // LOSSY compact filter for `ls -l` / `ls -la` — on by default (v0.6).
 // Set SMLL_LOSSLESS=1 to bypass.
@@ -384,7 +385,7 @@ fn flushSegment(writer: *Writer, header: ?[]const u8, entries: []const []const u
         try newline(writer, first);
         try writer.writeAll(h);
         try writer.writeAll("/ (");
-        try writer.print("{d}", .{real});
+        try util.writeDecimal(writer, real);
         try writer.writeAll(" entries: ");
         var shown: usize = 0;
         for (entries) |e| {
@@ -394,7 +395,7 @@ fn flushSegment(writer: *Writer, header: ?[]const u8, entries: []const []const u
             try writer.writeAll(e);
             shown += 1;
         }
-        if (real > shown) try writer.print("; {d} omitted; --raw for all", .{real - shown});
+        try util.writeOmission(writer, real, shown);
         try writer.writeByte(')');
     } else {
         for (entries) |e| {

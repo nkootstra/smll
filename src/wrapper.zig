@@ -44,6 +44,7 @@ const json_compact = @import("json_compact");
 const package_tree = @import("package_tree");
 const generic_compact = @import("generic_compact");
 const cat_compact = @import("cat_compact");
+const ansi = @import("ansi");
 const pipeline = @import("pipeline.zig");
 const pipe_filters = @import("pipe_filters.zig");
 
@@ -104,7 +105,11 @@ fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code
         }
     }
 
-    try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
+    try writer.writeAll("(smll: ");
+    try writer.writeAll(cmd);
+    try writer.writeAll(" exited ");
+    try ansi.writeDecimal(writer, exit_code);
+    try writer.writeAll(" with no output)\n");
 }
 
 fn isSyntheticSuccess(output: []const u8) bool {
@@ -318,8 +323,11 @@ pub fn run(
     if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
         const home = environ.get("HOME") orelse "";
         if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
-            if (!failed_filter_output)
-                final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+            if (!failed_filter_output) {
+                final_stdout.writer.writeAll("\n(smll: full output saved to ") catch {};
+                final_stdout.writer.writeAll(path) catch {};
+                final_stdout.writer.writeAll(")\n") catch {};
+            }
         }
     }
 

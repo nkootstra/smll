@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 const ansi = @import("ansi");
+const util = @import("util");
 
 // v0.6 grammar for `tree` output:
 //
@@ -357,7 +358,7 @@ fn writeCollapsedDirLine(
     try writer.writeAll(if (directChildrenAllFiles(entries, idx, end)) "files" else "entries");
     try writer.writeAll(": ");
     try writeDirectExamples(writer, entries, idx, end);
-    try writeOmission(writer, direct_count, 3);
+    try util.writeOmission(writer, direct_count, 3);
     try writer.writeByte(')');
     first_out.* = false;
 }
@@ -385,7 +386,7 @@ fn writeCollapsedFilesLine(
         try writer.writeAll(entries[i].name);
         written += 1;
     }
-    try writeOmission(writer, file_count, 3);
+    try util.writeOmission(writer, file_count, 3);
     try writer.writeByte(')');
     first_out.* = false;
 }
@@ -414,13 +415,6 @@ fn writeDirectExamples(writer: *Writer, entries: []const TreeEntry, idx: usize, 
         if (entries[i].is_dir and !std.mem.endsWith(u8, entries[i].name, "/")) try writer.writeByte('/');
         written += 1;
     }
-}
-
-fn writeOmission(writer: *Writer, total: usize, shown: usize) !void {
-    if (total <= shown) return;
-    try writer.writeAll("; ");
-    try ansi.writeDecimal(writer, total - shown);
-    try writer.writeAll(" omitted; --raw for all");
 }
 
 fn writeIndent(writer: *Writer, depth: usize) !void {
