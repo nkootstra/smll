@@ -191,7 +191,7 @@ pub fn run(
     last_filter_name = "passthrough";
     last_raw_stdout = &.{};
     last_raw_stderr = &.{};
-    const exit_code = try runWrapperInner(allocator, io, environ, argv, &capture.writer, &counted_stderr.writer);
+    const exit_code = try runWrapperInner(allocator, io, environ, argv, invocation, &capture.writer, &counted_stderr.writer);
     const output = capture.written();
 
     var final_stdout = std.Io.Writer.Allocating.init(allocator);
@@ -319,6 +319,7 @@ fn runWrapperInner(
     io: std.Io,
     environ: *const std.process.Environ.Map,
     original_argv: []const []const u8,
+    invocation: wrapper_util.Invocation,
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !u8 {
@@ -330,7 +331,6 @@ fn runWrapperInner(
     // shape ("Apr 22") regardless of the user's system locale. Without this,
     // non-English locales produce different date formats that shift the field
     // count and cause extractName() to return null for every line.
-    const invocation = wrapper_util.classifyInvocation(original_argv);
     const argv = invocation.logical_argv;
     const outer_cmd = argv[0];
     const cmd_basename = if (std.mem.findScalarLast(u8, outer_cmd, '/')) |idx|

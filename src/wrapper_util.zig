@@ -177,7 +177,7 @@ fn scanRunnerOptions(
         if (std.mem.eql(u8, arg, "--")) return if (stop_at == null) index + 1 else null;
         if (arg.len == 0 or arg[0] != '-') return if (stop_at == null) index else null;
         if (optionMatches(arg, opaque_options) != .none) return null;
-        if (optionMatches(arg, boolean_options) == .separate) {
+        if (matchesBooleanOption(arg, boolean_options)) {
             index += 1;
             continue;
         }
@@ -201,6 +201,27 @@ fn toolSlice(argv: []const []const u8, raw_index: usize) ?[]const []const u8 {
 }
 
 const OptionMatch = enum { none, separate, inline_value };
+
+fn matchesBooleanOption(arg: []const u8, options: []const []const u8) bool {
+    switch (optionMatches(arg, options)) {
+        .none => return false,
+        .separate => return true,
+        .inline_value => {},
+    }
+
+    if (arg.len <= 2 or arg[0] != '-' or arg[1] == '-') return false;
+    for (arg[1..]) |flag| {
+        var known = false;
+        for (options) |option| {
+            if (option.len == 2 and option[0] == '-' and option[1] == flag) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) return false;
+    }
+    return true;
+}
 
 fn optionMatches(arg: []const u8, options: []const []const u8) OptionMatch {
     for (options) |option| {
@@ -591,13 +612,33 @@ test "invocation classification: known runner options unwrap to a borrowed inner
     }
 }
 
+test "invocation classification: stacked short runner booleans unwrap" {
+    const cases = [_]struct { original: []const []const u8, logical: []const []const u8 }{
+        .{
+            .original = &.{ "poetry", "-qq", "run", "pytest", "-q" },
+            .logical = &.{ "pytest", "-q" },
+        },
+        .{
+            .original = &.{ "pnpm", "-rw", "exec", "pytest", "-q" },
+            .logical = &.{ "pytest", "-q" },
+        },
+    };
+    for (cases) |case| {
+        const invocation = classifyInvocation(case.original);
+        try std.testing.expectEqualDeep(case.logical, invocation.logical_argv);
+        try std.testing.expectEqual(@as(?PassthroughReason, null), invocation.passthrough_reason);
+    }
+}
+
 test "invocation classification: unknown and opaque runner options stay exact" {
     const cases = [_][]const []const u8{
         &.{ "uv", "run", "--future", "value", "pytest" },
         &.{ "uvx", "--future", "value", "ruff" },
         &.{ "poetry", "--future", "run", "pytest" },
+        &.{ "poetry", "-qz", "run", "pytest" },
         &.{ "poetry", "install" },
         &.{ "pnpm", "--future", "exec", "pytest" },
+        &.{ "pnpm", "-rz", "exec", "pytest" },
         &.{ "pnpm", "--future", "pytest" },
         &.{ "npx", "--future", "pytest" },
         &.{ "npx", "-c", "pytest -q" },
