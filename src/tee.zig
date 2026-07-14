@@ -102,14 +102,15 @@ fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
             continue;
         }
         if (std.mem.indexOfScalar(u8, arg, '=')) |eq| {
-            if (isSensitiveName(arg[0..eq])) {
+            const name = arg[0..eq];
+            if (isSensitiveName(name) and !isCookieJarFlag(name)) {
                 try w.writeAll(arg[0 .. eq + 1]);
                 try w.writeAll("[REDACTED]");
                 continue;
             }
         }
         try w.writeAll(arg);
-        if (arg.len > 0 and arg[0] == '-' and isSensitiveName(arg)) redact_next = true;
+        if (arg.len > 0 and arg[0] == '-' and isSensitiveName(arg) and !isVisibleSensitiveFlag(arg)) redact_next = true;
     }
     try w.writeAll("\n# exit: ");
     try w.printInt(exit_code, 10, .lower, .{});
@@ -121,6 +122,18 @@ fn isSensitiveName(name: []const u8) bool {
         if (containsAsciiIgnoreCase(name, needle)) return true;
     }
     return false;
+}
+
+fn isVisibleSensitiveFlag(name: []const u8) bool {
+    if (!std.mem.startsWith(u8, name, "--")) return false;
+    const flag = name[2..];
+    return std.mem.startsWith(u8, flag, "no-") or
+        std.mem.startsWith(u8, flag, "disable-") or
+        isCookieJarFlag(name);
+}
+
+fn isCookieJarFlag(name: []const u8) bool {
+    return std.mem.eql(u8, name, "--cookie-jar");
 }
 
 fn containsAsciiIgnoreCase(haystack: []const u8, needle: []const u8) bool {
@@ -376,6 +389,61 @@ test "maybeRecord: redacts secret-bearing argv values" {
     try std.testing.expect(std.mem.find(u8, data, "--api-key=[REDACTED]") != null);
     try std.testing.expect(std.mem.find(u8, data, "PASSWORD=[REDACTED]") != null);
     try std.testing.expect(std.mem.find(u8, data, "--verbose") != null);
+}
+
+test "writeHeader keeps sensitive-looking toggles and cookie jar paths visible" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try writeHeader(&out.writer, &.{
+        "my-cmd",
+        "--no-cookie",
+        "--output",
+        "file.txt",
+        "--no-token",
+        "next-token-arg",
+        "--disable-password",
+        "next-password-arg",
+        "--cookie-jar",
+        "/tmp/cookies.txt",
+        "--cookie-jar=/tmp/other-cookies.txt",
+    }, 1);
+
+    try std.testing.expect(std.mem.find(u8, out.written(),
+        "# argv: my-cmd --no-cookie --output file.txt --no-token next-token-arg --disable-password next-password-arg --cookie-jar /tmp/cookies.txt --cookie-jar=/tmp/other-cookies.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "[REDACTED]") == null);
+}
+
+test "writeHeader exceptions do not weaken secret value redaction" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try writeHeader(&out.writer, &.{
+        "my-cmd",
+        "--password",
+        "password-value",
+        "--token=token-value",
+        "--no-token=token-disabled",
+        "--client-secret",
+        "secret-value",
+        "--authorization",
+        "Bearer auth-value",
+        "--cookie",
+        "cookie-value",
+        "API_KEY=key-value",
+    }, 1);
+
+    const header = out.written();
+    inline for (.{ "password-value", "token-value", "token-disabled", "secret-value", "auth-value", "cookie-value", "key-value" }) |secret| {
+        try std.testing.expect(std.mem.find(u8, header, secret) == null);
+    }
+    try std.testing.expect(std.mem.find(u8, header, "--password [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--token=[REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--no-token=[REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--client-secret [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--authorization [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--cookie [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "API_KEY=[REDACTED]") != null);
 }
 
 test "maybeRecord: uses collision-resistant private tee paths" {

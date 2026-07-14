@@ -134,9 +134,8 @@ fn recordInner(
         }
 
         try saveJson(allocator, io, dir_path, path, s);
+        try history.append(allocator, io, home, dir_path, label, input_bytes, output_bytes, options);
     }
-
-    try history.append(allocator, io, home, dir_path, label, input_bytes, output_bytes, options);
 }
 
 pub fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
@@ -408,17 +407,24 @@ fn parseDurationMs(s: []const u8) !i64 {
 }
 
 fn reset(allocator: Allocator, io: Io, home: []const u8, all: bool) !void {
+    const dir_path = try joinPath(allocator, home, stats_dir);
+    defer allocator.free(dir_path);
+    try state_io.ensurePrivateDir(io, dir_path);
+
+    const lock_path = try joinPath(allocator, home, stats_lock_file);
+    defer allocator.free(lock_path);
+    const lock_file = try state_io.openExclusivePrivateLock(io, lock_path);
+    defer if (lock_file) |file| file.close(io);
+
     const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
     Io.Dir.cwd().deleteFile(io, path) catch {};
     try history.reset(allocator, io, home);
     if (!all) return;
 
-    inline for (.{ stats_lock_file, history_lock_file }) |relative| {
-        const lock_path = try joinPath(allocator, home, relative);
-        defer allocator.free(lock_path);
-        Io.Dir.cwd().deleteFile(io, lock_path) catch {};
-    }
+    const history_lock_path = try joinPath(allocator, home, history_lock_file);
+    defer allocator.free(history_lock_path);
+    Io.Dir.cwd().deleteFile(io, history_lock_path) catch {};
     const tee_path = try joinPath(allocator, home, tee_dir);
     defer allocator.free(tee_path);
     Io.Dir.cwd().deleteTree(io, tee_path) catch {};
@@ -813,7 +819,54 @@ test "reset deletes stats and history" {
     try expectMissing(tmp.dir, ".smll/history.jsonl");
 }
 
-test "reset all deletes stats history locks and tee files" {
+test "reset waits for the stats writer lock" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(io, ".smll");
+
+    const lock_path = try joinPath(allocator, home, stats_lock_file);
+    defer allocator.free(lock_path);
+    const maybe_lock = try state_io.openExclusivePrivateLock(io, lock_path);
+    if (maybe_lock == null) return;
+    const held_lock = maybe_lock.?;
+
+    var started: std.atomic.Value(bool) = .init(false);
+    var finished: std.atomic.Value(bool) = .init(false);
+    const Context = struct {
+        home: []const u8,
+        started: *std.atomic.Value(bool),
+        finished: *std.atomic.Value(bool),
+
+        fn run(ctx: @This()) void {
+            ctx.started.store(true, .release);
+            reset(std.heap.page_allocator, std.testing.io, ctx.home, false) catch return;
+            ctx.finished.store(true, .release);
+        }
+    };
+    const thread = try std.Thread.spawn(.{}, Context.run, .{Context{
+        .home = home,
+        .started = &started,
+        .finished = &finished,
+    }});
+
+    while (!started.load(.acquire)) try std.Thread.yield();
+    const deadline = Io.Clock.real.now(io).toNanoseconds() + 50 * std.time.ns_per_ms;
+    while (!finished.load(.acquire) and Io.Clock.real.now(io).toNanoseconds() < deadline) {
+        try std.Thread.yield();
+    }
+    const completed_while_locked = finished.load(.acquire);
+    held_lock.close(io);
+    thread.join();
+
+    try std.testing.expect(!completed_while_locked);
+    try std.testing.expect(finished.load(.acquire));
+}
+
+test "reset all deletes state and tee while retaining the coordination lock" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -825,9 +878,11 @@ test "reset all deletes stats history locks and tee files" {
     }
 
     try reset(allocator, std.testing.io, home, true);
-    inline for (.{ ".smll/stats.json", ".smll/stats.lock", ".smll/history.jsonl", ".smll/history.lock" }) |name| {
+    inline for (.{ ".smll/stats.json", ".smll/history.jsonl", ".smll/history.lock" }) |name| {
         try expectMissing(tmp.dir, name);
     }
+    const stats_lock = try tmp.dir.openFile(std.testing.io, ".smll/stats.lock", .{});
+    stats_lock.close(std.testing.io);
     tmp.dir.access(std.testing.io, ".smll/tee", .{}) catch |err| {
         try std.testing.expectEqual(error.FileNotFound, err);
         return;
