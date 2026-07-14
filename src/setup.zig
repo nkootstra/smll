@@ -139,88 +139,143 @@ fn runAction(
 }
 
 fn setupOpencode(
-    allocator: std.mem.Allocator,
+    backing_allocator: std.mem.Allocator,
     io: std.Io,
     home: []const u8,
     dry_run: bool,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const plugin_dir = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy");
-    defer allocator.free(plugin_dir);
     const index_path = try setup_io.concat2(allocator, plugin_dir, "/index.ts");
-    defer allocator.free(index_path);
     const pkg_path = try setup_io.concat2(allocator, plugin_dir, "/package.json");
-    defer allocator.free(pkg_path);
     const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
-    defer allocator.free(config_path);
 
     const existing_config = try setup_io.readFileOptional(allocator, io, config_path);
-    defer if (existing_config) |buf| allocator.free(buf);
     if (try setup_io.checkConflictingIntegration(existing_config, "opencode", "opencode.json", stderr)) return 1;
 
-    // Write plugin package (index.ts + package.json).
-    const executable_path = try std.process.executablePathAlloc(io, allocator);
-    defer allocator.free(executable_path);
-    const plugin_script = try buildOpencodePluginScript(allocator, executable_path);
-    defer allocator.free(plugin_script);
-    const pkg_json = "{\"name\":\"smll-proxy\",\"version\":\"1.0.0\",\"type\":\"module\",\"main\":\"index.ts\"}\n";
-
-    const existing_index = try setup_io.readFileOptional(allocator, io, index_path);
-    defer if (existing_index) |buf| allocator.free(buf);
-    const index_same = if (existing_index) |buf| std.mem.eql(u8, buf, plugin_script) else false;
-
-    if (!index_same) {
-        try setup_io.writeOrReport(allocator, io, index_path, plugin_script, dry_run, stdout);
-        try setup_io.writeOrReport(allocator, io, pkg_path, pkg_json, dry_run, stdout);
-    } else {
-        try stdout.writeAll("plugin up to date\n");
-    }
-
-    // Register plugin in opencode.json plugin array.
+    // Validate every input before changing the plugin package or its config.
     var config_json = setup_json.loadOrCreateObject(allocator, existing_config, false) catch {
         try setup_io.writeJsonError(stderr, "opencode.json");
         return 1;
     };
     defer config_json.deinit();
 
+    const executable_path = try std.process.executablePathAlloc(io, allocator);
+    if (!try setup_io.validateHookEvaluator(allocator, io, executable_path, "opencode", stderr)) return 1;
+    const plugin_script = try buildOpencodePluginScript(allocator, executable_path);
+    const pkg_json = "{\"name\":\"smll-proxy\",\"version\":\"1.0.0\",\"type\":\"module\",\"main\":\"index.ts\"}\n";
+
+    const existing_index = try setup_io.readFileOptional(allocator, io, index_path);
+    const existing_pkg = try setup_io.readFileOptional(allocator, io, pkg_path);
+    const index_same = if (existing_index) |buf| std.mem.eql(u8, buf, plugin_script) else false;
+    const pkg_same = if (existing_pkg) |buf| std.mem.eql(u8, buf, pkg_json) else false;
+
+    var ownership = setup_io.readOwnership(allocator, io, home, "opencode") catch setup_io.Ownership.missing;
+    const owned_digests = if (ownership.validPayload()) |payload| parsePluginOwnership(payload) else null;
+    if (ownership == .modified or ownership.validPayload() != null and owned_digests == null) {
+        try stderr.writeAll("smll opencode ownership record was modified; setup left files untouched\n");
+        return 1;
+    }
+    if (!index_same and existing_index != null and !matchesOwnedDigest(existing_index.?, if (owned_digests) |d| d.index else null)) {
+        try stderr.writeAll("opencode smll-proxy/index.ts was modified; setup left it untouched\n");
+        return 1;
+    }
+    if (!pkg_same and existing_pkg != null and !matchesOwnedDigest(existing_pkg.?, if (owned_digests) |d| d.package else null)) {
+        try stderr.writeAll("opencode smll-proxy/package.json was modified; setup left it untouched\n");
+        return 1;
+    }
+
     const pa = config_json.arena.allocator();
     const already_registered = try ensureOpencodePluginEnabled(pa, &config_json.value, plugin_dir);
 
-    if (!already_registered) {
-        try setup_io.writeBackupIfExists(allocator, io, config_path, dry_run);
-        try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
-    } else {
-        try stdout.writeAll("already installed\n");
+    if (dry_run) {
+        if (!index_same) try setup_io.writeOrReport(allocator, io, index_path, plugin_script, true, stdout);
+        if (!pkg_same) try setup_io.writeOrReport(allocator, io, pkg_path, pkg_json, true, stdout);
+        if (index_same and pkg_same) try stdout.writeAll("plugin up to date\n");
+        if (!already_registered) {
+            try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, true, stdout);
+        } else {
+            try stdout.writeAll("already installed\n");
+        }
+        try stdout.writeAll("[dry-run] would record smll plugin ownership\n");
+        return 0;
     }
 
-    if (!dry_run) try stdout.writeAll("ok\n");
+    var index_written = false;
+    var pkg_written = false;
+    var config_written = false;
+    if (!index_same) {
+        setup_io.writeOrReport(allocator, io, index_path, plugin_script, false, stdout) catch |err| return err;
+        index_written = true;
+    }
+    if (!pkg_same) {
+        setup_io.writeOrReport(allocator, io, pkg_path, pkg_json, false, stdout) catch |err| {
+            if (index_written) setup_io.restoreOptional(io, index_path, existing_index) catch {};
+            return err;
+        };
+        pkg_written = true;
+    }
+    if (index_same and pkg_same) try stdout.writeAll("plugin up to date\n");
+
+    if (!already_registered) {
+        setup_io.writeBackupIfExists(allocator, io, config_path, false) catch |err| {
+            rollbackPluginWrites(io, index_path, existing_index, index_written, pkg_path, existing_pkg, pkg_written);
+            return err;
+        };
+        setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, false, stdout) catch |err| {
+            rollbackPluginWrites(io, index_path, existing_index, index_written, pkg_path, existing_pkg, pkg_written);
+            return err;
+        };
+        config_written = true;
+    } else try stdout.writeAll("already installed\n");
+
+    const owned_payload = try buildPluginOwnership(allocator, plugin_script, pkg_json);
+    setup_io.writeOwnership(allocator, io, home, "opencode", owned_payload) catch |err| {
+        if (config_written) {
+            setup_io.restoreOptional(io, config_path, existing_config) catch {};
+            setup_io.removeBackupIfExists(allocator, io, config_path) catch {};
+        }
+        rollbackPluginWrites(io, index_path, existing_index, index_written, pkg_path, existing_pkg, pkg_written);
+        return err;
+    };
+
+    try stdout.writeAll("ok\n");
     return 0;
 }
 
 fn unsetupOpencode(
-    allocator: std.mem.Allocator,
+    backing_allocator: std.mem.Allocator,
     io: std.Io,
     home: []const u8,
     dry_run: bool,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const plugin_dir = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy");
-    defer allocator.free(plugin_dir);
     const index_path = try setup_io.concat2(allocator, plugin_dir, "/index.ts");
-    defer allocator.free(index_path);
     const pkg_path = try setup_io.concat2(allocator, plugin_dir, "/package.json");
-    defer allocator.free(pkg_path);
     // Also clean up legacy single-file plugin if present.
     const legacy_path = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy.ts");
-    defer allocator.free(legacy_path);
     const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
-    defer allocator.free(config_path);
 
     // Unregister the plugin entry from opencode.json (symmetric to setupOpencode).
     const existing_config = try setup_io.readFileOptional(allocator, io, config_path);
-    defer if (existing_config) |buf| allocator.free(buf);
+
+    var ownership = setup_io.readOwnership(allocator, io, home, "opencode") catch setup_io.Ownership.missing;
+    const owned_digests = if (ownership.validPayload()) |payload| parsePluginOwnership(payload) else null;
+    if (ownership == .missing or ownership == .modified or owned_digests == null) {
+        try stderr.writeAll("smll opencode ownership record missing or modified; no plugin files or config were removed\n");
+        return 0;
+    }
 
     if (existing_config) |_| {
         var config_json = setup_json.loadOrCreateObject(allocator, existing_config, false) catch {
@@ -238,16 +293,71 @@ fn unsetupOpencode(
         }
     }
 
-    for ([_][]const u8{ index_path, pkg_path, legacy_path }) |path| {
-        const existing = try setup_io.readFileOptional(allocator, io, path);
-        defer if (existing) |buf| allocator.free(buf);
-        if (existing != null) {
-            try setup_io.deleteOrReport(allocator, io, path, dry_run, stdout);
+    var modified_artifact = false;
+    const index = try setup_io.readFileOptional(allocator, io, index_path);
+    if (index) |data| {
+        if (matchesOwnedDigest(data, owned_digests.?.index)) {
+            try setup_io.deleteOrReport(allocator, io, index_path, dry_run, stdout);
+        } else {
+            modified_artifact = true;
+            try stderr.writeAll("opencode smll-proxy/index.ts was modified; file left untouched\n");
+        }
+    }
+    const pkg = try setup_io.readFileOptional(allocator, io, pkg_path);
+    if (pkg) |data| {
+        if (matchesOwnedDigest(data, owned_digests.?.package)) {
+            try setup_io.deleteOrReport(allocator, io, pkg_path, dry_run, stdout);
+        } else {
+            modified_artifact = true;
+            try stderr.writeAll("opencode smll-proxy/package.json was modified; file left untouched\n");
         }
     }
 
-    if (!dry_run) try stdout.writeAll("ok\n");
+    const legacy = try setup_io.readFileOptional(allocator, io, legacy_path);
+    if (legacy != null) try stderr.writeAll("legacy opencode plugin left untouched because its ownership is unknown\n");
+    if (!dry_run and !modified_artifact) {
+        try setup_io.deleteOwnership(allocator, io, home, "opencode");
+        try stdout.writeAll("ok\n");
+    }
     return 0;
+}
+
+const PluginOwnership = struct {
+    index: []const u8,
+    package: []const u8,
+};
+
+fn buildPluginOwnership(allocator: std.mem.Allocator, index: []const u8, package: []const u8) ![]u8 {
+    const payload = try allocator.alloc(u8, 33);
+    setup_io.digestHex(index, payload[0..16]);
+    payload[16] = '\n';
+    setup_io.digestHex(package, payload[17..33]);
+    return payload;
+}
+
+fn parsePluginOwnership(payload: []const u8) ?PluginOwnership {
+    if (payload.len != 33 or payload[16] != '\n') return null;
+    return .{ .index = payload[0..16], .package = payload[17..33] };
+}
+
+fn matchesOwnedDigest(data: []const u8, expected: ?[]const u8) bool {
+    const digest = expected orelse return false;
+    var actual: [16]u8 = undefined;
+    setup_io.digestHex(data, &actual);
+    return std.mem.eql(u8, digest, &actual);
+}
+
+fn rollbackPluginWrites(
+    io: std.Io,
+    index_path: []const u8,
+    existing_index: ?[]const u8,
+    index_written: bool,
+    pkg_path: []const u8,
+    existing_pkg: ?[]const u8,
+    pkg_written: bool,
+) void {
+    if (index_written) setup_io.restoreOptional(io, index_path, existing_index) catch {};
+    if (pkg_written) setup_io.restoreOptional(io, pkg_path, existing_pkg) catch {};
 }
 
 fn ensureOpencodePluginEnabled(pa: std.mem.Allocator, root: *JValue, plugin_path: []const u8) !bool {
@@ -312,6 +422,88 @@ test "opencode plugin routes classification through the absolute smll evaluator"
     try std.testing.expect(std.mem.find(u8, script, "opencode") != null);
     try std.testing.expect(std.mem.find(u8, script, "TextEncoder") != null);
     try std.testing.expect(std.mem.find(u8, script, "new Set") == null);
+}
+
+test "opencode setup validates config before writing plugin files" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".config/opencode");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".config/opencode/opencode.json", .data = "{invalid" });
+
+    var stdout = std.Io.Writer.Allocating.init(allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(allocator);
+    defer stderr.deinit();
+    try std.testing.expectEqual(@as(u8, 1), try setupOpencode(allocator, std.testing.io, home, false, &stdout.writer, &stderr.writer));
+    const index_path = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy/index.ts");
+    defer allocator.free(index_path);
+    try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, index_path)) == null);
+}
+
+test "opencode unsetup leaves modified owned plugin files and warns" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    var stdout = std.Io.Writer.Allocating.init(allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(allocator);
+    defer stderr.deinit();
+
+    try std.testing.expectEqual(@as(u8, 0), try setupOpencode(allocator, std.testing.io, home, false, &stdout.writer, &stderr.writer));
+    const index_path = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy/index.ts");
+    defer allocator.free(index_path);
+    try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = index_path, .data = "// user modified\n" });
+
+    var unsetup_stdout = std.Io.Writer.Allocating.init(allocator);
+    defer unsetup_stdout.deinit();
+    try std.testing.expectEqual(@as(u8, 0), try unsetupOpencode(allocator, std.testing.io, home, false, &unsetup_stdout.writer, &stderr.writer));
+    const index = try setup_io.readFileOptional(allocator, std.testing.io, index_path);
+    defer allocator.free(index.?);
+    try std.testing.expectEqualStrings("// user modified\n", index.?);
+    try std.testing.expect(std.mem.find(u8, stderr.written(), "index.ts was modified") != null);
+    try std.testing.expect(std.mem.find(u8, unsetup_stdout.written(), "ok\n") == null);
+}
+
+test "opencode setup rolls back plugin and config when ownership write fails" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".config/opencode");
+    const original_config = "{\"plugin\":[]}\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".config/opencode/opencode.json", .data = original_config });
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll", .data = "blocks ownership directory\n" });
+    var stdout = std.Io.Writer.Allocating.init(allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(allocator);
+    defer stderr.deinit();
+
+    if (setupOpencode(allocator, std.testing.io, home, false, &stdout.writer, &stderr.writer)) |_| {
+        return error.ExpectedSetupFailure;
+    } else |_| {}
+
+    inline for (.{
+        "/.config/opencode/plugins/smll-proxy/index.ts",
+        "/.config/opencode/plugins/smll-proxy/package.json",
+    }) |suffix| {
+        const path = try setup_io.concat2(allocator, home, suffix);
+        defer allocator.free(path);
+        try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, path)) == null);
+    }
+    const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
+    defer allocator.free(config_path);
+    const restored = try setup_io.readFileOptional(allocator, std.testing.io, config_path);
+    defer allocator.free(restored.?);
+    try std.testing.expectEqualStrings(original_config, restored.?);
+    const backup_path = try setup_io.concat2(allocator, config_path, ".bak.smll");
+    defer allocator.free(backup_path);
+    try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, backup_path)) == null);
 }
 
 test "parseCliArgs supports --setup target" {
