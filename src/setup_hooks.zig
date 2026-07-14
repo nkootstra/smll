@@ -79,7 +79,7 @@ pub fn codexSpec() Spec {
 }
 
 pub fn setup(
-    allocator: std.mem.Allocator,
+    backing_allocator: std.mem.Allocator,
     io: std.Io,
     home: []const u8,
     spec: Spec,
@@ -87,33 +87,28 @@ pub fn setup(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const config_path = try setup_io.concat2(allocator, home, spec.config_path_suffix);
-    defer allocator.free(config_path);
 
     const hook_script_path = try setup_io.concat2(allocator, home, spec.script_path_suffix);
-    defer allocator.free(hook_script_path);
 
     const executable_path = try std.process.executablePathAlloc(io, allocator);
-    defer allocator.free(executable_path);
     if (!try setup_io.validateHookEvaluator(allocator, io, executable_path, spec.target, stderr)) return 1;
     const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
-    defer allocator.free(escaped_executable);
     const eval_suffix = try setup_io.concat2(allocator, " --hook-eval ", spec.target);
-    defer allocator.free(eval_suffix);
     const hook_command = try setup_io.concat2(allocator, escaped_executable, eval_suffix);
-    defer allocator.free(hook_command);
     const legacy_hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
-    defer allocator.free(legacy_hook_command);
 
     var ownership = setup_io.readOwnership(allocator, io, home, spec.target) catch setup_io.Ownership.missing;
-    defer ownership.deinit(allocator);
     if (ownership == .modified) {
         try stderr.writeAll("smll setup ownership record was modified; configuration left untouched\n");
         return 1;
     }
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
-    defer if (existing) |buf| allocator.free(buf);
 
     if (try setup_io.checkConflictingIntegration(existing, spec.target, spec.config_file, stderr)) return 1;
 
@@ -149,7 +144,6 @@ pub fn setup(
     }
 
     const existing_hook = try setup_io.readFileOptional(allocator, io, hook_script_path);
-    defer if (existing_hook) |buf| allocator.free(buf);
     if (existing_hook != null) try stderr.writeAll("legacy hook script left untouched because its ownership is unknown\n");
 
     if (!dry_run) try stdout.writeAll("ok\n");
@@ -157,7 +151,7 @@ pub fn setup(
 }
 
 pub fn unsetup(
-    allocator: std.mem.Allocator,
+    backing_allocator: std.mem.Allocator,
     io: std.Io,
     home: []const u8,
     spec: Spec,
@@ -165,14 +159,15 @@ pub fn unsetup(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const config_path = try setup_io.concat2(allocator, home, spec.config_path_suffix);
-    defer allocator.free(config_path);
 
     const hook_script_path = try setup_io.concat2(allocator, home, spec.script_path_suffix);
-    defer allocator.free(hook_script_path);
 
     var ownership = setup_io.readOwnership(allocator, io, home, spec.target) catch setup_io.Ownership.missing;
-    defer ownership.deinit(allocator);
 
     const owned_command = ownership.validPayload();
     if (owned_command == null) {
@@ -183,7 +178,6 @@ pub fn unsetup(
     }
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
-    defer if (existing) |buf| allocator.free(buf);
 
     var removed_owned = false;
     if (existing != null and owned_command != null) {
@@ -207,7 +201,6 @@ pub fn unsetup(
     if (removed_owned and !dry_run) try setup_io.deleteOwnership(allocator, io, home, spec.target);
 
     const existing_hook = try setup_io.readFileOptional(allocator, io, hook_script_path);
-    defer if (existing_hook) |buf| allocator.free(buf);
     if (existing_hook != null) try stderr.writeAll("legacy hook script left untouched because its ownership is unknown\n");
 
     if (!dry_run) try stdout.writeAll("ok\n");

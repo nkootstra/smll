@@ -139,24 +139,23 @@ fn runAction(
 }
 
 fn setupOpencode(
-    allocator: std.mem.Allocator,
+    backing_allocator: std.mem.Allocator,
     io: std.Io,
     home: []const u8,
     dry_run: bool,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const plugin_dir = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy");
-    defer allocator.free(plugin_dir);
     const index_path = try setup_io.concat2(allocator, plugin_dir, "/index.ts");
-    defer allocator.free(index_path);
     const pkg_path = try setup_io.concat2(allocator, plugin_dir, "/package.json");
-    defer allocator.free(pkg_path);
     const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
-    defer allocator.free(config_path);
 
     const existing_config = try setup_io.readFileOptional(allocator, io, config_path);
-    defer if (existing_config) |buf| allocator.free(buf);
     if (try setup_io.checkConflictingIntegration(existing_config, "opencode", "opencode.json", stderr)) return 1;
 
     // Validate every input before changing the plugin package or its config.
@@ -167,21 +166,16 @@ fn setupOpencode(
     defer config_json.deinit();
 
     const executable_path = try std.process.executablePathAlloc(io, allocator);
-    defer allocator.free(executable_path);
     if (!try setup_io.validateHookEvaluator(allocator, io, executable_path, "opencode", stderr)) return 1;
     const plugin_script = try buildOpencodePluginScript(allocator, executable_path);
-    defer allocator.free(plugin_script);
     const pkg_json = "{\"name\":\"smll-proxy\",\"version\":\"1.0.0\",\"type\":\"module\",\"main\":\"index.ts\"}\n";
 
     const existing_index = try setup_io.readFileOptional(allocator, io, index_path);
-    defer if (existing_index) |buf| allocator.free(buf);
     const existing_pkg = try setup_io.readFileOptional(allocator, io, pkg_path);
-    defer if (existing_pkg) |buf| allocator.free(buf);
     const index_same = if (existing_index) |buf| std.mem.eql(u8, buf, plugin_script) else false;
     const pkg_same = if (existing_pkg) |buf| std.mem.eql(u8, buf, pkg_json) else false;
 
     var ownership = setup_io.readOwnership(allocator, io, home, "opencode") catch setup_io.Ownership.missing;
-    defer ownership.deinit(allocator);
     const owned_digests = if (ownership.validPayload()) |payload| parsePluginOwnership(payload) else null;
     if (ownership == .modified or ownership.validPayload() != null and owned_digests == null) {
         try stderr.writeAll("smll opencode ownership record was modified; setup left files untouched\n");
@@ -241,7 +235,6 @@ fn setupOpencode(
     } else try stdout.writeAll("already installed\n");
 
     const owned_payload = try buildPluginOwnership(allocator, plugin_script, pkg_json);
-    defer allocator.free(owned_payload);
     setup_io.writeOwnership(allocator, io, home, "opencode", owned_payload) catch |err| {
         if (config_written) setup_io.restoreOptional(io, config_path, existing_config) catch {};
         rollbackPluginWrites(io, index_path, existing_index, index_written, pkg_path, existing_pkg, pkg_written);
@@ -253,31 +246,28 @@ fn setupOpencode(
 }
 
 fn unsetupOpencode(
-    allocator: std.mem.Allocator,
+    backing_allocator: std.mem.Allocator,
     io: std.Io,
     home: []const u8,
     dry_run: bool,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !u8 {
+    var arena = std.heap.ArenaAllocator.init(backing_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
     const plugin_dir = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy");
-    defer allocator.free(plugin_dir);
     const index_path = try setup_io.concat2(allocator, plugin_dir, "/index.ts");
-    defer allocator.free(index_path);
     const pkg_path = try setup_io.concat2(allocator, plugin_dir, "/package.json");
-    defer allocator.free(pkg_path);
     // Also clean up legacy single-file plugin if present.
     const legacy_path = try setup_io.concat2(allocator, home, "/.config/opencode/plugins/smll-proxy.ts");
-    defer allocator.free(legacy_path);
     const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
-    defer allocator.free(config_path);
 
     // Unregister the plugin entry from opencode.json (symmetric to setupOpencode).
     const existing_config = try setup_io.readFileOptional(allocator, io, config_path);
-    defer if (existing_config) |buf| allocator.free(buf);
 
     var ownership = setup_io.readOwnership(allocator, io, home, "opencode") catch setup_io.Ownership.missing;
-    defer ownership.deinit(allocator);
     const owned_digests = if (ownership.validPayload()) |payload| parsePluginOwnership(payload) else null;
     if (ownership == .missing or ownership == .modified or owned_digests == null) {
         try stderr.writeAll("smll opencode ownership record missing or modified; no plugin files or config were removed\n");
@@ -302,7 +292,6 @@ fn unsetupOpencode(
 
     var modified_artifact = false;
     const index = try setup_io.readFileOptional(allocator, io, index_path);
-    defer if (index) |buf| allocator.free(buf);
     if (index) |data| {
         if (matchesOwnedDigest(data, owned_digests.?.index)) {
             try setup_io.deleteOrReport(allocator, io, index_path, dry_run, stdout);
@@ -312,7 +301,6 @@ fn unsetupOpencode(
         }
     }
     const pkg = try setup_io.readFileOptional(allocator, io, pkg_path);
-    defer if (pkg) |buf| allocator.free(buf);
     if (pkg) |data| {
         if (matchesOwnedDigest(data, owned_digests.?.package)) {
             try setup_io.deleteOrReport(allocator, io, pkg_path, dry_run, stdout);
@@ -323,7 +311,6 @@ fn unsetupOpencode(
     }
 
     const legacy = try setup_io.readFileOptional(allocator, io, legacy_path);
-    defer if (legacy) |buf| allocator.free(buf);
     if (legacy != null) try stderr.writeAll("legacy opencode plugin left untouched because its ownership is unknown\n");
     if (!dry_run and !modified_artifact) try setup_io.deleteOwnership(allocator, io, home, "opencode");
 
