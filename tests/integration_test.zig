@@ -972,7 +972,7 @@ fn expectHelpOutput(out: []const u8) !void {
     try std.testing.expect(std.mem.find(u8, out, "-h --help") != null);
     try std.testing.expect(std.mem.find(u8, out, "--version") != null);
     try std.testing.expect(std.mem.find(u8, out, "--filters") != null);
-    try std.testing.expect(std.mem.find(u8, out, "--stats [--reset|--verbose|--by-command") != null);
+    try std.testing.expect(std.mem.find(u8, out, "--stats [--reset [--all]|--verbose|--by-command") != null);
     try std.testing.expect(std.mem.find(u8, out, "--discover [--since <24h|7d|30d>|--project]") != null);
     try std.testing.expect(std.mem.find(u8, out, "--setup[=]T --unsetup[=]T [--dry-run]") != null);
     try std.testing.expect(std.mem.find(u8, out, "T=claude|opencode|cursor|codex") != null);
@@ -1283,6 +1283,56 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     try std.testing.expect(std.mem.find(u8, history, "\"raw\":15") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"compact\":15") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"duration_ms\":") != null);
+}
+
+test "wrapper: concurrent stats writers preserve every update" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "state-writer",
+        \\#!/bin/sh
+        \\printf 'state output\n'
+    );
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "0");
+
+    const writer_count = 16;
+    var children: [writer_count]std.process.Child = undefined;
+    var spawned: usize = 0;
+    errdefer for (children[0..spawned]) |*child| child.kill(io);
+    while (spawned < writer_count) : (spawned += 1) {
+        children[spawned] = try std.process.spawn(io, .{
+            .argv = &.{ exe_path, "state-writer" },
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+            .environ_map = &env,
+        });
+    }
+    for (&children) |*child| {
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, try child.wait(io));
+    }
+
+    const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":16") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"state-writer\":{\"n\":16") != null);
+
+    const history = try tmp.dir.readFileAlloc(io, ".smll/history.jsonl", allocator, .limited(64 * 1024));
+    defer allocator.free(history);
+    try std.testing.expectEqual(@as(usize, writer_count), std.mem.count(u8, history, "\"cmd\":\"state-writer\""));
 }
 
 test "wrapper: explain preserves output and emits stderr footer" {

@@ -319,7 +319,7 @@ fn compactSpaces(allocator: Allocator, input: []const u8) ![]u8 {
 
 fn appendDecimal(allocator: Allocator, out: *std.ArrayList(u8), value: usize) !void {
     var buf: [32]u8 = undefined;
-    const s = try std.fmt.bufPrint(&buf, "{d}", .{value});
+    const s = util.formatDecimal(&buf, value);
     try out.appendSlice(allocator, s);
 }
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const util = @import("util");
 
 // Bespoke compaction for `gh pr view` / `gh pr checks` / `gh run view`.
 //
@@ -192,10 +193,13 @@ pub fn applyPrChecks(allocator: Allocator, stdout: []const u8, stderr: []const u
         return;
     }
 
-    try writer.print("{d} checks:", .{total});
+    try util.writeDecimal(writer, total);
+    try writer.writeAll(" checks:");
     for (tallies.items, 0..) |t, i| {
         try writer.writeAll(if (i == 0) " " else ", ");
-        try writer.print("{d} {s}", .{ t.count, t.state });
+        try util.writeDecimal(writer, t.count);
+        try writer.writeByte(' ');
+        try writer.writeAll(t.state);
     }
     try writer.writeByte('\n');
     try writer.writeAll(detail.items);
@@ -303,7 +307,11 @@ fn emitJobs(allocator: Allocator, items: []const []const u8, i: *usize, writer: 
         // increment then advances past it.
     }
 
-    if (passed > 0) try writer.print("{s} {d} passed\n", .{ Sigil.pass, passed });
+    if (passed > 0) {
+        try writer.writeAll(Sigil.pass ++ " ");
+        try util.writeDecimal(writer, passed);
+        try writer.writeAll(" passed\n");
+    }
     try writer.writeAll(detail.items);
 }
 
@@ -325,9 +333,10 @@ fn foldSteps(allocator: Allocator, items: []const []const u8, i: *usize, detail:
     }
 
     if (step_pass > 0) {
-        var buf: [48]u8 = undefined;
-        const summary = try std.fmt.bufPrint(&buf, "  {s} {d} steps passed\n", .{ Sigil.pass, step_pass });
-        try detail.appendSlice(allocator, summary);
+        var buf: [20]u8 = undefined;
+        try detail.appendSlice(allocator, "  " ++ Sigil.pass ++ " ");
+        try detail.appendSlice(allocator, util.formatDecimal(&buf, step_pass));
+        try detail.appendSlice(allocator, " steps passed\n");
     }
     for (kept.items) |step| {
         try detail.appendSlice(allocator, step);
@@ -387,9 +396,13 @@ fn emitAnnotations(allocator: Allocator, items: []const []const u8, i: *usize, w
     for (groups.items) |g| {
         try writer.writeAll(g.msg);
         if (g.locs.items.len == 1) {
-            try writer.print("  [{s}]", .{g.locs.items[0]});
+            try writer.writeAll("  [");
+            try writer.writeAll(g.locs.items[0]);
+            try writer.writeByte(']');
         } else if (g.locs.items.len > 1) {
-            try writer.print("  [×{d}: ", .{g.locs.items.len});
+            try writer.writeAll("  [×");
+            try util.writeDecimal(writer, g.locs.items.len);
+            try writer.writeAll(": ");
             for (g.locs.items, 0..) |loc, idx| {
                 if (idx > 0) try writer.writeAll(", ");
                 try writer.writeAll(loc);

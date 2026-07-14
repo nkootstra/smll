@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub noinline fn writeDecimal(writer: *std.Io.Writer, value: usize) !void {
+pub noinline fn writeDecimal(writer: *std.Io.Writer, value: u64) !void {
     var buf: [20]u8 = undefined;
     var n = value;
     var i: usize = buf.len;
@@ -11,6 +11,92 @@ pub noinline fn writeDecimal(writer: *std.Io.Writer, value: usize) !void {
         n /= 10;
     }
     try writer.writeAll(buf[i..]);
+}
+
+pub noinline fn joinPath(allocator: std.mem.Allocator, parent: []const u8, child: []const u8) ![]u8 {
+    const path = try allocator.alloc(u8, parent.len + 1 + child.len);
+    @memcpy(path[0..parent.len], parent);
+    path[parent.len] = '/';
+    @memcpy(path[parent.len + 1 ..], child);
+    return path;
+}
+
+pub noinline fn writeHumanCount(writer: *std.Io.Writer, value: u64) !void {
+    if (value < 1000) return writeDecimal(writer, value);
+    const unit: u64 = if (value < 1_000_000) 1000 else 1_000_000;
+    try writeDecimal(writer, value / unit);
+    try writer.writeByte('.');
+    try writeDecimal(writer, (value % unit) * 10 / unit);
+    try writer.writeByte(if (unit == 1000) 'K' else 'M');
+}
+
+pub noinline fn writeHumanDecimal(writer: *std.Io.Writer, value: u64) !void {
+    if (value < 1000) return writeDecimal(writer, value);
+    const unit: u64 = if (value < 1_000_000)
+        1000
+    else if (value < 1_000_000_000)
+        1_000_000
+    else
+        1_000_000_000;
+    try writeDecimal(writer, value / unit);
+    try writer.writeByte('.');
+    try writeDecimal(writer, (value % unit) * 10 / unit);
+    try writer.writeByte(if (unit == 1000) 'K' else if (unit == 1_000_000) 'M' else 'G');
+}
+
+pub noinline fn formatDecimal(buffer: []u8, value: u64) []const u8 {
+    var n = value;
+    var pos = buffer.len;
+    while (true) {
+        pos -= 1;
+        buffer[pos] = @intCast('0' + n % 10);
+        n /= 10;
+        if (n == 0) return buffer[pos..];
+    }
+}
+
+pub noinline fn formatHumanCount(buffer: []u8, value: u64) []const u8 {
+    if (value < 1000) return formatDecimal(buffer, value);
+    const unit: u64 = if (value < 1_000_000) 1000 else 1_000_000;
+    var digits: [20]u8 = undefined;
+    const whole = formatDecimal(&digits, value / unit);
+    @memcpy(buffer[0..whole.len], whole);
+    buffer[whole.len] = '.';
+    buffer[whole.len + 1] = @intCast('0' + (value % unit) * 10 / unit);
+    buffer[whole.len + 2] = if (unit == 1000) 'K' else 'M';
+    return buffer[0 .. whole.len + 3];
+}
+
+pub fn writeJsonString(writer: *std.Io.Writer, value: []const u8) !void {
+    try writer.writeByte('"');
+    try writeJsonStringContentMode(writer, value, true);
+    try writer.writeByte('"');
+}
+
+pub fn writeJsonStringUtf8(writer: *std.Io.Writer, value: []const u8) !void {
+    try writer.writeByte('"');
+    try writeJsonStringContentMode(writer, value, false);
+    try writer.writeByte('"');
+}
+
+pub fn writeJsonStringContentUtf8(writer: *std.Io.Writer, value: []const u8) !void {
+    return writeJsonStringContentMode(writer, value, false);
+}
+
+fn writeJsonStringContentMode(writer: *std.Io.Writer, value: []const u8, escape_high_bytes: bool) !void {
+    for (value) |c| switch (c) {
+        '"' => try writer.writeAll("\\\""),
+        '\\' => try writer.writeAll("\\\\"),
+        '\n' => try writer.writeAll("\\n"),
+        '\r' => try writer.writeAll("\\r"),
+        '\t' => try writer.writeAll("\\t"),
+        else => if (c < 0x20 or (escape_high_bytes and c >= 0x80)) {
+            const hex = "0123456789abcdef";
+            try writer.writeAll("\\u00");
+            try writer.writeByte(hex[c >> 4]);
+            try writer.writeByte(hex[c & 0x0f]);
+        } else try writer.writeByte(c),
+    };
 }
 
 pub noinline fn writeOmission(writer: *std.Io.Writer, total: usize, shown: usize) !void {

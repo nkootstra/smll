@@ -132,7 +132,7 @@ const help_text =
     \\-h --help --version --filters
     \\--raw [--] <cmd...>|<cmd>|smll --raw
     \\--explain|--err|--test|--rewrite <cmd...>
-    \\--stats [--reset|--verbose|--by-command|--since <24h|7d|30d>|--project]
+    \\--stats [--reset [--all]|--verbose|--by-command|--since <24h|7d|30d>|--project]
     \\--discover [--since <24h|7d|30d>|--project]
     \\--setup[=]T --unsetup[=]T [--dry-run]
     \\T=claude|opencode|cursor|codex

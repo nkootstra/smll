@@ -97,7 +97,7 @@ pub fn setup(
     defer allocator.free(executable_path);
     const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
     defer allocator.free(escaped_executable);
-    const eval_suffix = try std.fmt.allocPrint(allocator, " --hook-eval {s}", .{spec.target});
+    const eval_suffix = try setup_io.concat2(allocator, " --hook-eval ", spec.target);
     defer allocator.free(eval_suffix);
     const hook_command = try setup_io.concat2(allocator, escaped_executable, eval_suffix);
     defer allocator.free(hook_command);
@@ -153,7 +153,7 @@ pub fn unsetup(
     defer allocator.free(executable_path);
     const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
     defer allocator.free(escaped_executable);
-    const eval_suffix = try std.fmt.allocPrint(allocator, " --hook-eval {s}", .{spec.target});
+    const eval_suffix = try setup_io.concat2(allocator, " --hook-eval ", spec.target);
     defer allocator.free(eval_suffix);
     const hook_command = try setup_io.concat2(allocator, escaped_executable, eval_suffix);
     defer allocator.free(hook_command);

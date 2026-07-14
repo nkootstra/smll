@@ -1,4 +1,5 @@
 const std = @import("std");
+const state_io = @import("state_io.zig");
 const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
@@ -21,6 +22,7 @@ pub const QueryOptions = struct {
     by_command: bool = false,
     project_only: bool = false,
     reset: bool = false,
+    all: bool = false,
     since_ms: ?i64 = null,
 };
 
@@ -83,8 +85,7 @@ pub fn append(
     output_bytes: usize,
     options: RecordOptions,
 ) !void {
-    const cwd = Io.Dir.cwd();
-    try cwd.createDirPath(io, dir_path);
+    try state_io.ensurePrivateDir(io, dir_path);
 
     const history_path = try joinPath(allocator, home, history_file);
     defer allocator.free(history_path);
@@ -179,12 +180,11 @@ const HistoryData = struct {
 fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, lock_path: []const u8, line: []const u8, max_size: usize) !void {
     if (line.len > max_size) return;
 
-    const cwd = Io.Dir.cwd();
     const lock_file = try openLockFile(io, lock_path);
     defer if (lock_file) |file| file.close(io);
 
     {
-        var file = try cwd.createFile(io, history_path, .{ .read = true, .truncate = false });
+        var file = try state_io.createPrivateFile(io, history_path, .{ .read = true, .truncate = false });
         defer file.close(io);
         const st = try file.stat(io);
         if (st.size + line.len <= max_size) {
@@ -205,21 +205,14 @@ fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, loc
     defer if (maybe_tail) |t| allocator.free(t.owned);
     const tail_lines: []const u8 = if (maybe_tail) |t| t.lines else "";
 
-    var file = try cwd.createFile(io, history_path, .{ .read = true, .truncate = true });
+    var file = try state_io.createPrivateFile(io, history_path, .{ .read = true, .truncate = true });
     defer file.close(io);
     try file.writePositionalAll(io, tail_lines, 0);
     try file.writePositionalAll(io, line, tail_lines.len);
 }
 
 fn openLockFile(io: Io, lock_path: []const u8) !?Io.File {
-    return Io.Dir.cwd().createFile(io, lock_path, .{
-        .read = true,
-        .truncate = false,
-        .lock = .exclusive,
-    }) catch |err| switch (err) {
-        error.FileLocksUnsupported => return null,
-        else => |e| return e,
-    };
+    return state_io.openExclusivePrivateLock(io, lock_path);
 }
 
 fn readHistoryData(allocator: Allocator, io: Io, history_path: []const u8, max_size: usize) !HistoryData {
@@ -461,49 +454,58 @@ fn aggLess(items: []const AggEntry, a: usize, b: usize, mode: AggSort) bool {
 fn readJsonStringInto(data: []const u8, key: []const u8, out: []u8) ?usize {
     const idx = std.mem.find(u8, data, key) orelse return null;
     var pos = idx + key.len;
+    return readJsonStringAt(data, &pos, out);
+}
+
+pub fn readJsonStringAt(data: []const u8, pos_ptr: *usize, out: []u8) ?usize {
+    var pos = pos_ptr.*;
     while (pos < data.len and (data[pos] == ' ' or data[pos] == '\t')) pos += 1;
     if (pos >= data.len or data[pos] != '"') return null;
     pos += 1;
-
     var len: usize = 0;
     while (pos < data.len) : (pos += 1) {
         const c = data[pos];
-        if (c == '"') return len;
-        if (c == '\\') {
+        if (c == '"') {
+            pos_ptr.* = pos + 1;
+            return len;
+        }
+        const decoded = if (c == '\\') blk: {
             pos += 1;
             if (pos >= data.len) return null;
-            const escaped = switch (data[pos]) {
+            break :blk switch (data[pos]) {
                 '"', '\\', '/' => data[pos],
+                'b' => 0x08,
+                'f' => 0x0c,
                 'n' => '\n',
                 'r' => '\r',
                 't' => '\t',
-                else => data[pos],
+                'u' => unicode: {
+                    if (pos + 4 >= data.len or data[pos + 1] != '0' or data[pos + 2] != '0') return null;
+                    const high = hexValue(data[pos + 3]) orelse return null;
+                    const low = hexValue(data[pos + 4]) orelse return null;
+                    pos += 4;
+                    break :unicode high * 16 + low;
+                },
+                else => return null,
             };
-            if (len < out.len) {
-                out[len] = escaped;
-                len += 1;
-            }
-            continue;
-        }
+        } else c;
         if (len < out.len) {
-            out[len] = c;
+            out[len] = decoded;
             len += 1;
         }
     }
     return null;
 }
 
-fn writeJsonString(w: *Writer, s: []const u8) !void {
-    try w.writeByte('"');
-    for (s) |c| switch (c) {
-        '"' => try w.writeAll("\\\""),
-        '\\' => try w.writeAll("\\\\"),
-        '\n' => try w.writeAll("\\n"),
-        '\r' => try w.writeAll("\\r"),
-        '\t' => try w.writeAll("\\t"),
-        else => try w.writeByte(if (c < 0x20) ' ' else c),
+pub const writeJsonString = util.writeJsonString;
+
+fn hexValue(c: u8) ?u8 {
+    return switch (c) {
+        '0'...'9' => c - '0',
+        'a'...'f' => c - 'a' + 10,
+        'A'...'F' => c - 'A' + 10,
+        else => null,
     };
-    try w.writeByte('"');
 }
 
 fn projectKey(allocator: Allocator, io: Io, cwd_path: []const u8) ![]u8 {
@@ -535,21 +537,7 @@ fn percentSaved(input_bytes: u64, output_bytes: u64) u64 {
     return (savedBytes(input_bytes, output_bytes) * 100) / input_bytes;
 }
 
-fn writeHumanCount(w: *Writer, n: u64) !void {
-    if (n < 1000) {
-        try writeU64(w, n);
-    } else if (n < 1_000_000) {
-        try writeU64(w, n / 1000);
-        try w.writeByte('.');
-        try writeU64(w, (n % 1000) / 100);
-        try w.writeByte('K');
-    } else {
-        try writeU64(w, n / 1_000_000);
-        try w.writeByte('.');
-        try writeU64(w, (n % 1_000_000) / 100_000);
-        try w.writeByte('M');
-    }
-}
+const writeHumanCount = util.writeHumanCount;
 
 fn writeHumanCountPaddedLeft(w: *Writer, n: u64, width: usize) !void {
     var buf: [24]u8 = undefined;
@@ -558,18 +546,12 @@ fn writeHumanCountPaddedLeft(w: *Writer, n: u64, width: usize) !void {
 }
 
 fn formatHumanCount(buf: []u8, n: u64) ![]const u8 {
-    if (n < 1000) {
-        return std.fmt.bufPrint(buf, "{d}", .{n});
-    } else if (n < 1_000_000) {
-        return std.fmt.bufPrint(buf, "{d}.{d}K", .{ n / 1000, (n % 1000) / 100 });
-    } else {
-        return std.fmt.bufPrint(buf, "{d}.{d}M", .{ n / 1_000_000, (n % 1_000_000) / 100_000 });
-    }
+    return util.formatHumanCount(buf, n);
 }
 
 fn writeU64PaddedLeft(w: *Writer, n: u64, width: usize) !void {
     var buf: [20]u8 = undefined;
-    const text = try std.fmt.bufPrint(&buf, "{d}", .{n});
+    const text = util.formatDecimal(&buf, n);
     try writePaddedLeft(w, text, width);
 }
 
@@ -588,48 +570,10 @@ fn writeSpaces(w: *Writer, count: usize) !void {
     while (remaining > 0) : (remaining -= 1) try w.writeByte(' ');
 }
 
-fn writeHumanDecimal(w: *Writer, n: u64) !void {
-    if (n < 1000) {
-        try writeU64(w, n);
-    } else if (n < 1_000_000) {
-        try writeDecimalUnit(w, n, 1000, 'K');
-    } else if (n < 1_000_000_000) {
-        try writeDecimalUnit(w, n, 1_000_000, 'M');
-    } else {
-        try writeDecimalUnit(w, n, 1_000_000_000, 'G');
-    }
-}
+const writeHumanDecimal = util.writeHumanDecimal;
 
-fn writeDecimalUnit(w: *Writer, n: u64, unit: u64, suffix: u8) !void {
-    try writeU64(w, n / unit);
-    try w.writeByte('.');
-    try writeU64(w, (n % unit) * 10 / unit);
-    try w.writeByte(suffix);
-}
-
-fn writeU64(w: *Writer, val: u64) !void {
-    var buf: [20]u8 = undefined;
-    var n = val;
-    var i: usize = buf.len;
-    if (n == 0) {
-        try w.writeByte('0');
-        return;
-    }
-    while (n > 0) {
-        i -= 1;
-        buf[i] = @intCast('0' + n % 10);
-        n /= 10;
-    }
-    try w.writeAll(buf[i..]);
-}
-
-fn joinPath(allocator: Allocator, a: []const u8, b: []const u8) ![]u8 {
-    const buf = try allocator.alloc(u8, a.len + 1 + b.len);
-    @memcpy(buf[0..a.len], a);
-    buf[a.len] = '/';
-    @memcpy(buf[a.len + 1 ..], b);
-    return buf;
-}
+const writeU64 = util.writeDecimal;
+const joinPath = util.joinPath;
 
 test "history aggregation skips malformed lines and applies since" {
     const allocator = std.testing.allocator;

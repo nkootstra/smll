@@ -1,4 +1,7 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const state_io = @import("state_io.zig");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const Writer = std.Io.Writer;
@@ -18,6 +21,7 @@ const Writer = std.Io.Writer;
 const tee_subdir = ".smll/tee";
 const MAX_TEE_FILES: usize = 20;
 const MAX_LABEL_LEN: usize = 48;
+var file_sequence: std.atomic.Value(u64) = .init(0);
 
 /// Persist raw output for a failed wrapped command. Returns the absolute
 /// path on success so the caller can emit a breadcrumb; returns null when
@@ -47,23 +51,22 @@ fn recordInner(
     stdout_slice: []const u8,
     stderr_slice: []const u8,
 ) ![]const u8 {
-    const cwd = Io.Dir.cwd();
-
-    const dir_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, tee_subdir });
+    const dir_path = try util.joinPath(allocator, home, tee_subdir);
     defer allocator.free(dir_path);
-    try cwd.createDirPath(io, dir_path);
+    const root_path = try util.joinPath(allocator, home, ".smll");
+    defer allocator.free(root_path);
+    try state_io.ensurePrivateDir(io, root_path);
+    try state_io.ensurePrivateDir(io, dir_path);
 
     var label_buf: [MAX_LABEL_LEN]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
 
-    // Millisecond precision: keeps filenames readable while ensuring two
-    // failures in the same second don't collide.
     const epoch_ns: i64 = @intCast(Io.Clock.real.now(io).toNanoseconds());
-    const epoch_ms = @divTrunc(epoch_ns, std.time.ns_per_ms);
-    const file_name = try std.fmt.allocPrint(allocator, "{d}_{s}.log", .{ epoch_ms, label });
+    const sequence = file_sequence.fetchAdd(1, .monotonic);
+    const file_name = try teeFileName(allocator, epoch_ns, processId(), sequence, label);
     defer allocator.free(file_name);
 
-    const file_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, file_name });
+    const file_path = try util.joinPath(allocator, dir_path, file_name);
     errdefer allocator.free(file_path);
 
     var content = Writer.Allocating.init(allocator);
@@ -80,7 +83,7 @@ fn recordInner(
         if (stderr_slice[stderr_slice.len - 1] != '\n') try content.writer.writeByte('\n');
     }
 
-    try cwd.writeFile(io, .{ .sub_path = file_path, .data = content.written() });
+    try state_io.writePrivateFileAtomic(io, file_path, content.written());
 
     rotate(allocator, io, dir_path) catch {};
 
@@ -89,14 +92,94 @@ fn recordInner(
 
 fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
     try w.writeAll("# smll tee — raw output from failed wrapped command\n");
+    try w.writeAll("# note: command output is raw and may contain secrets\n");
     try w.writeAll("# argv:");
-    for (argv) |a| {
+    var redact_next = false;
+    for (argv) |arg| {
         try w.writeByte(' ');
-        try w.writeAll(a);
+        if (redact_next) {
+            try w.writeAll("[REDACTED]");
+            redact_next = false;
+            continue;
+        }
+        if (std.mem.indexOfScalar(u8, arg, '=')) |eq| {
+            const name = arg[0..eq];
+            if (isSensitiveName(name) and !isCookieJarFlag(name)) {
+                try w.writeAll(arg[0 .. eq + 1]);
+                try w.writeAll("[REDACTED]");
+                continue;
+            }
+            try w.writeAll(arg);
+            continue;
+        }
+        try w.writeAll(arg);
+        if (arg.len > 0 and arg[0] == '-' and isSensitiveName(arg) and !isVisibleSensitiveFlag(arg)) redact_next = true;
     }
     try w.writeAll("\n# exit: ");
-    try w.printInt(exit_code, 10, .lower, .{});
+    try util.writeDecimal(w, exit_code);
     try w.writeAll("\n\n");
+}
+
+fn isSensitiveName(name: []const u8) bool {
+    const needles = [_][]const u8{ "password", "token", "secret", "api-key", "api_key", "apikey", "authorization", "cookie" };
+    for (&needles) |needle| {
+        if (std.ascii.indexOfIgnoreCase(name, needle) != null) return true;
+    }
+    return false;
+}
+
+fn isVisibleSensitiveFlag(name: []const u8) bool {
+    if (!std.mem.startsWith(u8, name, "--")) return false;
+    const flag = name[2..];
+    return std.mem.startsWith(u8, flag, "no-") or
+        std.mem.startsWith(u8, flag, "disable-") or
+        isCookieJarFlag(name);
+}
+
+fn isCookieJarFlag(name: []const u8) bool {
+    return std.mem.eql(u8, name, "--cookie-jar");
+}
+
+fn processId() u64 {
+    return switch (builtin.os.tag) {
+        .windows => @intCast(std.os.windows.GetCurrentProcessId()),
+        .wasi => 0,
+        else => @intCast(std.posix.system.getpid()),
+    };
+}
+
+fn teeFileName(allocator: Allocator, epoch_ns: i64, pid: u64, sequence: u64, label: []const u8) ![]u8 {
+    var prefix: [62]u8 = undefined;
+    var len: usize = 0;
+    len += writeUnsigned(prefix[len..], @intCast(@max(epoch_ns, 0)));
+    prefix[len] = '_';
+    len += 1;
+    len += writeUnsigned(prefix[len..], pid);
+    prefix[len] = '_';
+    len += 1;
+    len += writeUnsigned(prefix[len..], sequence);
+    prefix[len] = '_';
+    len += 1;
+
+    const name = try allocator.alloc(u8, len + label.len + ".log".len);
+    @memcpy(name[0..len], prefix[0..len]);
+    @memcpy(name[len .. len + label.len], label);
+    @memcpy(name[len + label.len ..], ".log");
+    return name;
+}
+
+fn writeUnsigned(out: []u8, value: u64) usize {
+    var reversed: [20]u8 = undefined;
+    var n = value;
+    var len: usize = 0;
+    while (true) {
+        reversed[len] = @intCast('0' + n % 10);
+        len += 1;
+        n /= 10;
+        if (n == 0) break;
+    }
+    for (0..len) |i| out[i] = reversed[len - i - 1];
+    return len;
 }
 
 /// Build a filesystem-safe `<basename>[_<subcmd>]` label, mirroring
@@ -296,6 +379,123 @@ test "maybeRecord: writes file under HOME/.smll/tee and returns absolute path" {
     try std.testing.expect(std.mem.indexOf(u8, data, "thread panicked") != null);
     try std.testing.expect(std.mem.indexOf(u8, data, "# argv: cargo test") != null);
     try std.testing.expect(std.mem.indexOf(u8, data, "# exit: 101") != null);
+    try std.testing.expect(std.mem.indexOf(u8, data, "may contain secrets") != null);
+}
+
+test "maybeRecord: redacts secret-bearing argv values" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var name_buf: [64]u8 = undefined;
+    const home = try std.fmt.bufPrint(&name_buf, "/tmp/smll-tee-redact-{d}", .{Io.Clock.real.now(io).toNanoseconds()});
+    defer cleanupTeeDir(allocator, io, home);
+
+    const path = maybeRecord(allocator, io, home, &.{
+        "curl",
+        "--authorization",
+        "Bearer abc123",
+        "--api-key=key456",
+        "PASSWORD=hunter2",
+        "--cookie",
+        "session789",
+        "--verbose",
+    }, 1, "failed\n", "") orelse return error.TestUnexpectedNullPath;
+    defer allocator.free(@constCast(path));
+
+    const data = try Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(64 * 1024));
+    defer allocator.free(data);
+    try std.testing.expect(std.mem.find(u8, data, "Bearer abc123") == null);
+    try std.testing.expect(std.mem.find(u8, data, "key456") == null);
+    try std.testing.expect(std.mem.find(u8, data, "hunter2") == null);
+    try std.testing.expect(std.mem.find(u8, data, "session789") == null);
+    try std.testing.expect(std.mem.find(u8, data, "--authorization [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, data, "--api-key=[REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, data, "PASSWORD=[REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, data, "--verbose") != null);
+}
+
+test "writeHeader keeps sensitive-looking toggles and cookie jar paths visible" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try writeHeader(&out.writer, &.{
+        "my-cmd",
+        "--no-cookie",
+        "--output",
+        "file.txt",
+        "--no-token",
+        "next-token-arg",
+        "--disable-password",
+        "next-password-arg",
+        "--cookie-jar",
+        "/tmp/cookies.txt",
+        "--cookie-jar=/tmp/other-cookies.txt",
+        "https://api.example.com",
+    }, 1);
+
+    try std.testing.expect(std.mem.find(u8, out.written(), "# argv: my-cmd --no-cookie --output file.txt --no-token next-token-arg --disable-password next-password-arg --cookie-jar /tmp/cookies.txt --cookie-jar=/tmp/other-cookies.txt https://api.example.com\n") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "[REDACTED]") == null);
+}
+
+test "writeHeader exceptions do not weaken secret value redaction" {
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+
+    try writeHeader(&out.writer, &.{
+        "my-cmd",
+        "--password",
+        "password-value",
+        "--token=token-value",
+        "--no-token=token-disabled",
+        "--client-secret",
+        "secret-value",
+        "--authorization",
+        "Bearer auth-value",
+        "--cookie",
+        "cookie-value",
+        "API_KEY=key-value",
+    }, 1);
+
+    const header = out.written();
+    inline for (.{ "password-value", "token-value", "token-disabled", "secret-value", "auth-value", "cookie-value", "key-value" }) |secret| {
+        try std.testing.expect(std.mem.find(u8, header, secret) == null);
+    }
+    try std.testing.expect(std.mem.find(u8, header, "--password [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--token=[REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--no-token=[REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--client-secret [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--authorization [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "--cookie [REDACTED]") != null);
+    try std.testing.expect(std.mem.find(u8, header, "API_KEY=[REDACTED]") != null);
+}
+
+test "maybeRecord: uses collision-resistant private tee paths" {
+    if (@import("builtin").os.tag == .windows) return;
+
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var name_buf: [64]u8 = undefined;
+    const home = try std.fmt.bufPrint(&name_buf, "/tmp/smll-tee-private-{d}", .{Io.Clock.real.now(io).toNanoseconds()});
+    defer cleanupTeeDir(allocator, io, home);
+
+    const first = maybeRecord(allocator, io, home, &.{"cargo"}, 1, "one\n", "") orelse return error.TestUnexpectedNullPath;
+    defer allocator.free(@constCast(first));
+    const second = maybeRecord(allocator, io, home, &.{"cargo"}, 1, "two\n", "") orelse return error.TestUnexpectedNullPath;
+    defer allocator.free(@constCast(second));
+    try std.testing.expect(!std.mem.eql(u8, first, second));
+
+    const root_path = try std.fmt.allocPrint(allocator, "{s}/.smll", .{home});
+    defer allocator.free(root_path);
+    var root = try Io.Dir.cwd().openDir(io, root_path, .{ .iterate = true });
+    defer root.close(io);
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try root.stat(io)).permissions.toMode() & 0o777);
+
+    const tee_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ home, tee_subdir });
+    defer allocator.free(tee_path);
+    var tee_dir = try Io.Dir.cwd().openDir(io, tee_path, .{ .iterate = true });
+    defer tee_dir.close(io);
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try tee_dir.stat(io)).permissions.toMode() & 0o777);
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), (try Io.Dir.cwd().statFile(io, first, .{})).permissions.toMode() & 0o777);
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), (try Io.Dir.cwd().statFile(io, second, .{})).permissions.toMode() & 0o777);
 }
 
 test "rotate: keeps newest MAX_TEE_FILES, deletes older" {
