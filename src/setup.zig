@@ -315,9 +315,10 @@ fn unsetupOpencode(
 
     const legacy = try setup_io.readFileOptional(allocator, io, legacy_path);
     if (legacy != null) try stderr.writeAll("legacy opencode plugin left untouched because its ownership is unknown\n");
-    if (!dry_run and !modified_artifact) try setup_io.deleteOwnership(allocator, io, home, "opencode");
-
-    if (!dry_run) try stdout.writeAll("ok\n");
+    if (!dry_run and !modified_artifact) {
+        try setup_io.deleteOwnership(allocator, io, home, "opencode");
+        try stdout.writeAll("ok\n");
+    }
     return 0;
 }
 
@@ -458,11 +459,14 @@ test "opencode unsetup leaves modified owned plugin files and warns" {
     defer allocator.free(index_path);
     try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = index_path, .data = "// user modified\n" });
 
-    try std.testing.expectEqual(@as(u8, 0), try unsetupOpencode(allocator, std.testing.io, home, false, &stdout.writer, &stderr.writer));
+    var unsetup_stdout = std.Io.Writer.Allocating.init(allocator);
+    defer unsetup_stdout.deinit();
+    try std.testing.expectEqual(@as(u8, 0), try unsetupOpencode(allocator, std.testing.io, home, false, &unsetup_stdout.writer, &stderr.writer));
     const index = try setup_io.readFileOptional(allocator, std.testing.io, index_path);
     defer allocator.free(index.?);
     try std.testing.expectEqualStrings("// user modified\n", index.?);
     try std.testing.expect(std.mem.find(u8, stderr.written(), "index.ts was modified") != null);
+    try std.testing.expect(std.mem.find(u8, unsetup_stdout.written(), "ok\n") == null);
 }
 
 test "opencode setup rolls back plugin and config when ownership write fails" {
