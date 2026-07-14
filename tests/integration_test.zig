@@ -2264,6 +2264,39 @@ test "wrapper: nonzero pytest cannot synthesize a passing verdict" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
 }
 
+test "wrapper: raw failure fallback does not append a tee recovery breadcrumb" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const raw =
+        "============ test session starts ============\n" ++
+        "collected 1 item\n" ++
+        "tests/test_x.py . [100%]\n" ++
+        "================ 1 passed in 0.01s ================\n";
+    try writeFakeScript(tmp.dir, "pytest",
+        \\#!/bin/sh
+        \\printf '%s' '============ test session starts ============
+        \\collected 1 item
+        \\tests/test_x.py . [100%]
+        \\================ 1 passed in 0.01s ================
+        \\'
+        \\exit 2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{"pytest"}, &.{
+        .{ "SMLL_TEE", "1" },
+        .{ "HOME", bin_path },
+    });
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqualStrings(raw, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+}
+
 test "pipe-mode: --raw preserves arbitrary input byte-identically" {
     const allocator = std.testing.allocator;
     const input = "raw  spacing\n\xff\x00tail\n";

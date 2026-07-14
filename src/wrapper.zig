@@ -285,7 +285,8 @@ pub fn run(
     if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
         const home = environ.get("HOME") orelse "";
         if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
-            final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+            if (!failed_filter_output)
+                final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
         }
     }
 
