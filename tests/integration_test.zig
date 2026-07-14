@@ -575,6 +575,8 @@ test "process contract: descendant-held pipes stop after drain grace and preserv
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
     const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(bin_dir);
     try writeFakeScript(tmp.dir, "pipe-holder",
@@ -585,7 +587,10 @@ test "process contract: descendant-held pipes stop after drain grace and preserv
     );
 
     const start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
-    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"pipe-holder"}, &.{});
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"pipe-holder"}, &.{
+        .{ "HOME", home_path },
+        .{ "SMLL_TEE", "1" },
+    });
     defer result.deinit(allocator);
     const elapsed_ms = @divTrunc(start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
 

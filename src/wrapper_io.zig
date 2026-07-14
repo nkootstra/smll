@@ -6,6 +6,7 @@ pub const drain_poll_timeout: std.Io.Timeout = .{ .duration = .{
     .clock = .awake,
 } };
 const drain_grace_ns = 500 * std.time.ns_per_ms;
+pub const raw_passthrough_limit: usize = 0;
 
 pub const incomplete_output_diagnostic = "(smll: output incomplete; descendants kept stdout/stderr open after child exit)\n";
 
@@ -68,7 +69,11 @@ pub fn proxyChildOutput(
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
 ) !ProxiedOutput {
-    const result = try drainChildOutput(allocator, io, child, 0, stdout, stderr);
+    const result = try drainChildOutput(allocator, io, child, raw_passthrough_limit, stdout, stderr);
+    defer if (!result.overflowed) {
+        allocator.free(result.stdout);
+        allocator.free(result.stderr);
+    };
     if (!result.overflowed) {
         try stdout.writeAll(result.stdout);
         try stderr.writeAll(result.stderr);
@@ -108,7 +113,8 @@ pub fn drainChildOutput(
     const stderr_reader = multi_reader.reader(1);
 
     var incomplete = false;
-    var overflowed = false;
+    const passthrough_immediately = max_output_bytes == raw_passthrough_limit;
+    var overflowed = passthrough_immediately;
     var input_bytes: usize = 0;
     while (true) {
         multi_reader.fill(64, drain_poll_timeout) catch |err| switch (err) {
@@ -155,6 +161,7 @@ pub fn drainChildOutput(
         try allocator.dupe(u8, stderr_reader.buffered())
     else
         try multi_reader.toOwnedSlice(1);
+    errdefer if (!overflowed) allocator.free(stderr_slice);
 
     if (!overflowed) input_bytes = stdout_slice.len + stderr_slice.len;
 

@@ -567,6 +567,7 @@ fn runWrapperInner(
         return exit_code;
     }
     if (captured.incomplete) {
+        last_output_inherited = true;
         passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
         return exit_code;
