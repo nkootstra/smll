@@ -55,6 +55,12 @@ pub fn writeBackupIfExists(allocator: std.mem.Allocator, io: std.Io, path: []con
     try writeFileAtomicWithPermissions(io, backup_path, existing.?, source.permissions);
 }
 
+pub fn removeBackupIfExists(allocator: std.mem.Allocator, io: std.Io, path: []const u8) !void {
+    const backup_path = try concat2(allocator, path, ".bak.smll");
+    defer allocator.free(backup_path);
+    try deleteFileIfExists(io, backup_path);
+}
+
 fn writeFileAtomicWithPermissions(io: std.Io, path: []const u8, data: []const u8, permissions: std.Io.File.Permissions) !void {
     const cwd = std.Io.Dir.cwd();
     if (std.mem.findScalarLast(u8, path, '/')) |idx| try cwd.createDirPath(io, path[0..idx]);

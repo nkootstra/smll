@@ -236,7 +236,10 @@ fn setupOpencode(
 
     const owned_payload = try buildPluginOwnership(allocator, plugin_script, pkg_json);
     setup_io.writeOwnership(allocator, io, home, "opencode", owned_payload) catch |err| {
-        if (config_written) setup_io.restoreOptional(io, config_path, existing_config) catch {};
+        if (config_written) {
+            setup_io.restoreOptional(io, config_path, existing_config) catch {};
+            setup_io.removeBackupIfExists(allocator, io, config_path) catch {};
+        }
         rollbackPluginWrites(io, index_path, existing_index, index_written, pkg_path, existing_pkg, pkg_written);
         return err;
     };
@@ -468,6 +471,9 @@ test "opencode setup rolls back plugin and config when ownership write fails" {
     defer tmp.cleanup();
     const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".config/opencode");
+    const original_config = "{\"plugin\":[]}\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".config/opencode/opencode.json", .data = original_config });
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll", .data = "blocks ownership directory\n" });
     var stdout = std.Io.Writer.Allocating.init(allocator);
     defer stdout.deinit();
@@ -481,12 +487,19 @@ test "opencode setup rolls back plugin and config when ownership write fails" {
     inline for (.{
         "/.config/opencode/plugins/smll-proxy/index.ts",
         "/.config/opencode/plugins/smll-proxy/package.json",
-        "/.config/opencode/opencode.json",
     }) |suffix| {
         const path = try setup_io.concat2(allocator, home, suffix);
         defer allocator.free(path);
         try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, path)) == null);
     }
+    const config_path = try setup_io.concat2(allocator, home, "/.config/opencode/opencode.json");
+    defer allocator.free(config_path);
+    const restored = try setup_io.readFileOptional(allocator, std.testing.io, config_path);
+    defer allocator.free(restored.?);
+    try std.testing.expectEqualStrings(original_config, restored.?);
+    const backup_path = try setup_io.concat2(allocator, config_path, ".bak.smll");
+    defer allocator.free(backup_path);
+    try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, backup_path)) == null);
 }
 
 test "parseCliArgs supports --setup target" {

@@ -138,7 +138,10 @@ pub fn setup(
         try stdout.writeAll("[dry-run] would record smll hook ownership\n");
     } else {
         setup_io.writeOwnership(allocator, io, home, spec.target, hook_command) catch |err| {
-            if (config_changed) try setup_io.restoreOptional(io, config_path, existing);
+            if (config_changed) {
+                try setup_io.restoreOptional(io, config_path, existing);
+                try setup_io.removeBackupIfExists(allocator, io, config_path);
+            }
             return err;
         };
     }
@@ -175,6 +178,7 @@ pub fn unsetup(
             "smll hook ownership record was modified; no hook was removed\n"
         else
             "smll hook ownership record not found; no hook was removed\n");
+        return 0;
     }
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
@@ -192,7 +196,7 @@ pub fn unsetup(
             try setup_io.writeBackupIfExists(allocator, io, config_path, dry_run);
             try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
         } else {
-            try stderr.writeAll("smll-owned hook entry was modified or removed; configuration left untouched\n");
+            try stderr.writeAll("smll-owned hook entry was modified or removed; configuration left untouched; rerun smll --setup for this target to recover\n");
         }
     } else if (existing == null) {
         try stdout.writeAll("not found\n");
@@ -203,6 +207,7 @@ pub fn unsetup(
     const existing_hook = try setup_io.readFileOptional(allocator, io, hook_script_path);
     if (existing_hook != null) try stderr.writeAll("legacy hook script left untouched because its ownership is unknown\n");
 
+    if (!removed_owned) return 0;
     if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
 }
@@ -486,11 +491,15 @@ test "unsetup leaves a modified owned hook entry and warns" {
     defer allocator.free(modified);
     try std.Io.Dir.cwd().writeFile(std.testing.io, .{ .sub_path = config_path, .data = modified });
 
-    try std.testing.expectEqual(@as(u8, 0), try unsetup(allocator, std.testing.io, home_path, codexSpec(), false, &stdout.writer, &stderr.writer));
+    var unsetup_stdout = std.Io.Writer.Allocating.init(allocator);
+    defer unsetup_stdout.deinit();
+    try std.testing.expectEqual(@as(u8, 0), try unsetup(allocator, std.testing.io, home_path, codexSpec(), false, &unsetup_stdout.writer, &stderr.writer));
     const after = try setup_io.readFileOptional(allocator, std.testing.io, config_path);
     defer allocator.free(after.?);
     try std.testing.expect(std.mem.find(u8, after.?, "--hook-eval codex --modified") != null);
     try std.testing.expect(std.mem.find(u8, stderr.written(), "modified") != null);
+    try std.testing.expect(std.mem.find(u8, stderr.written(), "--setup") != null);
+    try std.testing.expectEqualStrings("", unsetup_stdout.written());
 }
 
 test "setup rolls back config when ownership cannot be recorded" {
@@ -499,6 +508,9 @@ test "setup rolls back config when ownership cannot be recorded" {
     defer tmp.cleanup();
     const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home_path);
+    try tmp.dir.createDirPath(std.testing.io, ".codex");
+    const original_config = "{\"hooks\":{\"PreToolUse\":[]}}\n";
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".codex/hooks.json", .data = original_config });
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = ".smll", .data = "blocks ownership directory\n" });
 
     var stdout = std.Io.Writer.Allocating.init(allocator);
@@ -511,7 +523,12 @@ test "setup rolls back config when ownership cannot be recorded" {
 
     const config_path = try setup_io.concat2(allocator, home_path, codexSpec().config_path_suffix);
     defer allocator.free(config_path);
-    try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, config_path)) == null);
+    const restored = try setup_io.readFileOptional(allocator, std.testing.io, config_path);
+    defer allocator.free(restored.?);
+    try std.testing.expectEqualStrings(original_config, restored.?);
+    const backup_path = try setup_io.concat2(allocator, config_path, ".bak.smll");
+    defer allocator.free(backup_path);
+    try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, backup_path)) == null);
 }
 
 test "setup and unsetup cursor preserves flat hook shape" {
