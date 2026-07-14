@@ -13,8 +13,10 @@ const Writer = std.Io.Writer;
 //   D <path>                  — staged deleted     (Changes to be committed: deleted:)
 //   R <old> -> <new>          — staged renamed     (Changes to be committed: renamed:)
 //   M <path>                  — unstaged modified  (Changes not staged: modified:)
+//   I <path>                  — intent to add      (Changes not staged: new file:)
 //   d <path>                  — unstaged deleted   (Changes not staged: deleted:)
 //   ? <path>                  — untracked          (Untracked files:)
+//   ! <text>                  — repository operation state (merge, rebase, cherry-pick, etc.)
 //   UU <path>                 — unmerged both modified
 //   AU <path>                 — unmerged added by us
 //   UA <path>                 — unmerged added by them
