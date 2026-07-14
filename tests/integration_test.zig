@@ -545,6 +545,234 @@ fn runSmllWrapperWithStdin(
     return try drainChild(allocator, io, &child);
 }
 
+test "process contract: SIGTERM maps to exit 143 in buffered raw and streaming paths" {
+    const allocator = std.testing.allocator;
+    const terminate_self = "kill -TERM $$";
+
+    var buffered = try runSmllInnerEnv(allocator, &.{ "/bin/sh", "-c", terminate_self }, &.{});
+    defer buffered.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 143 }, buffered.term);
+
+    var raw = try runSmllInnerEnv(allocator, &.{ "--raw", "/bin/sh", "-c", terminate_self }, &.{});
+    defer raw.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 143 }, raw.term);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "docker", "#!/bin/sh\nkill -TERM $$\n");
+
+    var streaming = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "logs", "service" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer streaming.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 143 }, streaming.term);
+}
+
+test "process contract: descendant-held pipes stop after drain grace and preserve direct status" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "pipe-holder",
+        \\#!/bin/sh
+        \\(sleep 10) &
+        \\printf 'direct output\n'
+        \\exit 23
+    );
+
+    const start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"pipe-holder"}, &.{
+        .{ "HOME", home_path },
+        .{ "SMLL_TEE", "1" },
+    });
+    defer result.deinit(allocator);
+    const elapsed_ms = @divTrunc(start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, result.term);
+    try std.testing.expectEqualStrings("direct output\n", result.stdout);
+    try std.testing.expect(elapsed_ms >= 350);
+    try std.testing.expect(elapsed_ms < 3000);
+    try std.testing.expectEqualStrings(
+        "(smll: output incomplete; descendants kept stdout/stderr open after child exit)\n",
+        result.stderr,
+    );
+}
+
+test "process contract: raw lossless and streaming paths bound descendant-held pipes" {
+    const allocator = std.testing.allocator;
+    const diagnostic = "(smll: output incomplete; descendants kept stdout/stderr open after child exit)\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "pipe-holder",
+        \\#!/bin/sh
+        \\(sleep 5) &
+        \\printf 'direct output\n'
+        \\exit 23
+    );
+    try writeFakeScript(tmp.dir, "docker",
+        \\#!/bin/sh
+        \\(sleep 5) &
+        \\printf 'stream output\n'
+        \\exit 23
+    );
+
+    const raw_start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    var raw = try runSmllWrapperEnv(allocator, bin_dir, &.{ "--raw", "pipe-holder" }, &.{});
+    defer raw.deinit(allocator);
+    const raw_ms = @divTrunc(raw_start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, raw.term);
+    try std.testing.expect(raw_ms >= 350 and raw_ms < 3000);
+    try std.testing.expectEqualStrings("direct output\n", raw.stdout);
+    try std.testing.expectEqualStrings(diagnostic, raw.stderr);
+
+    const lossless_start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    var lossless = try runSmllWrapperEnv(allocator, bin_dir, &.{"pipe-holder"}, &.{
+        .{ "SMLL_LOSSLESS", "1" },
+    });
+    defer lossless.deinit(allocator);
+    const lossless_ms = @divTrunc(lossless_start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, lossless.term);
+    try std.testing.expect(lossless_ms >= 350 and lossless_ms < 3000);
+    try std.testing.expectEqualStrings("direct output\n", lossless.stdout);
+    try std.testing.expectEqualStrings(diagnostic, lossless.stderr);
+
+    const stream_start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
+    var streaming = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "logs", "service" }, &.{
+        .{ "SMLL_STREAM", "1" },
+    });
+    defer streaming.deinit(allocator);
+    const stream_ms = @divTrunc(stream_start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, streaming.term);
+    try std.testing.expect(stream_ms >= 350 and stream_ms < 3000);
+    try std.testing.expectEqualStrings(diagnostic, streaming.stderr);
+    try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, streaming.stdout, diagnostic));
+}
+
+test "process contract: 17 MiB overflow falls open byte-exactly and preserves status" {
+    const allocator = std.testing.allocator;
+    const output_len = 17 * 1024 * 1024;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "huge-output",
+        \\#!/bin/sh
+        \\dd if=/dev/zero bs=1048576 count=17 2>/dev/null
+        \\exit 23
+    );
+
+    var result = try runSmllWrapperFakePathLimited(
+        allocator,
+        bin_dir,
+        &.{"huge-output"},
+        20 * 1024 * 1024,
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, result.term);
+    try std.testing.expectEqual(output_len, result.stdout.len);
+    try std.testing.expect(std.mem.allEqual(u8, result.stdout, 0));
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "process contract: oversized stdin pipe falls open byte-exactly" {
+    const allocator = std.testing.allocator;
+    const output_len = 17 * 1024 * 1024;
+    const script = try std.fmt.allocPrint(
+        allocator,
+        "dd if=/dev/zero bs=1048576 count=17 2>/dev/null | '{s}'",
+        .{exe_path},
+    );
+    defer allocator.free(script);
+
+    const result = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ "/bin/sh", "-c", script },
+        .stdout_limit = .limited(20 * 1024 * 1024),
+        .stderr_limit = .limited(1024 * 1024),
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqual(output_len, result.stdout.len);
+    try std.testing.expect(std.mem.allEqual(u8, result.stdout, 0));
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "process contract: docker stderr is owned and emitted exactly once" {
+    const allocator = std.testing.allocator;
+    const diagnostic = "unique docker diagnostic\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "docker",
+        \\#!/bin/sh
+        \\printf 'unique docker diagnostic\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "docker", "logs", "service" }, &.{});
+    defer result.deinit(allocator);
+
+    const occurrences = std.mem.count(u8, result.stdout, diagnostic) +
+        std.mem.count(u8, result.stderr, diagnostic);
+    try std.testing.expectEqual(@as(usize, 1), occurrences);
+}
+
+test "process contract: npm stderr is owned and emitted exactly once" {
+    const allocator = std.testing.allocator;
+    const diagnostic = "npm WARN peer dependency conflict\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "npm",
+        \\#!/bin/sh
+        \\printf 'npm WARN peer dependency conflict\n' >&2
+        \\printf 'added 2 packages\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "npm", "install" }, &.{});
+    defer result.deinit(allocator);
+
+    const occurrences = std.mem.count(u8, result.stdout, diagnostic) +
+        std.mem.count(u8, result.stderr, diagnostic);
+    try std.testing.expectEqual(@as(usize, 1), occurrences);
+}
+
+test "process contract: generic gh stderr is owned and emitted exactly once" {
+    const allocator = std.testing.allocator;
+    const diagnostic = "success: unique gh diagnostic\n";
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_dir);
+    try writeFakeScript(tmp.dir, "gh",
+        \\#!/bin/sh
+        \\printf 'success: unique gh diagnostic\n' >&2
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "gh", "issue", "list" }, &.{});
+    defer result.deinit(allocator);
+
+    const occurrences = std.mem.count(u8, result.stdout, diagnostic) +
+        std.mem.count(u8, result.stderr, diagnostic);
+    try std.testing.expectEqual(@as(usize, 1), occurrences);
+}
+
 test "wrapper: `smll cat <fixture>` passes through unfiltered (non-git outer cmd)" {
     // v0.4 argv guard: the outer command is "cat", not "git", so the formatter
     // switch is bypassed and stdout passes through verbatim (no filtering).
@@ -2074,27 +2302,6 @@ test "dispatch: large unknown text output is compacted instead of capped" {
     try std.testing.expect(result.stdout.len < 1024);
     try std.testing.expect(std.mem.find(u8, result.stdout, "×3000") != null);
     try std.testing.expectEqualStrings("", result.stderr);
-}
-
-test "dispatch: oversized captured output emits only cap marker" {
-    const allocator = std.testing.allocator;
-
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
-    defer allocator.free(bin_path);
-
-    try writeFakeScript(tmp.dir, "hugeout",
-        \\#!/bin/sh
-        \\dd if=/dev/zero bs=1048576 count=17 2>/dev/null | tr '\000' 'A'
-    );
-
-    var result = try runSmllWrapperFakePathLimited(allocator, bin_path, &.{"hugeout"}, 1024);
-    defer result.deinit(allocator);
-
-    try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, result.term);
-    try std.testing.expectEqualStrings("", result.stdout);
-    try std.testing.expectEqualStrings("16M+\n", result.stderr);
 }
 
 test "pipe-mode: large JSON passes through byte-identically" {

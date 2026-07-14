@@ -56,10 +56,20 @@ pub fn run(
     // Read remaining data directly into the buffer.
     while (true) {
         if (total >= buf.len) {
-            // Grow buffer (double), but stop at MAX_PIPE_INPUT_BYTES. If we
-            // reach the cap and still have data to read, return error.StreamTooLong
-            // so the caller can fall open to a safer behavior.
-            if (buf.len >= MAX_PIPE_INPUT_BYTES) return error.StreamTooLong;
+            // Once the inspection budget is exhausted, filtering is no longer
+            // safe. Flush the prefix exactly once and stream the remainder raw
+            // instead of failing or continuing to grow memory.
+            if (buf.len >= MAX_PIPE_INPUT_BYTES) {
+                try writer.writeAll(buf[0..total]);
+                var copy_buf: [32 * 1024]u8 = undefined;
+                while (true) {
+                    const got = reader.readSliceShort(&copy_buf) catch |err| switch (err) {
+                        error.ReadFailed => return err,
+                    };
+                    if (got == 0) return;
+                    try writer.writeAll(copy_buf[0..got]);
+                }
+            }
             const new_cap = @min(buf.len * 2, MAX_PIPE_INPUT_BYTES);
             const new_buf = try allocator.alloc(u8, new_cap);
             @memcpy(new_buf[0..total], buf[0..total]);

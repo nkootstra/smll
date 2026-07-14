@@ -4,13 +4,12 @@ const ansi = @import("ansi");
 const docker_logs = @import("docker_logs");
 const jest = @import("jest");
 const tsc = @import("tsc");
+const wrapper_io = @import("wrapper_io.zig");
 const wrapper_util = @import("wrapper_util.zig");
+const exitCode = wrapper_io.exitCode;
 
 const max_line_bytes: usize = 64 * 1024;
-const idle_flush_timeout: std.Io.Timeout = .{ .duration = .{
-    .raw = .fromSeconds(2),
-    .clock = .awake,
-} };
+const idle_flush_ns = 2 * std.time.ns_per_s;
 
 pub const Result = struct {
     exit_code: u8,
@@ -29,7 +28,7 @@ const LineAssembler = struct {
         self: *LineAssembler,
         allocator: std.mem.Allocator,
         bytes: []const u8,
-        processor: anytype,
+        processor: LineProcessor,
         writer: *std.Io.Writer,
     ) !void {
         var start: usize = 0;
@@ -51,12 +50,75 @@ const LineAssembler = struct {
 
     fn flush(
         self: *LineAssembler,
-        processor: anytype,
+        processor: LineProcessor,
         writer: *std.Io.Writer,
     ) !void {
         if (self.buf.items.len == 0) return;
         try processor.feedLine(self.buf.items, writer);
         self.buf.clearRetainingCapacity();
+    }
+};
+
+const LineProcessor = struct {
+    ptr: *anyopaque,
+    feed_line_fn: *const fn (*anyopaque, []const u8, *std.Io.Writer) anyerror!void,
+
+    fn init(comptime T: type, processor: *T) LineProcessor {
+        const Adapter = struct {
+            fn feedLine(ptr: *anyopaque, line: []const u8, writer: *std.Io.Writer) !void {
+                const typed: *T = @ptrCast(@alignCast(ptr));
+                try typed.feedLine(line, writer);
+            }
+        };
+        return .{ .ptr = processor, .feed_line_fn = Adapter.feedLine };
+    }
+
+    fn feedLine(self: LineProcessor, line: []const u8, writer: *std.Io.Writer) !void {
+        try self.feed_line_fn(self.ptr, line, writer);
+    }
+};
+
+const StreamSide = struct {
+    ptr: *anyopaque,
+    feed_fn: *const fn (*anyopaque, std.mem.Allocator, []const u8, *std.Io.Writer) anyerror!void,
+    idle_flush_fn: *const fn (*anyopaque, *std.Io.Writer) anyerror!void,
+    end_flush_fn: *const fn (*anyopaque, *std.Io.Writer) anyerror!void,
+
+    fn init(comptime T: type, side: *T) StreamSide {
+        const Adapter = struct {
+            fn feed(ptr: *anyopaque, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
+                const typed: *T = @ptrCast(@alignCast(ptr));
+                try typed.feed(allocator, bytes, writer);
+            }
+
+            fn idleFlush(ptr: *anyopaque, writer: *std.Io.Writer) !void {
+                const typed: *T = @ptrCast(@alignCast(ptr));
+                try typed.idleFlush(writer);
+            }
+
+            fn endFlush(ptr: *anyopaque, writer: *std.Io.Writer) !void {
+                const typed: *T = @ptrCast(@alignCast(ptr));
+                try typed.endFlush(writer);
+            }
+        };
+        return .{
+            .ptr = side,
+            .feed_fn = Adapter.feed,
+            .idle_flush_fn = Adapter.idleFlush,
+            .end_flush_fn = Adapter.endFlush,
+        };
+    }
+
+    fn feed(self: StreamSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
+        try self.feed_fn(self.ptr, allocator, bytes, writer);
+    }
+
+    fn idleFlush(self: StreamSide, writer: *std.Io.Writer) !void {
+        try self.idle_flush_fn(self.ptr, writer);
+    }
+
+    fn endFlush(self: StreamSide, writer: *std.Io.Writer) !void {
+        try self.end_flush_fn(self.ptr, writer);
     }
 };
 
@@ -74,7 +136,7 @@ const LogStreamSide = struct {
     }
 
     fn feed(self: *LogStreamSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(LogStreamSide, self), writer);
     }
 
     fn feedLine(self: *LogStreamSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -86,7 +148,7 @@ const LogStreamSide = struct {
     }
 
     fn endFlush(self: *LogStreamSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(LogStreamSide, self), writer);
         try self.deduper.flush(writer, true);
     }
 };
@@ -107,7 +169,7 @@ const TscWatchSide = struct {
     }
 
     fn feed(self: *TscWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(TscWatchSide, self), writer);
     }
 
     fn feedLine(self: *TscWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -126,7 +188,7 @@ const TscWatchSide = struct {
     fn idleFlush(_: *TscWatchSide, _: *std.Io.Writer) !void {}
 
     fn endFlush(self: *TscWatchSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(TscWatchSide, self), writer);
     }
 };
 
@@ -147,7 +209,7 @@ const JestWatchSide = struct {
     }
 
     fn feed(self: *JestWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(JestWatchSide, self), writer);
     }
 
     fn feedLine(self: *JestWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -165,7 +227,7 @@ const JestWatchSide = struct {
     }
 
     fn endFlush(self: *JestWatchSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(JestWatchSide, self), writer);
         try self.flushFrame(writer);
     }
 
@@ -240,7 +302,7 @@ const GhRunWatchSide = struct {
     }
 
     fn feed(self: *GhRunWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(GhRunWatchSide, self), writer);
     }
 
     fn feedLine(self: *GhRunWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -292,7 +354,7 @@ const GhRunWatchSide = struct {
     }
 
     fn endFlush(self: *GhRunWatchSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(GhRunWatchSide, self), writer);
         try self.flushPending(writer);
         if (!self.saw_jobs) try writer.writeAll(self.raw_fallback.items);
     }
@@ -336,18 +398,19 @@ pub fn runStreamFilter(
     original_argv: []const []const u8,
     logical_argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     const cmd = commandBasename(logical_argv) orelse "";
     if (wrapper_util.isTscWatch(cmd, logical_argv)) {
-        return runTscWatch(allocator, io, original_argv, writer);
+        return runTscWatch(allocator, io, original_argv, writer, stderr_writer);
     }
     if (wrapper_util.isJsTestWatch(cmd, logical_argv)) {
-        return runJestWatch(allocator, io, original_argv, writer);
+        return runJestWatch(allocator, io, original_argv, writer, stderr_writer);
     }
     if (wrapper_util.isGhRunWatch(cmd, logical_argv)) {
-        return runGhRunWatch(allocator, io, original_argv, writer);
+        return runGhRunWatch(allocator, io, original_argv, writer, stderr_writer);
     }
-    return runFollowLogs(allocator, io, original_argv, logical_argv, writer);
+    return runFollowLogs(allocator, io, original_argv, logical_argv, writer, stderr_writer);
 }
 
 pub fn runFollowLogs(
@@ -356,13 +419,14 @@ pub fn runFollowLogs(
     original_argv: []const []const u8,
     logical_argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     const mode: docker_logs.Mode = if (isComposeInvocation(logical_argv)) .compose else .plain;
     var stdout_side = LogStreamSide.init(allocator, mode);
     defer stdout_side.deinit(allocator);
     var stderr_side = LogStreamSide.init(allocator, mode);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, original_argv, writer, &stdout_side, &stderr_side, if (isDockerInvocation(logical_argv)) "stream:docker_logs" else "stream:logs");
+    return runPipedStream(allocator, io, original_argv, writer, stderr_writer, StreamSide.init(LogStreamSide, &stdout_side), StreamSide.init(LogStreamSide, &stderr_side), if (isDockerInvocation(logical_argv)) "stream:docker_logs" else "stream:logs");
 }
 
 fn runTscWatch(
@@ -370,12 +434,13 @@ fn runTscWatch(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     var stdout_side = TscWatchSide.init(allocator);
     defer stdout_side.deinit(allocator);
     var stderr_side = TscWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:tsc_watch");
+    return runPipedStream(allocator, io, argv, writer, stderr_writer, StreamSide.init(TscWatchSide, &stdout_side), StreamSide.init(TscWatchSide, &stderr_side), "stream:tsc_watch");
 }
 
 fn runJestWatch(
@@ -383,12 +448,13 @@ fn runJestWatch(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     var stdout_side = JestWatchSide.init(allocator);
     defer stdout_side.deinit(allocator);
     var stderr_side = JestWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:js_test_watch");
+    return runPipedStream(allocator, io, argv, writer, stderr_writer, StreamSide.init(JestWatchSide, &stdout_side), StreamSide.init(JestWatchSide, &stderr_side), "stream:js_test_watch");
 }
 
 fn runGhRunWatch(
@@ -396,12 +462,13 @@ fn runGhRunWatch(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
 ) !Result {
     var stdout_side = GhRunWatchSide.init(allocator);
     defer stdout_side.deinit(allocator);
     var stderr_side = GhRunWatchSide.init(allocator);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, "stream:gh_run_watch");
+    return runPipedStream(allocator, io, argv, writer, stderr_writer, StreamSide.init(GhRunWatchSide, &stdout_side), StreamSide.init(GhRunWatchSide, &stderr_side), "stream:gh_run_watch");
 }
 
 fn runPipedStream(
@@ -409,8 +476,9 @@ fn runPipedStream(
     io: std.Io,
     argv: []const []const u8,
     writer: *std.Io.Writer,
-    stdout_side: anytype,
-    stderr_side: anytype,
+    stderr_writer: *std.Io.Writer,
+    stdout_side: StreamSide,
+    stderr_side: StreamSide,
     filter_name: []const u8,
 ) !Result {
     var child = std.process.spawn(io, .{
@@ -420,6 +488,9 @@ fn runPipedStream(
         .stderr = .pipe,
     }) catch |err| return err;
     defer child.kill(io);
+
+    var watcher: wrapper_io.ChildExitWatcher = .{};
+    defer if (watcher.reaped) wrapper_io.closeChildPipes(&child, io);
 
     var multi_reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
     var multi_reader: std.Io.File.MultiReader = undefined;
@@ -432,22 +503,37 @@ fn runPipedStream(
     defer multi_reader.deinit();
 
     var input_bytes: usize = 0;
+    var incomplete = false;
+    var last_activity: std.Io.Clock.Timestamp = .now(io, .awake);
     while (true) {
-        multi_reader.fill(64, idle_flush_timeout) catch |err| switch (err) {
+        var received_data = true;
+        multi_reader.fill(64, wrapper_io.drain_poll_timeout) catch |err| switch (err) {
             error.Timeout => {
-                try stdout_side.idleFlush(writer);
-                try stderr_side.idleFlush(writer);
-                try writer.flush();
-                continue;
+                received_data = false;
             },
             error.EndOfStream => break,
             else => |e| return e,
         };
-        input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
-        input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
-        try writer.flush();
+
+        if (received_data) {
+            input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
+            input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
+            try writer.flush();
+            last_activity = .now(io, .awake);
+        } else if (last_activity.untilNow(io).raw.nanoseconds >= idle_flush_ns) {
+            try stdout_side.idleFlush(writer);
+            try stderr_side.idleFlush(writer);
+            try writer.flush();
+            last_activity = .now(io, .awake);
+        }
+
+        try watcher.poll(&child, io);
+        if (watcher.graceExpired(io)) {
+            incomplete = true;
+            break;
+        }
     }
-    try multi_reader.checkAnyError();
+    if (!incomplete) try multi_reader.checkAnyError();
 
     input_bytes += try drainAvailable(&multi_reader, 0, stdout_side, allocator, writer);
     input_bytes += try drainAvailable(&multi_reader, 1, stderr_side, allocator, writer);
@@ -455,12 +541,11 @@ fn runPipedStream(
     try stderr_side.endFlush(writer);
     try writer.flush();
 
-    const term = try child.wait(io);
+    if (incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+
+    const term = try watcher.finish(&child, io);
     return .{
-        .exit_code = switch (term) {
-            .exited => |c| c,
-            .signal, .stopped, .unknown => 1,
-        },
+        .exit_code = exitCode(term),
         .input_bytes = input_bytes,
         .filter_name = filter_name,
     };
@@ -469,7 +554,7 @@ fn runPipedStream(
 fn drainAvailable(
     multi_reader: *std.Io.File.MultiReader,
     index: usize,
-    side: anytype,
+    side: StreamSide,
     allocator: std.mem.Allocator,
     writer: *std.Io.Writer,
 ) !usize {
