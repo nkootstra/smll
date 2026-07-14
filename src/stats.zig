@@ -39,7 +39,7 @@ pub const Stats = struct {
     omitted_bytes: u64 = 0,
     diagnostic_bytes: u64 = 0,
     formatting_saved_bytes: u64 = 0,
-    by_cmd: [MAX_TRACKED_CMDS]CmdEntry = [_]CmdEntry{.{}} ** MAX_TRACKED_CMDS,
+    by_cmd: [MAX_TRACKED_CMDS]CmdEntry = undefined,
     cmd_count: usize = 0,
 };
 
@@ -112,6 +112,7 @@ fn recordInner(
         }
         if (found == null and s.cmd_count < MAX_TRACKED_CMDS) {
             const entry = &s.by_cmd[s.cmd_count];
+            entry.* = .{};
             const copy_len = @min(label.len, entry.name.len);
             @memcpy(entry.name[0..copy_len], label[0..copy_len]);
             entry.name_len = copy_len;
@@ -171,15 +172,15 @@ pub fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
 }
 
 fn load(allocator: Allocator, io: Io, path: []const u8) Stats {
-    return loadInner(allocator, io, path) catch .{};
+    return loadInner(allocator, io, path) catch emptyStats();
 }
 
 fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
     const cwd = Io.Dir.cwd();
-    const data = cwd.readFileAlloc(io, path, allocator, .limited(MAX_JSON_SIZE)) catch return .{};
+    const data = cwd.readFileAlloc(io, path, allocator, .limited(MAX_JSON_SIZE)) catch return emptyStats();
     defer allocator.free(data);
 
-    var s: Stats = .{};
+    var s = emptyStats();
     // Hand-rolled parser for the fixed stats JSON schema. Version 1 had no
     // explicit schema marker and stored only input/output byte totals.
     s.schema_version = util.findJsonU64Opt(data, "\"v\":") orelse 1;
@@ -203,6 +204,7 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
         if (pos >= data.len or data[pos] == '}') break;
         if (data[pos] != '"') break;
         var entry = &s.by_cmd[s.cmd_count];
+        entry.* = .{};
         entry.name_len = history.readJsonStringAt(data, &pos, &entry.name) orelse break;
         while (pos < data.len and data[pos] != '{') pos += 1;
         if (pos >= data.len) break;
@@ -234,6 +236,19 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
         }
         s.cmd_count += 1;
     }
+    return s;
+}
+
+fn emptyStats() Stats {
+    var s: Stats = undefined;
+    s.schema_version = STATS_SCHEMA_VERSION;
+    s.commands = 0;
+    s.raw_bytes = 0;
+    s.displayed_bytes = 0;
+    s.omitted_bytes = 0;
+    s.diagnostic_bytes = 0;
+    s.formatting_saved_bytes = 0;
+    s.cmd_count = 0;
     return s;
 }
 

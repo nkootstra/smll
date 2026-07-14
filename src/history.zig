@@ -81,7 +81,7 @@ pub const Aggregate = struct {
     omitted_bytes: u64 = 0,
     diagnostic_bytes: u64 = 0,
     formatting_saved_bytes: u64 = 0,
-    by_cmd: [MAX_TRACKED_CMDS]AggEntry = [_]AggEntry{.{}} ** MAX_TRACKED_CMDS,
+    by_cmd: [MAX_TRACKED_CMDS]AggEntry = undefined,
     cmd_count: usize = 0,
 };
 
@@ -199,7 +199,14 @@ pub fn aggregate(allocator: Allocator, io: Io, home: []const u8, opts: QueryOpti
         project_filter = projectKey(allocator, io, cwd_path) catch try allocator.dupe(u8, cwd_path);
     }
 
-    var agg: Aggregate = .{};
+    var agg: Aggregate = undefined;
+    agg.commands = 0;
+    agg.raw_bytes = 0;
+    agg.displayed_bytes = 0;
+    agg.omitted_bytes = 0;
+    agg.diagnostic_bytes = 0;
+    agg.formatting_saved_bytes = 0;
+    agg.cmd_count = 0;
     var lines = std.mem.splitScalar(u8, data.lines, '\n');
     while (lines.next()) |raw_line| {
         const line = std.mem.trim(u8, raw_line, " \t\r");
@@ -390,6 +397,7 @@ fn addEntry(agg: *Aggregate, entry: Entry) void {
     }
     if (found == null and agg.cmd_count < MAX_TRACKED_CMDS) {
         const item = &agg.by_cmd[agg.cmd_count];
+        item.* = .{};
         const copy_len = @min(name.len, item.name.len);
         @memcpy(item.name[0..copy_len], name[0..copy_len]);
         item.name_len = copy_len;
@@ -765,6 +773,8 @@ test "by-command stats label token estimates and avoid tabs" {
         .formatting_saved_bytes = 500,
     };
     agg.cmd_count = 2;
+    agg.by_cmd[0] = .{};
+    agg.by_cmd[1] = .{};
 
     const status = "git status";
     @memcpy(agg.by_cmd[0].name[0..status.len], status);
