@@ -327,30 +327,7 @@ pub fn runRaw(
     stdout_writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) !u8 {
-    if (!outputsAreTty()) {
-        var child = try std.process.spawn(io, .{
-            .argv = argv,
-            .stdin = .inherit,
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .environ_map = environ,
-        });
-        defer child.kill(io);
-        const proxied = try wrapper_io.proxyChildOutput(allocator, io, &child, stdout_writer, stderr_writer);
-        if (proxied.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
-        return exitCode(proxied.term);
-    }
-
-    var child = try std.process.spawn(io, .{
-        .argv = argv,
-        .stdin = .inherit,
-        .stdout = .inherit,
-        .stderr = .inherit,
-        .environ_map = environ,
-    });
-    defer child.kill(io);
-    const term = try child.wait(io);
-    return exitCode(term);
+    return (try runUnfiltered(allocator, io, environ, argv, stdout_writer, stderr_writer)).exit_code;
 }
 
 fn shouldRunStreamFilter(environ: *const std.process.Environ.Map, invocation: wrapper_util.Invocation) bool {
@@ -380,6 +357,44 @@ fn fdIsTty(fd: std.posix.fd_t) bool {
     }
     const rc = std.posix.system.isatty(fd);
     return std.posix.errno(rc - 1) == .SUCCESS;
+}
+
+const UnfilteredResult = struct {
+    exit_code: u8,
+    input_bytes: usize,
+};
+
+noinline fn runUnfiltered(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    environ: ?*const std.process.Environ.Map,
+    argv: []const []const u8,
+    stdout_writer: *std.Io.Writer,
+    stderr_writer: *std.Io.Writer,
+) !UnfilteredResult {
+    if (!outputsAreTty()) {
+        var child = try std.process.spawn(io, .{
+            .argv = argv,
+            .stdin = .inherit,
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .environ_map = environ,
+        });
+        defer child.kill(io);
+        const proxied = try wrapper_io.proxyChildOutput(allocator, io, &child, stdout_writer, stderr_writer);
+        if (proxied.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+        return .{ .exit_code = exitCode(proxied.term), .input_bytes = proxied.input_bytes };
+    }
+
+    var child = try std.process.spawn(io, .{
+        .argv = argv,
+        .stdin = .inherit,
+        .stdout = .inherit,
+        .stderr = .inherit,
+        .environ_map = environ,
+    });
+    defer child.kill(io);
+    return .{ .exit_code = exitCode(try child.wait(io)), .input_bytes = 0 };
 }
 
 fn pathBasename(path: []const u8) []const u8 {
@@ -497,37 +512,16 @@ fn runWrapperInner(
     if (is_streaming) {
         last_output_inherited = true;
         last_filter_name = "passthrough";
-        last_input_bytes = 0;
-        if (!outputsAreTty()) {
-            var child = std.process.spawn(io, .{
-                .argv = original_argv,
-                .stdin = .inherit,
-                .stdout = .pipe,
-                .stderr = .pipe,
-                .environ_map = spawn_env,
-            }) catch |err| return err;
-            defer child.kill(io);
-            const proxied = try wrapper_io.proxyChildOutput(
-                allocator,
-                io,
-                &child,
-                raw_stdout_writer,
-                stderr_writer,
-            );
-            last_input_bytes = proxied.input_bytes;
-            if (proxied.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
-            return exitCode(proxied.term);
-        }
-        var child = std.process.spawn(io, .{
-            .argv = original_argv,
-            .stdin = .inherit,
-            .stdout = .inherit,
-            .stderr = .inherit,
-            .environ_map = spawn_env,
-        }) catch |err| return err;
-        defer child.kill(io);
-        const term = try child.wait(io);
-        return exitCode(term);
+        const result = try runUnfiltered(
+            allocator,
+            io,
+            spawn_env,
+            original_argv,
+            raw_stdout_writer,
+            stderr_writer,
+        );
+        last_input_bytes = result.input_bytes;
+        return result.exit_code;
     }
 
     var child = std.process.spawn(io, .{

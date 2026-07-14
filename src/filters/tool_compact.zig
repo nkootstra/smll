@@ -2,6 +2,8 @@ const std = @import("std");
 const ansi = @import("ansi");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
+const KeepFn = *const fn ([]const u8) bool;
+const WriteFn = *const fn (*Writer, []const u8) anyerror!void;
 
 const gh_pr_state_field = 3;
 
@@ -69,9 +71,9 @@ fn scanKeep(
     stdout: []const u8,
     stderr: []const u8,
     writer: *Writer,
-    comptime keepFn: fn ([]const u8) bool,
-    comptime writeFn: fn (*Writer, []const u8) anyerror!void,
-    comptime preserve_trailing_tabs: bool,
+    keepFn: KeepFn,
+    writeFn: WriteFn,
+    preserve_trailing_tabs: bool,
     empty_msg: []const u8,
 ) !void {
     var strip_buf: std.ArrayList(u8) = .empty;
@@ -88,9 +90,9 @@ fn scanOne(
     writer: *Writer,
     strip_buf: *std.ArrayList(u8),
     kept: *usize,
-    comptime keepFn: fn ([]const u8) bool,
-    comptime writeFn: fn (*Writer, []const u8) anyerror!void,
-    comptime preserve_trailing_tabs: bool,
+    keepFn: KeepFn,
+    writeFn: WriteFn,
+    preserve_trailing_tabs: bool,
 ) !void {
     var lines = std.mem.splitScalar(u8, input, '\n');
     while (lines.next()) |raw| {

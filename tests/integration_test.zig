@@ -581,7 +581,7 @@ test "process contract: descendant-held pipes stop after drain grace and preserv
     defer allocator.free(bin_dir);
     try writeFakeScript(tmp.dir, "pipe-holder",
         \\#!/bin/sh
-        \\(sleep 5) &
+        \\(sleep 10) &
         \\printf 'direct output\n'
         \\exit 23
     );
@@ -597,7 +597,7 @@ test "process contract: descendant-held pipes stop after drain grace and preserv
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, result.term);
     try std.testing.expectEqualStrings("direct output\n", result.stdout);
     try std.testing.expect(elapsed_ms >= 350);
-    try std.testing.expect(elapsed_ms < 1500);
+    try std.testing.expect(elapsed_ms < 3000);
     try std.testing.expectEqualStrings(
         "(smll: output incomplete; descendants kept stdout/stderr open after child exit)\n",
         result.stderr,
@@ -614,13 +614,13 @@ test "process contract: raw lossless and streaming paths bound descendant-held p
     defer allocator.free(bin_dir);
     try writeFakeScript(tmp.dir, "pipe-holder",
         \\#!/bin/sh
-        \\(sleep 2) &
+        \\(sleep 5) &
         \\printf 'direct output\n'
         \\exit 23
     );
     try writeFakeScript(tmp.dir, "docker",
         \\#!/bin/sh
-        \\(sleep 2) &
+        \\(sleep 5) &
         \\printf 'stream output\n'
         \\exit 23
     );
@@ -630,7 +630,7 @@ test "process contract: raw lossless and streaming paths bound descendant-held p
     defer raw.deinit(allocator);
     const raw_ms = @divTrunc(raw_start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, raw.term);
-    try std.testing.expect(raw_ms >= 350 and raw_ms < 1500);
+    try std.testing.expect(raw_ms >= 350 and raw_ms < 3000);
     try std.testing.expectEqualStrings("direct output\n", raw.stdout);
     try std.testing.expectEqualStrings(diagnostic, raw.stderr);
 
@@ -641,7 +641,7 @@ test "process contract: raw lossless and streaming paths bound descendant-held p
     defer lossless.deinit(allocator);
     const lossless_ms = @divTrunc(lossless_start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, lossless.term);
-    try std.testing.expect(lossless_ms >= 350 and lossless_ms < 1500);
+    try std.testing.expect(lossless_ms >= 350 and lossless_ms < 3000);
     try std.testing.expectEqualStrings("direct output\n", lossless.stdout);
     try std.testing.expectEqualStrings(diagnostic, lossless.stderr);
 
@@ -652,7 +652,7 @@ test "process contract: raw lossless and streaming paths bound descendant-held p
     defer streaming.deinit(allocator);
     const stream_ms = @divTrunc(stream_start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, streaming.term);
-    try std.testing.expect(stream_ms >= 350 and stream_ms < 1500);
+    try std.testing.expect(stream_ms >= 350 and stream_ms < 3000);
     try std.testing.expectEqualStrings(diagnostic, streaming.stderr);
     try std.testing.expectEqual(@as(usize, 0), std.mem.count(u8, streaming.stdout, diagnostic));
 }

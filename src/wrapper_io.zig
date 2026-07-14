@@ -13,7 +13,7 @@ pub const incomplete_output_diagnostic = "(smll: output incomplete; descendants 
 /// Convert the direct child's termination into the shell-compatible status
 /// exposed by every smll execution path. Unix shells report signals as
 /// 128 + signal; stopped children use the same convention.
-pub fn exitCode(term: std.process.Child.Term) u8 {
+pub noinline fn exitCode(term: std.process.Child.Term) u8 {
     return switch (term) {
         .exited => |code| code,
         .signal, .stopped => |signal| @intCast(128 + @intFromEnum(signal)),
@@ -41,7 +41,7 @@ pub const ChildExitWatcher = struct {
     observed_at: ?std.Io.Clock.Timestamp = null,
     reaped: bool = false,
 
-    pub fn poll(self: *ChildExitWatcher, child: *std.process.Child, io: std.Io) !void {
+    pub noinline fn poll(self: *ChildExitWatcher, child: *std.process.Child, io: std.Io) !void {
         if (self.term != null) return;
         if (try pollDirectChild(child)) |term| {
             self.term = term;
@@ -50,12 +50,12 @@ pub const ChildExitWatcher = struct {
         }
     }
 
-    pub fn graceExpired(self: ChildExitWatcher, io: std.Io) bool {
+    pub noinline fn graceExpired(self: ChildExitWatcher, io: std.Io) bool {
         const observed_at = self.observed_at orelse return false;
         return observed_at.untilNow(io).raw.nanoseconds >= drain_grace_ns;
     }
 
-    pub fn finish(self: ChildExitWatcher, child: *std.process.Child, io: std.Io) !std.process.Child.Term {
+    pub noinline fn finish(self: ChildExitWatcher, child: *std.process.Child, io: std.Io) !std.process.Child.Term {
         return self.term orelse try child.wait(io);
     }
 };
@@ -177,7 +177,7 @@ pub fn drainChildOutput(
     };
 }
 
-fn flushBuffered(reader: *std.Io.Reader, writer: *std.Io.Writer) !usize {
+noinline fn flushBuffered(reader: *std.Io.Reader, writer: *std.Io.Writer) !usize {
     const bytes = reader.buffered();
     if (bytes.len == 0) return 0;
     try writer.writeAll(bytes);
