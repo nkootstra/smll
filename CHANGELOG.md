@@ -9,6 +9,50 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-07-14
+
+### Added
+
+- `smll --raw <command...>` and `<command> | smll --raw` provide discoverable
+  aliases for byte-identical lossless output.
+- Semantic regression coverage now spans explicit wrapping, pipe mode,
+  installed hooks, streaming, lossless output, exit/signal propagation,
+  truncation, UTF-8 boundaries, Git patches, repository states, and capture
+  limits.
+- Repeatable hardening benchmarks compare median and p95 warm startup, hook
+  classification, filter throughput, and concurrent state writes against an
+  explicit baseline.
+
+### Changed
+
+- Transparent runners such as `uv run`, `uvx`, `poetry run`, `pnpm exec`, and
+  `npx` are normalized without changing argv boundaries, while version, help,
+  query, structured, patch, NUL-delimited, and custom-format output stays raw.
+- Bounded filters retain deterministic head-and-tail output with exact omission
+  counts and a `--raw` recovery instruction; unique long lines and invalid byte
+  sequences are preserved.
+- Stats and history use a versioned schema that separates raw, displayed,
+  explicitly omitted, diagnostic, and verified formatting-saved bytes.
+
+### Fixed
+
+- Installed hooks no longer grant command authority or rewrite compound shell
+  commands. Simple supported commands are blocked with a suggestion to rerun
+  through smll; ambiguous commands leave normal agent permissions untouched.
+- Nonzero commands cannot produce synthetic success, and unrecognized failures
+  fall back to raw output instead of an empty summary.
+- Child exit codes, Unix signals, oversized captures/stdin, descendant-held
+  pipes, stream draining, and stdout/stderr ownership now behave consistently.
+- Git patches, merge/rebase/cherry-pick/revert/bisect state, intent-to-add,
+  listing hierarchy, parent paths, and requested file metadata retain their
+  semantic information.
+- Local state uses private permissions, serialized atomic writes, redacted tee
+  headers, collision-resistant filenames, and complete `--stats --reset --all`
+  cleanup.
+- Hook setup validates before writing, records ownership, preserves config
+  permissions, rolls back transactionally, and never reports success after a
+  partial or no-op unsetup.
+
 ## [1.8.2] - 2026-06-30
 
 ### Fixed
@@ -452,7 +496,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.8.2...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/nkootstra/smll/compare/v1.8.2...v1.9.0
 [1.8.2]: https://github.com/nkootstra/smll/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/nkootstra/smll/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/nkootstra/smll/compare/v1.7.0...v1.8.0
