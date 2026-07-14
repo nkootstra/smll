@@ -28,7 +28,7 @@ const LineAssembler = struct {
         self: *LineAssembler,
         allocator: std.mem.Allocator,
         bytes: []const u8,
-        processor: anytype,
+        processor: LineProcessor,
         writer: *std.Io.Writer,
     ) !void {
         var start: usize = 0;
@@ -50,12 +50,31 @@ const LineAssembler = struct {
 
     fn flush(
         self: *LineAssembler,
-        processor: anytype,
+        processor: LineProcessor,
         writer: *std.Io.Writer,
     ) !void {
         if (self.buf.items.len == 0) return;
         try processor.feedLine(self.buf.items, writer);
         self.buf.clearRetainingCapacity();
+    }
+};
+
+const LineProcessor = struct {
+    ptr: *anyopaque,
+    feed_line_fn: *const fn (*anyopaque, []const u8, *std.Io.Writer) anyerror!void,
+
+    fn init(comptime T: type, processor: *T) LineProcessor {
+        const Adapter = struct {
+            fn feedLine(ptr: *anyopaque, line: []const u8, writer: *std.Io.Writer) !void {
+                const typed: *T = @ptrCast(@alignCast(ptr));
+                try typed.feedLine(line, writer);
+            }
+        };
+        return .{ .ptr = processor, .feed_line_fn = Adapter.feedLine };
+    }
+
+    fn feedLine(self: LineProcessor, line: []const u8, writer: *std.Io.Writer) !void {
+        try self.feed_line_fn(self.ptr, line, writer);
     }
 };
 
@@ -117,7 +136,7 @@ const LogStreamSide = struct {
     }
 
     fn feed(self: *LogStreamSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(LogStreamSide, self), writer);
     }
 
     fn feedLine(self: *LogStreamSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -129,7 +148,7 @@ const LogStreamSide = struct {
     }
 
     fn endFlush(self: *LogStreamSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(LogStreamSide, self), writer);
         try self.deduper.flush(writer, true);
     }
 };
@@ -150,7 +169,7 @@ const TscWatchSide = struct {
     }
 
     fn feed(self: *TscWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(TscWatchSide, self), writer);
     }
 
     fn feedLine(self: *TscWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -169,7 +188,7 @@ const TscWatchSide = struct {
     fn idleFlush(_: *TscWatchSide, _: *std.Io.Writer) !void {}
 
     fn endFlush(self: *TscWatchSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(TscWatchSide, self), writer);
     }
 };
 
@@ -190,7 +209,7 @@ const JestWatchSide = struct {
     }
 
     fn feed(self: *JestWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(JestWatchSide, self), writer);
     }
 
     fn feedLine(self: *JestWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -208,7 +227,7 @@ const JestWatchSide = struct {
     }
 
     fn endFlush(self: *JestWatchSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(JestWatchSide, self), writer);
         try self.flushFrame(writer);
     }
 
@@ -283,7 +302,7 @@ const GhRunWatchSide = struct {
     }
 
     fn feed(self: *GhRunWatchSide, allocator: std.mem.Allocator, bytes: []const u8, writer: *std.Io.Writer) !void {
-        try self.assembler.feed(allocator, bytes, self, writer);
+        try self.assembler.feed(allocator, bytes, LineProcessor.init(GhRunWatchSide, self), writer);
     }
 
     fn feedLine(self: *GhRunWatchSide, raw: []const u8, writer: *std.Io.Writer) !void {
@@ -335,7 +354,7 @@ const GhRunWatchSide = struct {
     }
 
     fn endFlush(self: *GhRunWatchSide, writer: *std.Io.Writer) !void {
-        try self.assembler.flush(self, writer);
+        try self.assembler.flush(LineProcessor.init(GhRunWatchSide, self), writer);
         try self.flushPending(writer);
         if (!self.saw_jobs) try writer.writeAll(self.raw_fallback.items);
     }
