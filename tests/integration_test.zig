@@ -135,6 +135,20 @@ fn runSmllWithEnv(allocator: std.mem.Allocator, input: []const u8, extra_env: []
     return try drainChild(allocator, io, &child);
 }
 
+fn runHookEval(allocator: std.mem.Allocator, adapter: []const u8, input: []const u8) !RunResult {
+    const io = std.testing.io;
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ exe_path, "--hook-eval", adapter },
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    });
+    try child.stdin.?.writeStreamingAll(io, input);
+    child.stdin.?.close(io);
+    child.stdin = null;
+    return drainChild(allocator, io, &child);
+}
+
 /// Concurrently drain stdout + stderr from a running child, wait on it,
 /// and return owned slices. Mirrors what std.process.run does internally so
 /// we don't deadlock when both pipes fill.
@@ -1150,6 +1164,150 @@ test "rewrite only prefixes commands from the hook catalog" {
     try std.testing.expectEqualStrings("python script.py\n", wrapped.stdout);
     try std.testing.expectEqualStrings("", wrapped.stderr);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, wrapped.term);
+}
+
+test "hook eval codex denies a simple supported command with smll guidance" {
+    const allocator = std.testing.allocator;
+    var result = try runHookEval(allocator, "codex", "{\"tool_input\":{\"command\":\"git status\"}}\n");
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqualStrings(
+        "{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"rerun through smll: smll git status\"}}\n",
+        result.stdout,
+    );
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\"permissionDecision\":\"allow\"") == null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "updatedInput") == null);
+}
+
+test "hook eval recognizes quoted literal shell characters" {
+    const allocator = std.testing.allocator;
+    var result = try runHookEval(allocator, "codex", "{\"tool_input\":{\"command\":\"/usr/bin/git diff -- \\\"a|b > c\\\"\"}}\n");
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\"permissionDecision\":\"deny\"") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "updatedInput") == null);
+}
+
+test "hook eval codex ignores a compound supported command" {
+    const allocator = std.testing.allocator;
+    var result = try runHookEval(allocator, "codex", "{\"tool_input\":{\"command\":\"git status; rm -rf /\"}}\n");
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "hook eval ignores unsafe or ambiguous shell shapes" {
+    const allocator = std.testing.allocator;
+    const events = [_][]const u8{
+        "{\"tool_input\":{\"command\":\"git status\\nrm -rf /\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status | cat\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status > out\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status $(uname)\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status `uname`\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status \\\"unterminated\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status $REF\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status ${REF}\"}}\n",
+        "{\"tool_input\":{\"command\":\"git checkout {main,dev}\"}}\n",
+        "{\"tool_input\":{\"command\":\"find . -name *.py\"}}\n",
+        "{\"tool_input\":{\"command\":\"find . -name file?.py\"}}\n",
+        "{\"tool_input\":{\"command\":\"find . -name [ab].py\"}}\n",
+        "{\"tool_input\":{\"command\":\"git checkout ~/repo\"}}\n",
+        "{\"tool_input\":{\"command\":\"git status # inspect repository\"}}\n",
+        "{\"tool_input\":{\"command\":\"smll git status\"}}\n",
+        "{\"tool_input\":{\"command\":\"python script.py\"}}\n",
+    };
+
+    for (events) |event| {
+        var result = try runHookEval(allocator, "codex", event);
+        defer result.deinit(allocator);
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+        try std.testing.expectEqualStrings("", result.stdout);
+        try std.testing.expectEqualStrings("", result.stderr);
+    }
+}
+
+test "hook eval claude keeps stderr blocking behavior for an eligible command" {
+    const allocator = std.testing.allocator;
+    var result = try runHookEval(allocator, "claude", "{\"tool_input\":{\"command\":\"git status\"}}\n");
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+    try std.testing.expectEqualStrings("", result.stdout);
+    try std.testing.expectEqualStrings(
+        "smll hook: wrap noisy command with smll (example: smll git status)\n",
+        result.stderr,
+    );
+}
+
+test "hook eval cursor returns the enforced preToolUse denial shape" {
+    const allocator = std.testing.allocator;
+    var result = try runHookEval(allocator, "cursor", "{\"tool_input\":{\"command\":\"git status\"}}\n");
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expectEqualStrings(
+        "{\"permission\":\"deny\",\"user_message\":\"wrap with smll: smll git status\",\"agent_message\":\"rerun through smll: smll git status\"}\n",
+        result.stdout,
+    );
+    try std.testing.expect(std.mem.find(u8, result.stdout, "updated_input") == null);
+}
+
+test "hook eval opencode keeps command mutation behavior for an eligible command" {
+    const allocator = std.testing.allocator;
+    var result = try runHookEval(allocator, "opencode", "{\"tool_input\":{\"command\":\"git status\"}}\n");
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "'"));
+    try std.testing.expect(std.mem.find(u8, result.stdout, exe_path) != null);
+    try std.testing.expect(std.mem.endsWith(u8, result.stdout, "' git status\n"));
+    try std.testing.expect(!std.mem.startsWith(u8, result.stdout, "smll "));
+}
+
+test "hook setup codex invokes the absolute smll evaluator without a generated script" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("HOME", home);
+    const run = try std.process.run(allocator, std.testing.io, .{
+        .argv = &.{ exe_path, "--setup", "codex" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(4096),
+        .environ_map = &env,
+    });
+    var result: RunResult = .{ .stdout = run.stdout, .stderr = run.stderr, .term = run.term };
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+    const hooks_json = try tmp.dir.readFileAlloc(std.testing.io, ".codex/hooks.json", allocator, .limited(4096));
+    defer allocator.free(hooks_json);
+    try std.testing.expect(std.mem.find(u8, hooks_json, exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "--hook-eval codex") != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "\"command\":\"'") != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "smll-pretooluse.sh") == null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "permissionDecision") == null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "Checking smll wrapper eligibility") != null);
+
+    const script = tmp.dir.openFile(std.testing.io, ".codex/hooks/smll-pretooluse.sh", .{}) catch |err| {
+        try std.testing.expectEqual(error.FileNotFound, err);
+        return;
+    };
+    script.close(std.testing.io);
+    return error.UnexpectedHookScript;
 }
 
 test "wrapper: large stderr does not deadlock while stdout is still open" {

@@ -1,5 +1,4 @@
 const std = @import("std");
-const filter_catalog = @import("filter_catalog.zig");
 const setup_io = @import("setup_io.zig");
 const setup_json = @import("setup_json.zig");
 
@@ -16,7 +15,6 @@ pub const Spec = struct {
     config_file: []const u8,
     config_path_suffix: []const u8,
     script_path_suffix: []const u8,
-    script: []const u8,
     needs_version: bool = false,
     hook: HookConfig,
 };
@@ -44,7 +42,6 @@ pub fn claudeSpec() Spec {
         .config_file = "settings.json",
         .config_path_suffix = "/.claude/settings.json",
         .script_path_suffix = "/.claude/hooks/smll-pretooluse.sh",
-        .script = buildClaudeHookScript(),
         .hook = .{ .nested = .{
             .event_field = "PreToolUse",
             .matcher = "Bash",
@@ -58,7 +55,6 @@ pub fn cursorSpec() Spec {
         .config_file = "hooks.json",
         .config_path_suffix = "/.cursor/hooks.json",
         .script_path_suffix = "/.cursor/hooks/smll-pretooluse.sh",
-        .script = buildCursorHookScript(),
         .needs_version = true,
         .hook = .{ .flat = .{
             .event_field = "preToolUse",
@@ -74,11 +70,10 @@ pub fn codexSpec() Spec {
         .config_file = "hooks.json",
         .config_path_suffix = "/.codex/hooks.json",
         .script_path_suffix = "/.codex/hooks/smll-pretooluse.sh",
-        .script = buildCodexHookScript(),
         .hook = .{ .nested = .{
             .event_field = "PreToolUse",
             .matcher = "Bash",
-            .status_message = "Wrapping Bash command with smll",
+            .status_message = "Checking smll wrapper eligibility",
         } },
     };
 }
@@ -98,8 +93,16 @@ pub fn setup(
     const hook_script_path = try setup_io.concat2(allocator, home, spec.script_path_suffix);
     defer allocator.free(hook_script_path);
 
-    const hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
+    const executable_path = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(executable_path);
+    const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
+    defer allocator.free(escaped_executable);
+    const eval_suffix = try std.fmt.allocPrint(allocator, " --hook-eval {s}", .{spec.target});
+    defer allocator.free(eval_suffix);
+    const hook_command = try setup_io.concat2(allocator, escaped_executable, eval_suffix);
     defer allocator.free(hook_command);
+    const legacy_hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
+    defer allocator.free(legacy_hook_command);
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
     defer if (existing) |buf| allocator.free(buf);
@@ -113,9 +116,10 @@ pub fn setup(
     defer config_json.deinit();
 
     const pa = config_json.arena.allocator();
+    const removed_legacy = try removeHook(&config_json.value, spec.hook, legacy_hook_command);
     const already_installed = try ensureHook(pa, &config_json.value, spec.hook, hook_command);
 
-    if (!already_installed) {
+    if (!already_installed or removed_legacy) {
         try setup_io.writeBackupIfExists(allocator, io, config_path, dry_run);
         try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
     } else {
@@ -124,13 +128,7 @@ pub fn setup(
 
     const existing_hook = try setup_io.readFileOptional(allocator, io, hook_script_path);
     defer if (existing_hook) |buf| allocator.free(buf);
-
-    const hook_same = if (existing_hook) |buf| std.mem.eql(u8, buf, spec.script) else false;
-    if (!hook_same) {
-        try setup_io.writeOrReport(allocator, io, hook_script_path, spec.script, dry_run, stdout);
-    } else {
-        try stdout.writeAll("hook up to date\n");
-    }
+    if (existing_hook != null) try setup_io.deleteOrReport(allocator, io, hook_script_path, dry_run, stdout);
 
     if (!dry_run) try stdout.writeAll("ok\n");
     return 0;
@@ -151,8 +149,16 @@ pub fn unsetup(
     const hook_script_path = try setup_io.concat2(allocator, home, spec.script_path_suffix);
     defer allocator.free(hook_script_path);
 
-    const hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
+    const executable_path = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(executable_path);
+    const escaped_executable = try setup_io.shellEscapeAlloc(allocator, executable_path);
+    defer allocator.free(escaped_executable);
+    const eval_suffix = try std.fmt.allocPrint(allocator, " --hook-eval {s}", .{spec.target});
+    defer allocator.free(eval_suffix);
+    const hook_command = try setup_io.concat2(allocator, escaped_executable, eval_suffix);
     defer allocator.free(hook_command);
+    const legacy_hook_command = try setup_io.concat2(allocator, "bash ", hook_script_path);
+    defer allocator.free(legacy_hook_command);
 
     const existing = try setup_io.readFileOptional(allocator, io, config_path);
     defer if (existing) |buf| allocator.free(buf);
@@ -165,7 +171,8 @@ pub fn unsetup(
         defer config_json.deinit();
 
         const changed = try removeHook(&config_json.value, spec.hook, hook_command);
-        if (changed) {
+        const removed_legacy = try removeHook(&config_json.value, spec.hook, legacy_hook_command);
+        if (changed or removed_legacy) {
             try setup_io.writeBackupIfExists(allocator, io, config_path, dry_run);
             try setup_io.writeJsonValueToPath(allocator, io, config_path, config_json.value, dry_run, stdout);
         } else {
@@ -350,36 +357,7 @@ fn ensureArrayField(pa: std.mem.Allocator, obj: *JObject, key: []const u8) !*JVa
     return obj.getPtr(key).?;
 }
 
-const hook_prologue =
-    \\#!/usr/bin/env bash
-    \\set -euo pipefail
-    \\command -v jq>/dev/null 2>&1||exit 0
-    \\p="$(cat)";c="$(printf '%s' "$p"|jq -r '.tool_input.command // ""')"
-    \\[ -z "$c" ]&&exit 0;[[ "$c" =~ ^[[:space:]]*smll([[:space:]]|$) ]]&&exit 0
-    \\t="${c#"${c%%[![:space:]]*}"}";f="${t%%[[:space:]]*}"
-;
-
-const hook_prefix = hook_prologue ++ "case \"$f\" in " ++ filter_catalog.auto_wrap_shell_case ++ ")\n";
-
-fn buildClaudeHookScript() []const u8 {
-    return hook_prefix ++
-        \\echo "smll hook: wrap noisy command with smll (example: smll $c)">&2;exit 2;;*)exit 0;;esac
-    ;
-}
-
-fn buildCursorHookScript() []const u8 {
-    return hook_prefix ++
-        \\printf '{"decision":"block","reason":"wrap with smll: smll %s"}' "$c";exit 0;;*)exit 0;;esac
-    ;
-}
-
-fn buildCodexHookScript() []const u8 {
-    return hook_prefix ++
-        \\wrapped="$(printf 'smll %s' "$c")";jq -cn --arg command "$wrapped" '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"command":$command}}}';exit 0;;*)exit 0;;esac
-    ;
-}
-
-test "setup codex writes PreToolUse hook and script" {
+test "setup codex writes direct PreToolUse hook command" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -400,18 +378,10 @@ test "setup codex writes PreToolUse hook and script" {
     defer allocator.free(hooks_json);
     try std.testing.expect(std.mem.find(u8, hooks_json, "\"PreToolUse\"") != null);
     try std.testing.expect(std.mem.find(u8, hooks_json, "\"matcher\":\"Bash\"") != null);
-    try std.testing.expect(std.mem.find(u8, hooks_json, "\"command\":\"bash ") != null);
-    try std.testing.expect(std.mem.find(u8, hooks_json, ".codex/hooks/smll-pretooluse.sh\"") != null);
-
-    const hook_script = try tmp.dir.readFileAlloc(std.testing.io, ".codex/hooks/smll-pretooluse.sh", allocator, .limited(4096));
-    defer allocator.free(hook_script);
-    try std.testing.expect(std.mem.startsWith(u8, hook_script, "#!/usr/bin/env bash\n"));
-    try std.testing.expect(std.mem.find(u8, hook_script, "\"permissionDecision\":\"allow\"") != null);
-    try std.testing.expect(std.mem.find(u8, hook_script, "\"updatedInput\"") != null);
-    try std.testing.expect(std.mem.find(u8, hook_script, "printf 'smll %s' \"$c\"") != null);
-    try std.testing.expect(std.mem.find(u8, hook_script, "--arg command \"$wrapped\"") != null);
-    try std.testing.expect(std.mem.find(u8, hook_script, "--arg command \"smll $c\"") == null);
-    try std.testing.expect(std.mem.find(u8, hook_script, "terraform|tofu|aws|jq") != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "--hook-eval codex") != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "\"command\":\"'") != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "smll-pretooluse.sh") == null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "permissionDecision") == null);
 }
 
 test "unsetup codex removes PreToolUse hook and script" {
@@ -438,7 +408,7 @@ test "unsetup codex removes PreToolUse hook and script" {
 
     const hooks_json = try tmp.dir.readFileAlloc(std.testing.io, ".codex/hooks.json", allocator, .limited(4096));
     defer allocator.free(hooks_json);
-    try std.testing.expect(std.mem.find(u8, hooks_json, "smll-pretooluse.sh") == null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "--hook-eval codex") == null);
 
     const script_file = tmp.dir.openFile(std.testing.io, ".codex/hooks/smll-pretooluse.sh", .{}) catch |err| {
         try std.testing.expectEqual(error.FileNotFound, err);
@@ -470,7 +440,7 @@ test "setup and unsetup cursor preserves flat hook shape" {
     try std.testing.expect(std.mem.find(u8, hooks_json, "\"version\":1") != null);
     try std.testing.expect(std.mem.find(u8, hooks_json, "\"preToolUse\"") != null);
     try std.testing.expect(std.mem.find(u8, hooks_json, "\"matcher\":\"Shell\"") != null);
-    try std.testing.expect(std.mem.find(u8, hooks_json, ".cursor/hooks/smll-pretooluse.sh\"") != null);
+    try std.testing.expect(std.mem.find(u8, hooks_json, "--hook-eval cursor") != null);
 
     try std.testing.expectEqual(
         @as(u8, 0),
@@ -479,5 +449,5 @@ test "setup and unsetup cursor preserves flat hook shape" {
 
     const updated_json = try tmp.dir.readFileAlloc(std.testing.io, ".cursor/hooks.json", allocator, .limited(4096));
     defer allocator.free(updated_json);
-    try std.testing.expect(std.mem.find(u8, updated_json, "smll-pretooluse.sh") == null);
+    try std.testing.expect(std.mem.find(u8, updated_json, "--hook-eval cursor") == null);
 }

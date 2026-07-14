@@ -1,5 +1,4 @@
 const std = @import("std");
-const filter_catalog = @import("filter_catalog.zig");
 const setup_hooks = @import("setup_hooks.zig");
 const setup_io = @import("setup_io.zig");
 const setup_json = @import("setup_json.zig");
@@ -161,7 +160,10 @@ fn setupOpencode(
     if (try setup_io.checkConflictingIntegration(existing_config, "opencode", "opencode.json", stderr)) return 1;
 
     // Write plugin package (index.ts + package.json).
-    const plugin_script = buildOpencodePluginScript();
+    const executable_path = try std.process.executablePathAlloc(io, allocator);
+    defer allocator.free(executable_path);
+    const plugin_script = try buildOpencodePluginScript(allocator, executable_path);
+    defer allocator.free(plugin_script);
     const pkg_json = "{\"name\":\"smll-proxy\",\"version\":\"1.0.0\",\"type\":\"module\",\"main\":\"index.ts\"}\n";
 
     const existing_index = try setup_io.readFileOptional(allocator, io, index_path);
@@ -289,17 +291,27 @@ fn ensureArrayField(pa: std.mem.Allocator, obj: *JObject, key: []const u8) !*JVa
     return obj.getPtr(key).?;
 }
 
-fn buildOpencodePluginScript() []const u8 {
-    return "const W=new Set([" ++ filter_catalog.auto_wrap_js_array ++ "]);\n" ++
-        \\export const SmllProxyPlugin=async({$})=>({"tool.execute.before":async(i,o)=>{const t=String(i?.tool??"").toLowerCase();if(t!=="bash"&&t!=="shell")return;const a=o?.args;if(!a||typeof a!=="object")return;const c=(a.command??"").trim();if(!c||/^smll(\\s|$)/.test(c))return;const f=c.split(/\\s+/)[0];if(W.has(f))a.command=`smll ${c}`}});
-    ;
+fn buildOpencodePluginScript(allocator: std.mem.Allocator, executable_path: []const u8) ![]u8 {
+    var out = std.Io.Writer.Allocating.init(allocator);
+    defer out.deinit();
+    try out.writer.writeAll("const S=");
+    try setup_json.writeValue(&out.writer, .{ .string = executable_path });
+    try out.writer.writeAll(
+        \\;
+        \\export const SmllProxyPlugin=async()=>({"tool.execute.before":async(i,o)=>{const t=String(i?.tool??"").toLowerCase();if(t!=="bash"&&t!=="shell")return;const a=o?.args;if(!a||typeof a!=="object")return;const c=String(a.command??"");if(!c)return;const event=new TextEncoder().encode(JSON.stringify({tool_input:{command:c}}));const p=Bun.spawnSync([S,"--hook-eval","opencode"],{stdin:event,stdout:"pipe",stderr:"ignore"});if(p.exitCode!==0)return;const n=new TextDecoder().decode(p.stdout).replace(/\r?\n$/,"");if(n)a.command=n}});
+    );
+    return allocator.dupe(u8, out.written());
 }
 
-test "opencode plugin auto-wrap list includes expanded filters" {
-    const script = buildOpencodePluginScript();
-    try std.testing.expect(std.mem.find(u8, script, "\"eslint\"") != null);
-    try std.testing.expect(std.mem.find(u8, script, "\"terraform\"") != null);
-    try std.testing.expect(std.mem.find(u8, script, "\"aws\"") != null);
+test "opencode plugin routes classification through the absolute smll evaluator" {
+    const allocator = std.testing.allocator;
+    const script = try buildOpencodePluginScript(allocator, "/opt/smll");
+    defer allocator.free(script);
+    try std.testing.expect(std.mem.find(u8, script, "/opt/smll") != null);
+    try std.testing.expect(std.mem.find(u8, script, "--hook-eval") != null);
+    try std.testing.expect(std.mem.find(u8, script, "opencode") != null);
+    try std.testing.expect(std.mem.find(u8, script, "TextEncoder") != null);
+    try std.testing.expect(std.mem.find(u8, script, "new Set") == null);
 }
 
 test "parseCliArgs supports --setup target" {
