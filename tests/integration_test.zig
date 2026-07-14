@@ -1658,6 +1658,152 @@ fn writeFakeScript(dir: std.Io.Dir, name: []const u8, body: []const u8) !void {
     try file.setPermissions(io, .fromMode(0o755));
 }
 
+test "invocation contract: uv version query passes through byte-identically" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const version = "uv 0.8.2 (012345678 2026-07-13)\n";
+    try writeFakeScript(tmp.dir, "uv",
+        \\#!/bin/sh
+        \\printf 'uv 0.8.2 (012345678 2026-07-13)\n'
+    );
+
+    var result = try runSmllWrapperEnv(allocator, bin_path, &.{ "uv", "--version" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(version, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "invocation contract: uv run dispatches from inner argv but spawns original argv" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+    try writeFakeScript(tmp.dir, "uv",
+        \\#!/bin/sh
+        \\test "$#" -eq 7 || exit 71
+        \\test "$1" = run || exit 72
+        \\test "$2" = --project || exit 73
+        \\test "$3" = workspace || exit 74
+        \\test "$4" = pytest || exit 75
+        \\test "$5" = -- || exit 76
+        \\test "$6" = -k || exit 77
+        \\test "$7" = "path with spaces" || exit 78
+        \\printf '============================= test session starts ==============================\ncollected 2 items\n\ntests/test_math.py .. [100%%]\n\n============================== 2 passed in 0.01s ===============================\n'
+    );
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_path,
+        &.{ "uv", "run", "--project", "workspace", "pytest", "--", "-k", "path with spaces" },
+        &.{},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("all tests passed\n", result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "invocation contract: supported nested runners dispatch from their inner command" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const script =
+        \\#!/bin/sh
+        \\printf '============================= test session starts ==============================\ncollected 2 items\n\ntests/test_math.py .. [100%%]\n\n============================== 2 passed in 0.01s ===============================\n'
+    ;
+    inline for (.{ "uvx", "poetry", "pnpm", "npx" }) |tool| {
+        try writeFakeScript(tmp.dir, tool, script);
+    }
+
+    const cases = [_][]const []const u8{
+        &.{ "uvx", "pytest", "--", "-q" },
+        &.{ "poetry", "run", "pytest", "--", "-q" },
+        &.{ "pnpm", "exec", "pytest", "--", "-q" },
+        &.{ "npx", "pytest", "--", "-q" },
+    };
+    for (cases) |argv| {
+        var result = try runSmllWrapperEnv(allocator, bin_path, argv, &.{});
+        defer result.deinit(allocator);
+
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+        try std.testing.expectEqualStrings("all tests passed\n", result.stdout);
+        try std.testing.expectEqualStrings("", result.stderr);
+    }
+}
+
+test "invocation contract: ambiguous runner options stay exact instead of guessing an inner command" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const raw = "runner-owned output with    deliberate spacing\n";
+    try writeFakeScript(tmp.dir, "uv",
+        \\#!/bin/sh
+        \\printf 'runner-owned output with    deliberate spacing\n'
+    );
+
+    var result = try runSmllWrapperEnv(
+        allocator,
+        bin_path,
+        &.{ "uv", "run", "--future-flag", "workspace", "pytest" },
+        &.{},
+    );
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings(raw, result.stdout);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "invocation contract: default jq and docker inspect data stay byte-exact" {
+    const allocator = std.testing.allocator;
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    const json = "{\n  \"name\": \"api\",\n  \"ready\": true\n}\n";
+    try writeFakeScript(tmp.dir, "jq",
+        \\#!/bin/sh
+        \\printf '{\n  "name": "api",\n  "ready": true\n}\n'
+    );
+    try writeFakeScript(tmp.dir, "docker",
+        \\#!/bin/sh
+        \\printf '{\n  "name": "api",\n  "ready": true\n}\n'
+    );
+
+    const cases = [_][]const []const u8{
+        &.{ "jq", "." },
+        &.{ "docker", "inspect", "api" },
+        &.{ "docker", "container", "inspect", "api" },
+    };
+    for (cases) |argv| {
+        var result = try runSmllWrapperEnv(allocator, bin_path, argv, &.{});
+        defer result.deinit(allocator);
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+        try std.testing.expectEqualStrings(json, result.stdout);
+        try std.testing.expectEqualStrings("", result.stderr);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Unit-0 characterisation tests — must FAIL before dispatch is implemented.
 // ---------------------------------------------------------------------------
@@ -4504,6 +4650,20 @@ test "smoke: uvx keeps package errors" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expectEqualStrings("error: command failed\n", result.stdout);
+}
+
+test "smoke: uvx ruff failures without package prelude use ruff diagnostics" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "uvx", ruff_fixture);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "uvx", "ruff", "check", "." }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("src/a.py\n  1:8 F401 `os` imported but unused\nFound 1 error.\n", result.stdout);
 }
 
 const apple_fixture = "CompileSwift A.swift\nA.swift:1:1: error: bad\n** BUILD FAILED **\n";

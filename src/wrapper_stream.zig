@@ -333,34 +333,36 @@ const GhRunWatchSide = struct {
 pub fn runStreamFilter(
     allocator: std.mem.Allocator,
     io: std.Io,
-    argv: []const []const u8,
+    original_argv: []const []const u8,
+    logical_argv: []const []const u8,
     writer: *std.Io.Writer,
 ) !Result {
-    const cmd = commandBasename(argv) orelse "";
-    if (wrapper_util.isTscWatch(cmd, argv)) {
-        return runTscWatch(allocator, io, argv, writer);
+    const cmd = commandBasename(logical_argv) orelse "";
+    if (wrapper_util.isTscWatch(cmd, logical_argv)) {
+        return runTscWatch(allocator, io, original_argv, writer);
     }
-    if (wrapper_util.isJsTestWatch(cmd, argv)) {
-        return runJestWatch(allocator, io, argv, writer);
+    if (wrapper_util.isJsTestWatch(cmd, logical_argv)) {
+        return runJestWatch(allocator, io, original_argv, writer);
     }
-    if (wrapper_util.isGhRunWatch(cmd, argv)) {
-        return runGhRunWatch(allocator, io, argv, writer);
+    if (wrapper_util.isGhRunWatch(cmd, logical_argv)) {
+        return runGhRunWatch(allocator, io, original_argv, writer);
     }
-    return runFollowLogs(allocator, io, argv, writer);
+    return runFollowLogs(allocator, io, original_argv, logical_argv, writer);
 }
 
 pub fn runFollowLogs(
     allocator: std.mem.Allocator,
     io: std.Io,
-    argv: []const []const u8,
+    original_argv: []const []const u8,
+    logical_argv: []const []const u8,
     writer: *std.Io.Writer,
 ) !Result {
-    const mode: docker_logs.Mode = if (isComposeInvocation(argv)) .compose else .plain;
+    const mode: docker_logs.Mode = if (isComposeInvocation(logical_argv)) .compose else .plain;
     var stdout_side = LogStreamSide.init(allocator, mode);
     defer stdout_side.deinit(allocator);
     var stderr_side = LogStreamSide.init(allocator, mode);
     defer stderr_side.deinit(allocator);
-    return runPipedStream(allocator, io, argv, writer, &stdout_side, &stderr_side, if (isDockerInvocation(argv)) "stream:docker_logs" else "stream:logs");
+    return runPipedStream(allocator, io, original_argv, writer, &stdout_side, &stderr_side, if (isDockerInvocation(logical_argv)) "stream:docker_logs" else "stream:logs");
 }
 
 fn runTscWatch(
