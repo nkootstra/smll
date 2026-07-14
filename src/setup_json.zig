@@ -1,4 +1,5 @@
 const std = @import("std");
+const util = @import("util");
 
 pub const KV = struct { key: []const u8, val: Value };
 
@@ -126,18 +127,7 @@ pub fn writeValue(w: *std.Io.Writer, val: Value) !void {
             }
             try w.writeAll(buf[pos..]);
         },
-        .string => |s| {
-            try w.writeByte('"');
-            for (s) |c| switch (c) {
-                '"' => try w.writeAll("\\\""),
-                '\\' => try w.writeAll("\\\\"),
-                '\n' => try w.writeAll("\\n"),
-                '\r' => try w.writeAll("\\r"),
-                '\t' => try w.writeAll("\\t"),
-                else => try w.writeByte(c),
-            };
-            try w.writeByte('"');
-        },
+        .string => |s| try writeString(w, s),
         .array => |arr| {
             try w.writeByte('[');
             for (arr.items, 0..) |item, idx| {
@@ -162,6 +152,9 @@ pub fn writeValue(w: *std.Io.Writer, val: Value) !void {
         },
     }
 }
+
+pub const writeString = util.writeJsonStringUtf8;
+pub const writeStringContent = util.writeJsonStringContentUtf8;
 
 /// Minimal JSON parser producing Value. Handles objects, arrays, strings,
 /// integers, booleans, and null; sufficient for agent settings/hooks JSON.
@@ -366,4 +359,12 @@ test "loadOrCreateObject preserves historical trailing-content tolerance" {
 
     try std.testing.expect(parsed.value == .object);
     try std.testing.expect(parsed.value.object.contains("plugin"));
+}
+
+test "setup JSON preserves UTF-8 string bytes" {
+    var output = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer output.deinit();
+
+    try writeString(&output.writer, "caf\xc3\xa9 \xe2\x98\x83");
+    try std.testing.expectEqualStrings("\"caf\xc3\xa9 \xe2\x98\x83\"", output.written());
 }

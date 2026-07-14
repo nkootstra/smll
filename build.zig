@@ -166,7 +166,7 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_tofu_plan_update", .path = "tests/fixtures/tofu_plan_update.txt" },
     } },
     .{ .name = "json_compact" },
-    .{ .name = "package_tree", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "package_tree", .needs_util = true, .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_npm_ls", .path = "tests/fixtures/npm_ls.txt" },
         .{ .name = "fixture_npm_ls_all", .path = "tests/fixtures/npm_ls_all.txt" },
         .{ .name = "fixture_pnpm_list", .path = "tests/fixtures/pnpm_list.txt" },
@@ -182,7 +182,7 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_acli_confluence_space_list", .path = "tests/fixtures/acli_confluence_space_list.txt" },
         .{ .name = "fixture_acli_error_stderr", .path = "tests/fixtures/acli_error.stderr.txt" },
     } },
-    .{ .name = "gh_compact", .fixtures = &.{
+    .{ .name = "gh_compact", .needs_util = true, .fixtures = &.{
         .{ .name = "fixture_gh_pr_view", .path = "tests/fixtures/gh_pr_view.txt" },
         .{ .name = "fixture_gh_pr_checks", .path = "tests/fixtures/gh_pr_checks.txt" },
         .{ .name = "fixture_gh_pr_checks_pending", .path = "tests/fixtures/gh_pr_checks_pending.txt" },
@@ -309,7 +309,11 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    const target = b.standardTargetOptions(.{});
+    // Keep default builds portable and make the native Linux size gate match
+    // cross-build measurements. Explicit -Dtarget/-Dcpu options still win.
+    const target = b.standardTargetOptions(.{
+        .default_target = .{ .cpu_model = .baseline },
+    });
     const optimize = b.standardOptimizeOption(.{});
     const smll_version = packageVersion(b);
     const test_filter = b.option([]const u8, "test-filter", "Run only tests whose names contain this text");
@@ -400,6 +404,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = .ReleaseSmall,
     });
+    setup_mod.addImport("util", util_mod);
+    setup_hooks_mod.addImport("util", util_mod);
+    setup_io_mod.addImport("util", util_mod);
+    setup_json_mod.addImport("util", util_mod);
     const wrapper_io_mod = b.createModule(.{
         .root_source_file = b.path("src/wrapper_io.zig"),
         .target = target,
@@ -514,6 +522,7 @@ pub fn build(b: *std.Build) void {
             break :blk stripped_bin;
         } else {
             const rel_exe = b.addExecutable(.{ .name = "smll", .root_module = release_mod });
+            rel_exe.lto = .full;
             rel_exe.link_function_sections = true;
             rel_exe.link_data_sections = true;
             rel_exe.link_gc_sections = true;

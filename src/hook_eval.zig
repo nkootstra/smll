@@ -37,22 +37,16 @@ pub fn maybeRun(
             break :blk 2;
         },
         .cursor => blk: {
-            const guidance = try std.fmt.allocPrint(allocator, "rerun through smll: smll {s}", .{command});
-            defer allocator.free(guidance);
             try stdout.writeAll("{\"permission\":\"deny\",\"user_message\":");
-            const user_message = try std.fmt.allocPrint(allocator, "wrap with smll: smll {s}", .{command});
-            defer allocator.free(user_message);
-            try setup_json.writeValue(stdout, .{ .string = user_message });
+            try writeGuidance(stdout, "wrap with smll: smll ", command);
             try stdout.writeAll(",\"agent_message\":");
-            try setup_json.writeValue(stdout, .{ .string = guidance });
+            try writeGuidance(stdout, "rerun through smll: smll ", command);
             try stdout.writeAll("}\n");
             break :blk 0;
         },
         .codex => blk: {
-            const guidance = try std.fmt.allocPrint(allocator, "rerun through smll: smll {s}", .{command});
-            defer allocator.free(guidance);
             try stdout.writeAll("{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":");
-            try setup_json.writeValue(stdout, .{ .string = guidance });
+            try writeGuidance(stdout, "rerun through smll: smll ", command);
             try stdout.writeAll("}}\n");
             break :blk 0;
         },
@@ -66,6 +60,13 @@ pub fn maybeRun(
             break :blk 0;
         },
     };
+}
+
+fn writeGuidance(writer: *std.Io.Writer, prefix: []const u8, command: []const u8) !void {
+    try writer.writeByte('"');
+    try writer.writeAll(prefix);
+    try setup_json.writeStringContent(writer, command);
+    try writer.writeByte('"');
 }
 
 test "opencode executable paths are shell escaped" {

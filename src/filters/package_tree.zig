@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -194,9 +195,7 @@ fn isPnpmList(input: []const u8) bool {
 }
 
 fn writeDecimal(writer: *Writer, value: usize) !void {
-    var buf: [32]u8 = undefined;
-    const s = try std.fmt.bufPrint(&buf, "{d}", .{value});
-    try writer.writeAll(s);
+    try util.writeDecimal(writer, value);
 }
 
 test "package tree keeps direct deps and transitive count" {
