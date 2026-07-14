@@ -109,6 +109,8 @@ fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
                 try w.writeAll("[REDACTED]");
                 continue;
             }
+            try w.writeAll(arg);
+            continue;
         }
         try w.writeAll(arg);
         if (arg.len > 0 and arg[0] == '-' and isSensitiveName(arg) and !isVisibleSensitiveFlag(arg)) redact_next = true;
@@ -427,9 +429,10 @@ test "writeHeader keeps sensitive-looking toggles and cookie jar paths visible" 
         "--cookie-jar",
         "/tmp/cookies.txt",
         "--cookie-jar=/tmp/other-cookies.txt",
+        "https://api.example.com",
     }, 1);
 
-    try std.testing.expect(std.mem.find(u8, out.written(), "# argv: my-cmd --no-cookie --output file.txt --no-token next-token-arg --disable-password next-password-arg --cookie-jar /tmp/cookies.txt --cookie-jar=/tmp/other-cookies.txt\n") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "# argv: my-cmd --no-cookie --output file.txt --no-token next-token-arg --disable-password next-password-arg --cookie-jar /tmp/cookies.txt --cookie-jar=/tmp/other-cookies.txt https://api.example.com\n") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "[REDACTED]") == null);
 }
 
