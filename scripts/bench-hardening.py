@@ -146,9 +146,9 @@ def state_write_sample(binary: pathlib.Path, workers: int) -> float:
                         env=env,
                     )
                 )
-            for child in children:
-                if child.wait() != 0:
-                    raise RuntimeError(f"{binary}: concurrent state writer failed")
+            statuses = [child.wait() for child in children]
+            if any(status != 0 for status in statuses):
+                raise RuntimeError(f"{binary}: concurrent state writer failed")
 
         duration = elapsed_ms(invoke) / workers
         stats = json.loads((home / ".smll/stats.json").read_text(encoding="utf-8"))
@@ -204,8 +204,10 @@ def main() -> int:
     candidate = args.candidate_bin.resolve()
     baseline = args.baseline_bin.resolve()
     for binary in (candidate, baseline):
-        if binary is not None and not os.access(binary, os.X_OK):
+        if not binary.exists():
             raise SystemExit(f"error: executable not found: {binary}")
+        if not os.access(binary, os.X_OK):
+            raise SystemExit(f"error: file is not executable: {binary}")
     if args.runs < 2 or args.warmup < 0 or args.state_workers < 2:
         raise SystemExit("error: runs >= 2, warmup >= 0, and state-workers >= 2 are required")
 

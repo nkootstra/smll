@@ -7,8 +7,10 @@ import importlib.util
 import io
 import pathlib
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stderr
+from unittest import mock
 
 
 MODULE_PATH = pathlib.Path(__file__).with_name("bench-hardening.py")
@@ -36,6 +38,27 @@ class HardeningBenchmarkTests(unittest.TestCase):
         self.assertTrue(bench.regressed(baseline, bench.Summary(11.1, 20.0), 10.0))
         self.assertTrue(bench.regressed(baseline, bench.Summary(10.0, 22.1), 10.0))
         self.assertFalse(bench.regressed(baseline, bench.Summary(11.0, 22.0), 10.0))
+
+    def test_state_writer_waits_for_every_child_before_raising(self) -> None:
+        failed = mock.Mock()
+        failed.wait.return_value = 1
+        succeeded = mock.Mock()
+        succeeded.wait.return_value = 0
+        with mock.patch.object(bench.subprocess, "Popen", side_effect=[failed, succeeded]):
+            with self.assertRaisesRegex(RuntimeError, "concurrent state writer failed"):
+                bench.state_write_sample(pathlib.Path("/tmp/smll"), 2)
+        failed.wait.assert_called_once_with()
+        succeeded.wait.assert_called_once_with()
+
+    def test_existing_non_executable_binary_is_reported_precisely(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            binary = pathlib.Path(root) / "smll"
+            binary.write_text("not executable\n", encoding="utf-8")
+            binary.chmod(0o600)
+            argv = ["bench-hardening.py", "--baseline-bin", str(binary), "--candidate-bin", str(binary)]
+            with mock.patch.object(sys, "argv", argv), self.assertRaises(SystemExit) as raised:
+                bench.main()
+        self.assertIn("not executable", str(raised.exception))
 
 
 if __name__ == "__main__":

@@ -64,6 +64,8 @@ class CompareRtkMetricTests(unittest.TestCase):
                 b"(smll: omitted many relevant lines; rerun with smll --raw)\n"
             )
         )
+        self.assertFalse(compare.has_declared_omission(b"5 lines omitted by child\n"))
+        self.assertFalse(compare.has_declared_omission(b"rerun with smll --raw\n"))
 
     def test_benchmark_savings_are_unclamped(self) -> None:
         self.assertEqual(compare.benchmark_saved_tokens(100, 125), -25)
