@@ -1,4 +1,5 @@
 const std = @import("std");
+const accounting = @import("accounting.zig");
 const state_io = @import("state_io.zig");
 const util = @import("util");
 const Allocator = std.mem.Allocator;
@@ -9,7 +10,7 @@ const history_file = ".smll/history.jsonl";
 const history_lock_file = ".smll/history.lock";
 const MAX_TRACKED_CMDS = 32;
 const MAX_HISTORY_SIZE = 16 * 1024 * 1024;
-const HISTORY_SCHEMA_VERSION = 1;
+const HISTORY_SCHEMA_VERSION = 2;
 
 pub const RecordOptions = struct {
     exit_code: u8 = 0,
@@ -28,14 +29,20 @@ pub const QueryOptions = struct {
 
 const CmdStats = struct {
     n: u64 = 0,
-    in_bytes: u64 = 0,
-    out_bytes: u64 = 0,
+    raw_bytes: u64 = 0,
+    displayed_bytes: u64 = 0,
+    omitted_bytes: u64 = 0,
+    diagnostic_bytes: u64 = 0,
+    formatting_saved_bytes: u64 = 0,
 };
 
 const Entry = struct {
     ts_ms: i64 = 0,
     raw_bytes: u64 = 0,
-    compact_bytes: u64 = 0,
+    displayed_bytes: u64 = 0,
+    omitted_bytes: u64 = 0,
+    diagnostic_bytes: u64 = 0,
+    formatting_saved_bytes: u64 = 0,
     cmd: [64]u8 = [_]u8{0} ** 64,
     cmd_len: usize = 0,
     filter: [64]u8 = [_]u8{0} ** 64,
@@ -69,9 +76,12 @@ const AggEntry = struct {
 
 pub const Aggregate = struct {
     commands: u64 = 0,
-    input_bytes: u64 = 0,
-    output_bytes: u64 = 0,
-    by_cmd: [MAX_TRACKED_CMDS]AggEntry = [_]AggEntry{.{}} ** MAX_TRACKED_CMDS,
+    raw_bytes: u64 = 0,
+    displayed_bytes: u64 = 0,
+    omitted_bytes: u64 = 0,
+    diagnostic_bytes: u64 = 0,
+    formatting_saved_bytes: u64 = 0,
+    by_cmd: [MAX_TRACKED_CMDS]AggEntry = undefined,
     cmd_count: usize = 0,
 };
 
@@ -81,16 +91,38 @@ pub fn append(
     home: []const u8,
     dir_path: []const u8,
     label: []const u8,
-    input_bytes: usize,
-    output_bytes: usize,
+    bytes: accounting.Bytes,
     options: RecordOptions,
+) !void {
+    return appendInner(allocator, io, home, dir_path, label, bytes, options, true);
+}
+
+pub fn appendUnderStateLock(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    dir_path: []const u8,
+    label: []const u8,
+    bytes: accounting.Bytes,
+    options: RecordOptions,
+) !void {
+    return appendInner(allocator, io, home, dir_path, label, bytes, options, false);
+}
+
+fn appendInner(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    dir_path: []const u8,
+    label: []const u8,
+    bytes: accounting.Bytes,
+    options: RecordOptions,
+    acquire_history_lock: bool,
 ) !void {
     try state_io.ensurePrivateDir(io, dir_path);
 
     const history_path = try joinPath(allocator, home, history_file);
     defer allocator.free(history_path);
-    const lock_path = try joinPath(allocator, home, history_lock_file);
-    defer allocator.free(lock_path);
 
     const cwd_path = std.process.currentPathAlloc(io, allocator) catch try allocator.dupeZ(u8, "");
     defer allocator.free(cwd_path);
@@ -118,14 +150,26 @@ pub fn append(
     try w.writeAll(",\"exit\":");
     try writeU64(w, options.exit_code);
     try w.writeAll(",\"raw\":");
-    try writeU64(w, input_bytes);
-    try w.writeAll(",\"compact\":");
-    try writeU64(w, output_bytes);
+    try writeU64(w, bytes.raw_bytes);
+    try w.writeAll(",\"displayed\":");
+    try writeU64(w, bytes.displayed_bytes);
+    try w.writeAll(",\"omitted\":");
+    try writeU64(w, bytes.omitted_bytes);
+    try w.writeAll(",\"diagnostics\":");
+    try writeU64(w, bytes.diagnostic_bytes);
+    try w.writeAll(",\"saved\":");
+    try writeU64(w, bytes.formatting_saved_bytes);
     try w.writeAll(",\"duration_ms\":");
     try writeU64(w, options.duration_ms);
     try w.writeAll("}\n");
 
-    try appendLineBounded(allocator, io, history_path, lock_path, line.written(), MAX_HISTORY_SIZE);
+    if (acquire_history_lock) {
+        const lock_path = try joinPath(allocator, home, history_lock_file);
+        defer allocator.free(lock_path);
+        try appendLineBounded(allocator, io, history_path, lock_path, line.written(), MAX_HISTORY_SIZE);
+    } else {
+        try appendLineBoundedUnlocked(allocator, io, history_path, line.written(), MAX_HISTORY_SIZE);
+    }
 }
 
 pub fn reset(allocator: Allocator, io: Io, home: []const u8) !void {
@@ -155,7 +199,14 @@ pub fn aggregate(allocator: Allocator, io: Io, home: []const u8, opts: QueryOpti
         project_filter = projectKey(allocator, io, cwd_path) catch try allocator.dupe(u8, cwd_path);
     }
 
-    var agg: Aggregate = .{};
+    var agg: Aggregate = undefined;
+    agg.commands = 0;
+    agg.raw_bytes = 0;
+    agg.displayed_bytes = 0;
+    agg.omitted_bytes = 0;
+    agg.diagnostic_bytes = 0;
+    agg.formatting_saved_bytes = 0;
+    agg.cmd_count = 0;
     var lines = std.mem.splitScalar(u8, data.lines, '\n');
     while (lines.next()) |raw_line| {
         const line = std.mem.trim(u8, raw_line, " \t\r");
@@ -182,6 +233,12 @@ fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, loc
 
     const lock_file = try openLockFile(io, lock_path);
     defer if (lock_file) |file| file.close(io);
+
+    try appendLineBoundedUnlocked(allocator, io, history_path, line, max_size);
+}
+
+fn appendLineBoundedUnlocked(allocator: Allocator, io: Io, history_path: []const u8, line: []const u8, max_size: usize) !void {
+    if (line.len > max_size) return;
 
     {
         var file = try state_io.createPrivateFile(io, history_path, .{ .read = true, .truncate = false });
@@ -272,7 +329,7 @@ pub fn displayDiscover(allocator: Allocator, io: Io, home: []const u8, opts: Que
 
 pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
     if (agg.cmd_count == 0) return;
-    try stdout.writeAll("\n  Command              Runs  Input tok  Output tok  Saved tok\n");
+    try stdout.writeAll("\n  Command              Runs    Raw tok  Display tok  Saved tok\n");
     try stdout.writeAll("  -----------------------------------------------------------\n");
 
     var indices: [MAX_TRACKED_CMDS]usize = undefined;
@@ -281,16 +338,16 @@ pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
 
     for (indices[0..agg.cmd_count]) |idx| {
         const entry = &agg.by_cmd[idx];
-        const saved = savedBytes(entry.stats.in_bytes, entry.stats.out_bytes);
-        const pct = percentSaved(entry.stats.in_bytes, entry.stats.out_bytes);
+        const saved = entry.stats.formatting_saved_bytes;
+        const pct = percentSaved(entry.stats.raw_bytes, saved);
         try stdout.writeAll("  ");
         try writePaddedRight(stdout, entry.nameSlice(), 20);
         try stdout.writeAll("  ");
         try writeU64PaddedLeft(stdout, entry.stats.n, 4);
         try stdout.writeAll("  ");
-        try writeHumanCountPaddedLeft(stdout, entry.stats.in_bytes / 4, 9);
+        try writeHumanCountPaddedLeft(stdout, entry.stats.raw_bytes / 4, 9);
         try stdout.writeAll("  ");
-        try writeHumanCountPaddedLeft(stdout, entry.stats.out_bytes / 4, 10);
+        try writeHumanCountPaddedLeft(stdout, entry.stats.displayed_bytes / 4, 10);
         try stdout.writeAll("  ");
         try writeHumanCountPaddedLeft(stdout, saved / 4, 9);
         try stdout.writeAll(" (");
@@ -302,9 +359,18 @@ pub fn writeByCommand(stdout: *Writer, agg: Aggregate) !void {
 
 fn parseLine(line: []const u8) ?Entry {
     var entry: Entry = .{};
+    const version = util.findJsonU64Opt(line, "\"v\":") orelse 1;
     entry.ts_ms = std.math.cast(i64, util.findJsonU64Opt(line, "\"ts_ms\":") orelse return null) orelse return null;
     entry.raw_bytes = util.findJsonU64Opt(line, "\"raw\":") orelse return null;
-    entry.compact_bytes = util.findJsonU64Opt(line, "\"compact\":") orelse return null;
+    if (version >= 2) {
+        entry.displayed_bytes = util.findJsonU64Opt(line, "\"displayed\":") orelse return null;
+        entry.omitted_bytes = util.findJsonU64Opt(line, "\"omitted\":") orelse return null;
+        entry.diagnostic_bytes = util.findJsonU64Opt(line, "\"diagnostics\":") orelse return null;
+        entry.formatting_saved_bytes = util.findJsonU64Opt(line, "\"saved\":") orelse return null;
+    } else {
+        entry.displayed_bytes = util.findJsonU64Opt(line, "\"compact\":") orelse return null;
+        entry.formatting_saved_bytes = 0;
+    }
     _ = util.findJsonU64Opt(line, "\"exit\":") orelse return null;
     entry.cmd_len = readJsonStringInto(line, "\"cmd\":", &entry.cmd) orelse return null;
     entry.filter_len = readJsonStringInto(line, "\"filter\":", &entry.filter) orelse return null;
@@ -315,8 +381,11 @@ fn parseLine(line: []const u8) ?Entry {
 
 fn addEntry(agg: *Aggregate, entry: Entry) void {
     agg.commands += 1;
-    agg.input_bytes += entry.raw_bytes;
-    agg.output_bytes += entry.compact_bytes;
+    agg.raw_bytes += entry.raw_bytes;
+    agg.displayed_bytes += entry.displayed_bytes;
+    agg.omitted_bytes += entry.omitted_bytes;
+    agg.diagnostic_bytes += entry.diagnostic_bytes;
+    agg.formatting_saved_bytes += entry.formatting_saved_bytes;
 
     const name = entry.cmdSlice();
     var found: ?*AggEntry = null;
@@ -328,6 +397,7 @@ fn addEntry(agg: *Aggregate, entry: Entry) void {
     }
     if (found == null and agg.cmd_count < MAX_TRACKED_CMDS) {
         const item = &agg.by_cmd[agg.cmd_count];
+        item.* = .{};
         const copy_len = @min(name.len, item.name.len);
         @memcpy(item.name[0..copy_len], name[0..copy_len]);
         item.name_len = copy_len;
@@ -336,8 +406,11 @@ fn addEntry(agg: *Aggregate, entry: Entry) void {
     }
     if (found) |item| {
         item.stats.n += 1;
-        item.stats.in_bytes += entry.raw_bytes;
-        item.stats.out_bytes += entry.compact_bytes;
+        item.stats.raw_bytes += entry.raw_bytes;
+        item.stats.displayed_bytes += entry.displayed_bytes;
+        item.stats.omitted_bytes += entry.omitted_bytes;
+        item.stats.diagnostic_bytes += entry.diagnostic_bytes;
+        item.stats.formatting_saved_bytes += entry.formatting_saved_bytes;
         if (isPassthroughEntry(entry)) item.passthrough_runs += 1;
     }
 }
@@ -345,7 +418,7 @@ fn addEntry(agg: *Aggregate, entry: Entry) void {
 fn isPassthroughEntry(entry: Entry) bool {
     return std.mem.eql(u8, entry.filterSlice(), "passthrough") or
         std.mem.eql(u8, entry.filterSlice(), "unknown") or
-        savedBytes(entry.raw_bytes, entry.compact_bytes) == 0;
+        entry.formatting_saved_bytes == 0;
 }
 
 fn writeDiscoverLowSavings(stdout: *Writer, agg: Aggregate) !void {
@@ -356,10 +429,10 @@ fn writeDiscoverLowSavings(stdout: *Writer, agg: Aggregate) !void {
     var written: usize = 0;
     for (indices[0..agg.cmd_count]) |idx| {
         const entry = &agg.by_cmd[idx];
-        if (entry.stats.in_bytes == 0) continue;
-        const pct = percentSaved(entry.stats.in_bytes, entry.stats.out_bytes);
+        if (entry.stats.raw_bytes == 0) continue;
+        const pct = percentSaved(entry.stats.raw_bytes, entry.stats.formatting_saved_bytes);
         if (pct >= 30) continue;
-        try writeDiscoverRow(stdout, entry, pct, savedBytes(entry.stats.in_bytes, entry.stats.out_bytes), null);
+        try writeDiscoverRow(stdout, entry, pct, entry.stats.formatting_saved_bytes, null);
         written += 1;
         if (written == 8) break;
     }
@@ -375,8 +448,8 @@ fn writeDiscoverPassthrough(stdout: *Writer, agg: Aggregate) !void {
     for (indices[0..agg.cmd_count]) |idx| {
         const entry = &agg.by_cmd[idx];
         if (entry.passthrough_runs == 0) continue;
-        const pct = percentSaved(entry.stats.in_bytes, entry.stats.out_bytes);
-        try writeDiscoverRow(stdout, entry, pct, savedBytes(entry.stats.in_bytes, entry.stats.out_bytes), entry.passthrough_runs);
+        const pct = percentSaved(entry.stats.raw_bytes, entry.stats.formatting_saved_bytes);
+        try writeDiscoverRow(stdout, entry, pct, entry.stats.formatting_saved_bytes, entry.passthrough_runs);
         written += 1;
         if (written == 8) break;
     }
@@ -391,9 +464,9 @@ fn writeDiscoverTopRaw(stdout: *Writer, agg: Aggregate) !void {
     var written: usize = 0;
     for (indices[0..agg.cmd_count]) |idx| {
         const entry = &agg.by_cmd[idx];
-        if (entry.stats.in_bytes == 0) continue;
-        const pct = percentSaved(entry.stats.in_bytes, entry.stats.out_bytes);
-        try writeDiscoverRow(stdout, entry, pct, savedBytes(entry.stats.in_bytes, entry.stats.out_bytes), null);
+        if (entry.stats.raw_bytes == 0) continue;
+        const pct = percentSaved(entry.stats.raw_bytes, entry.stats.formatting_saved_bytes);
+        try writeDiscoverRow(stdout, entry, pct, entry.stats.formatting_saved_bytes, null);
         written += 1;
         if (written == 8) break;
     }
@@ -406,7 +479,7 @@ fn writeDiscoverRow(stdout: *Writer, entry: *const AggEntry, pct: u64, saved: u6
     try stdout.writeAll("  runs=");
     try writeU64(stdout, entry.stats.n);
     try stdout.writeAll(" raw=");
-    try writeHumanDecimal(stdout, entry.stats.in_bytes);
+    try writeHumanDecimal(stdout, entry.stats.raw_bytes);
     try stdout.writeAll("B saved=");
     try writeHumanDecimal(stdout, saved);
     try stdout.writeAll("B (");
@@ -436,17 +509,16 @@ fn sortAggIndices(entries: []const AggEntry, indices: []usize, mode: AggSort) vo
 
 fn aggLess(items: []const AggEntry, a: usize, b: usize, mode: AggSort) bool {
     return switch (mode) {
-        .saved => savedBytes(items[a].stats.in_bytes, items[a].stats.out_bytes) >
-            savedBytes(items[b].stats.in_bytes, items[b].stats.out_bytes),
-        .raw => items[a].stats.in_bytes > items[b].stats.in_bytes,
+        .saved => items[a].stats.formatting_saved_bytes > items[b].stats.formatting_saved_bytes,
+        .raw => items[a].stats.raw_bytes > items[b].stats.raw_bytes,
         .passthrough => if (items[a].passthrough_runs != items[b].passthrough_runs)
             items[a].passthrough_runs > items[b].passthrough_runs
         else
-            items[a].stats.in_bytes > items[b].stats.in_bytes,
+            items[a].stats.raw_bytes > items[b].stats.raw_bytes,
         .low_savings => blk: {
-            const pct_a = percentSaved(items[a].stats.in_bytes, items[a].stats.out_bytes);
-            const pct_b = percentSaved(items[b].stats.in_bytes, items[b].stats.out_bytes);
-            break :blk if (pct_a != pct_b) pct_a < pct_b else items[a].stats.in_bytes > items[b].stats.in_bytes;
+            const pct_a = percentSaved(items[a].stats.raw_bytes, items[a].stats.formatting_saved_bytes);
+            const pct_b = percentSaved(items[b].stats.raw_bytes, items[b].stats.formatting_saved_bytes);
+            break :blk if (pct_a != pct_b) pct_a < pct_b else items[a].stats.raw_bytes > items[b].stats.raw_bytes;
         },
     };
 }
@@ -528,13 +600,9 @@ fn dirnameSlice(path: []const u8) ?[]const u8 {
     return path[0..idx];
 }
 
-fn savedBytes(input_bytes: u64, output_bytes: u64) u64 {
-    return if (input_bytes > output_bytes) input_bytes - output_bytes else 0;
-}
-
-fn percentSaved(input_bytes: u64, output_bytes: u64) u64 {
-    if (input_bytes == 0) return 0;
-    return (savedBytes(input_bytes, output_bytes) * 100) / input_bytes;
+fn percentSaved(raw_bytes: u64, formatting_saved_bytes: u64) u64 {
+    if (raw_bytes == 0) return 0;
+    return (formatting_saved_bytes * 100) / raw_bytes;
 }
 
 const writeHumanCount = util.writeHumanCount;
@@ -597,8 +665,9 @@ test "history aggregation skips malformed lines and applies since" {
 
     const agg = try aggregate(allocator, std.testing.io, home, .{ .since_ms = 24 * 60 * 60 * 1000 });
     try std.testing.expectEqual(@as(u64, 1), agg.commands);
-    try std.testing.expectEqual(@as(u64, 200), agg.input_bytes);
-    try std.testing.expectEqual(@as(u64, 40), agg.output_bytes);
+    try std.testing.expectEqual(@as(u64, 200), agg.raw_bytes);
+    try std.testing.expectEqual(@as(u64, 40), agg.displayed_bytes);
+    try std.testing.expectEqual(@as(u64, 160), agg.formatting_saved_bytes);
     try std.testing.expectEqualStrings("new", agg.by_cmd[0].nameSlice());
 }
 
@@ -616,6 +685,28 @@ test "history parser skips oversized byte counts" {
         "\"cmd\":\"bad\",\"filter\":\"rg\",\"exit\":0,\"raw\":18446744073709551616,\"compact\":0,\"duration_ms\":1}";
 
     try std.testing.expect(parseLine(line) == null);
+}
+
+test "history parser migrates v1 and reads v2 accounting" {
+    const v1 =
+        "{\"v\":1,\"ts_ms\":1,\"project\":\"p\",\"cwd\":\"p\"," ++
+        "\"cmd\":\"old\",\"filter\":\"rg\",\"exit\":0,\"raw\":100,\"compact\":40,\"duration_ms\":1}";
+    const old = parseLine(v1).?;
+    try std.testing.expectEqual(@as(u64, 100), old.raw_bytes);
+    try std.testing.expectEqual(@as(u64, 40), old.displayed_bytes);
+    try std.testing.expectEqual(@as(u64, 0), old.formatting_saved_bytes);
+    try std.testing.expectEqual(@as(u64, 0), old.omitted_bytes);
+    try std.testing.expectEqual(@as(u64, 0), old.diagnostic_bytes);
+
+    const v2 =
+        "{\"v\":2,\"ts_ms\":1,\"project\":\"p\",\"cwd\":\"p\"," ++
+        "\"cmd\":\"new\",\"filter\":\"rg\",\"exit\":0,\"raw\":100," ++
+        "\"displayed\":55,\"omitted\":20,\"diagnostics\":5,\"saved\":30,\"duration_ms\":1}";
+    const current = parseLine(v2).?;
+    try std.testing.expectEqual(@as(u64, 55), current.displayed_bytes);
+    try std.testing.expectEqual(@as(u64, 20), current.omitted_bytes);
+    try std.testing.expectEqual(@as(u64, 5), current.diagnostic_bytes);
+    try std.testing.expectEqual(@as(u64, 30), current.formatting_saved_bytes);
 }
 
 test "history aggregation filters to current project" {
@@ -675,25 +766,32 @@ test "discover reports low savings passthrough and top raw commands" {
 
 test "by-command stats label token estimates and avoid tabs" {
     const allocator = std.testing.allocator;
-    var agg: Aggregate = .{ .commands = 2, .input_bytes = 1000, .output_bytes = 500 };
+    var agg: Aggregate = .{
+        .commands = 2,
+        .raw_bytes = 1000,
+        .displayed_bytes = 500,
+        .formatting_saved_bytes = 500,
+    };
     agg.cmd_count = 2;
+    agg.by_cmd[0] = .{};
+    agg.by_cmd[1] = .{};
 
     const status = "git status";
     @memcpy(agg.by_cmd[0].name[0..status.len], status);
     agg.by_cmd[0].name_len = status.len;
-    agg.by_cmd[0].stats = .{ .n = 1, .in_bytes = 400, .out_bytes = 100 };
+    agg.by_cmd[0].stats = .{ .n = 1, .raw_bytes = 400, .displayed_bytes = 100, .formatting_saved_bytes = 300 };
 
     const logs = "docker logs";
     @memcpy(agg.by_cmd[1].name[0..logs.len], logs);
     agg.by_cmd[1].name_len = logs.len;
-    agg.by_cmd[1].stats = .{ .n = 1, .in_bytes = 600, .out_bytes = 400 };
+    agg.by_cmd[1].stats = .{ .n = 1, .raw_bytes = 600, .displayed_bytes = 400, .formatting_saved_bytes = 200 };
 
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
     try writeByCommand(&out.writer, agg);
 
-    try std.testing.expect(std.mem.find(u8, out.written(), "Input tok") != null);
-    try std.testing.expect(std.mem.find(u8, out.written(), "Output tok") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Raw tok") != null);
+    try std.testing.expect(std.mem.find(u8, out.written(), "Display tok") != null);
     try std.testing.expect(std.mem.find(u8, out.written(), "Saved tok") != null);
     try std.testing.expect(std.mem.findScalar(u8, out.written(), '\t') == null);
     try std.testing.expect(std.mem.find(u8, out.written(), "git status") != null);
@@ -825,7 +923,7 @@ fn writeFixtureLine(
     raw_bytes: u64,
     compact_bytes: u64,
 ) !void {
-    try w.writeAll("{\"v\":1,\"ts_ms\":");
+    try w.writeAll("{\"v\":2,\"ts_ms\":");
     try writeU64(w, @intCast(ts_ms));
     try w.writeAll(",\"project\":");
     try writeJsonString(w, project);
@@ -837,7 +935,9 @@ fn writeFixtureLine(
     try writeJsonString(w, filter);
     try w.writeAll(",\"exit\":0,\"raw\":");
     try writeU64(w, raw_bytes);
-    try w.writeAll(",\"compact\":");
+    try w.writeAll(",\"displayed\":");
     try writeU64(w, compact_bytes);
+    try w.writeAll(",\"omitted\":0,\"diagnostics\":0,\"saved\":");
+    try writeU64(w, raw_bytes -| compact_bytes);
     try w.writeAll(",\"duration_ms\":1}\n");
 }

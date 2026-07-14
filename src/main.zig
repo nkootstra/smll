@@ -450,7 +450,7 @@ fn runWrappedAndRecord(
     var recorded = false;
     if (should_record) {
         const history_filter_name = try historyFilterName(allocator, mode, result.filter_name);
-        recorded = stats.record(allocator, io, home, child_argv, result.input_bytes, result.output_bytes, .{
+        recorded = stats.record(allocator, io, home, child_argv, result.bytes, .{
             .exit_code = result.exit_code,
             .filter_name = history_filter_name,
             .duration_ms = duration_ms,
@@ -458,14 +458,18 @@ fn runWrappedAndRecord(
     }
 
     if (mode == .explain) {
-        const saved = if (result.input_bytes > result.output_bytes) result.input_bytes - result.output_bytes else 0;
-        const pct = if (result.input_bytes > 0) (saved * 100) / result.input_bytes else 0;
+        const pct = if (result.bytes.raw_bytes > 0)
+            (result.bytes.formatting_saved_bytes * 100) / result.bytes.raw_bytes
+        else
+            0;
         try stderr.print(
-            "\n(smll explain: filter={s} raw={d} compact={d} saved={d}% exit={d} history={s})\n",
+            "\n(smll explain: filter={s} raw={d} displayed={d} omitted={d} diagnostics={d} saved={d}% exit={d} history={s})\n",
             .{
                 result.filter_name,
-                result.input_bytes,
-                result.output_bytes,
+                result.bytes.raw_bytes,
+                result.bytes.displayed_bytes,
+                result.bytes.omitted_bytes,
+                result.bytes.diagnostic_bytes,
                 pct,
                 result.exit_code,
                 if (recorded) "recorded" else "not-recorded",

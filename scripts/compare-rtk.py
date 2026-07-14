@@ -395,6 +395,37 @@ def count_run_tokens(counter: TokenCounter, run: ToolRun) -> int:
     return counter.count(run.stdout) + counter.count(run.stderr)
 
 
+def has_declared_omission(data: bytes) -> bool:
+    standalone_prefix = b"(smll: omitted "
+    standalone_suffix = b" relevant lines; rerun with smll --raw)"
+    grouped_suffix = b" omitted; --raw for all)"
+
+    for line in data.splitlines():
+        if line.startswith(standalone_prefix) and line.endswith(standalone_suffix):
+            count = line[len(standalone_prefix) : -len(standalone_suffix)]
+            if count.isdigit():
+                return True
+        if line.endswith(grouped_suffix):
+            before_suffix = line[: -len(grouped_suffix)]
+            separator = before_suffix.rfind(b"; ")
+            if separator < 0 or not before_suffix[separator + 2 :].isdigit():
+                continue
+            summary = before_suffix[:separator]
+            summary_start = summary.rfind(b"/ (")
+            if summary_start < 0:
+                continue
+            descriptor = summary[summary_start + 3 :]
+            count, separator, examples = descriptor.partition(b" ")
+            if (
+                separator
+                and count.isdigit()
+                and examples.startswith((b"entries: ", b"files: "))
+                and examples not in (b"entries: ", b"files: ")
+            ):
+                return True
+    return False
+
+
 def div_ceil(value: int, divisor: int) -> int:
     return (value + divisor - 1) // divisor
 
@@ -404,7 +435,16 @@ def build_stats_models(cases: list[dict], raw_tokens: int, smll_tokens: int, rtk
     raw_stderr_bytes = sum(row["raw"]["stderr_bytes"] for row in cases)
     smll_bytes = sum(row["smll"]["bytes"] for row in cases)
     smll_stderr_bytes = sum(row["smll"]["stderr_bytes"] for row in cases)
-    smll_saved_bytes = max(raw_bytes - smll_bytes, 0)
+    smll_omitted_bytes = sum(
+        max(row["raw"]["bytes"] - row["smll"]["bytes"], 0)
+        for row in cases
+        if row["smll"].get("declared_omission", False)
+    )
+    smll_saved_bytes = sum(
+        max(row["raw"]["bytes"] - row["smll"]["bytes"], 0)
+        for row in cases
+        if not row["smll"].get("declared_omission", False)
+    )
 
     rtk_input_estimate = sum(div_ceil(row["raw"]["bytes"], 4) for row in cases)
     rtk_output_estimate = sum(div_ceil(row["rtk"]["bytes"], 4) for row in cases)
@@ -420,16 +460,18 @@ def build_stats_models(cases: list[dict], raw_tokens: int, smll_tokens: int, rtk
     return {
         "smll_stats": {
             "role": "native_estimate_diagnostic",
-            "basis": "agent-visible stdout+stderr bytes recorded by smll wrapper stats; displayed token savings are floor(saved_bytes / 4)",
+            "basis": "versioned smll accounting: raw and displayed stdout+stderr bytes, with declared omissions excluded from formatting savings; displayed token savings are floor(saved_bytes / 4)",
             "input_bytes": raw_bytes,
             "output_bytes": smll_bytes,
+            "omitted_bytes": smll_omitted_bytes,
+            "diagnostic_bytes": 0,
             "saved_bytes": smll_saved_bytes,
             "estimated_tokens_saved": smll_saved_bytes // 4,
             "exact_benchmark_tokens_saved": benchmark_saved_tokens(raw_tokens, smll_tokens),
             "estimated_vs_exact_delta": (smll_saved_bytes // 4) - benchmark_saved_tokens(raw_tokens, smll_tokens),
             "included_raw_stderr_bytes": raw_stderr_bytes,
             "included_smll_stderr_bytes": smll_stderr_bytes,
-            "factuality": "Factual for smll's recorded agent-visible byte totals; token savings remain an explicit bytes/4 estimate, not tokenizer-factual.",
+            "factuality": "Conservative for formatting savings: declared omissions are excluded; token savings remain an explicit bytes/4 estimate, not tokenizer-factual.",
         },
         "rtk_gain": {
             "role": "native_estimate_diagnostic",
@@ -874,6 +916,7 @@ def main() -> int:
                         "bytes": len(smll_run.combined),
                         "stdout_bytes": len(smll_run.stdout),
                         "stderr_bytes": len(smll_run.stderr),
+                        "declared_omission": has_declared_omission(smll_run.combined),
                         "tokens": smll_tokens,
                         "saved_tokens": benchmark_saved_tokens(raw_tokens, smll_tokens),
                         "savings_pct": benchmark_savings_pct(raw_tokens, smll_tokens),

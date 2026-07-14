@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const accounting = @import("accounting.zig");
 
 const tee = @import("tee.zig");
 const wrapper_git = @import("wrapper_git.zig");
@@ -73,8 +74,7 @@ const MAX_CURL_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
 pub const Result = struct {
     exit_code: u8,
-    input_bytes: usize,
-    output_bytes: usize,
+    bytes: accounting.Bytes,
     filter_name: []const u8,
     record_stats: bool,
 };
@@ -261,10 +261,10 @@ pub fn run(
         );
         try counted_stdout.writer.flush();
         try counted_stderr.writer.flush();
+        const displayed_bytes = counted_stdout.count + counted_stderr.count;
         return .{
             .exit_code = stream_result.exit_code,
-            .input_bytes = stream_result.input_bytes,
-            .output_bytes = counted_stdout.count + counted_stderr.count,
+            .bytes = accounting.derive(stream_result.input_bytes, displayed_bytes, 0, false, true),
             .filter_name = stream_result.filter_name,
             .record_stats = true,
         };
@@ -279,6 +279,8 @@ pub fn run(
     last_filter_name = "passthrough";
     last_raw_stdout = &.{};
     last_raw_stderr = &.{};
+    last_capture_complete = true;
+    last_diagnostic_bytes = 0;
     const exit_code = try runWrapperInner(
         allocator,
         io,
@@ -310,7 +312,9 @@ pub fn run(
     // stdio directly, so their output bypasses this capture buffer and must
     // not get an extra hint appended.
     if (!failed_filter_output and output.len == 0 and counted_stderr.count == 0 and !last_output_inherited) {
+        const before = final_stdout.written().len;
         try writeNoOutputHint(&final_stdout.writer, argv, exit_code);
+        last_diagnostic_bytes += final_stdout.written().len - before;
     } else if (!failed_filter_output) {
         try final_stdout.writer.writeAll(output);
     }
@@ -324,9 +328,11 @@ pub fn run(
         const home = environ.get("HOME") orelse "";
         if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
             if (!failed_filter_output) {
+                const before = final_stdout.written().len;
                 final_stdout.writer.writeAll("\n(smll: full output saved to ") catch {};
                 final_stdout.writer.writeAll(path) catch {};
                 final_stdout.writer.writeAll(")\n") catch {};
+                last_diagnostic_bytes += final_stdout.written().len - before;
             }
         }
     }
@@ -336,13 +342,76 @@ pub fn run(
 
     // Input bytes are raw child stdout+stderr. Output bytes are compacted
     // stdout plus any stderr smll forwarded, matching what an agent sees.
+    const displayed_bytes = final_stdout_bytes + counted_stderr.count;
+    const declared_omission = hasDeclaredOmission(final_stdout.written());
     return .{
         .exit_code = exit_code,
-        .input_bytes = last_input_bytes,
-        .output_bytes = final_stdout_bytes + counted_stderr.count,
+        .bytes = accounting.derive(
+            last_input_bytes,
+            displayed_bytes,
+            last_diagnostic_bytes,
+            declared_omission,
+            last_capture_complete and !failed_filter_output,
+        ),
         .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
     };
+}
+
+fn hasDeclaredOmission(output: []const u8) bool {
+    var lines = std.mem.splitScalar(u8, output, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trim(u8, raw_line, "\r");
+        if (hasNumberedSuffix(
+            line,
+            "(smll: omitted ",
+            " relevant lines; rerun with smll --raw)",
+        )) return true;
+
+        if (hasGroupedOmissionLine(line)) return true;
+    }
+    return false;
+}
+
+fn hasGroupedOmissionLine(line: []const u8) bool {
+    const suffix = " omitted; --raw for all)";
+    if (!std.mem.endsWith(u8, line, suffix)) return false;
+
+    const before_suffix = line[0 .. line.len - suffix.len];
+    const omission_separator = std.mem.lastIndexOf(u8, before_suffix, "; ") orelse return false;
+    if (!isDecimal(before_suffix[omission_separator + 2 ..])) return false;
+
+    const summary = before_suffix[0..omission_separator];
+    const summary_start = std.mem.lastIndexOf(u8, summary, "/ (") orelse return false;
+    const descriptor = summary[summary_start + 3 ..];
+    const count_end = std.mem.indexOfScalar(u8, descriptor, ' ') orelse return false;
+    if (!isDecimal(descriptor[0..count_end])) return false;
+
+    const examples = descriptor[count_end + 1 ..];
+    if (std.mem.startsWith(u8, examples, "entries: ")) return examples.len > "entries: ".len;
+    if (std.mem.startsWith(u8, examples, "files: ")) return examples.len > "files: ".len;
+    return false;
+}
+
+fn hasNumberedSuffix(line: []const u8, prefix: []const u8, suffix: []const u8) bool {
+    if (!std.mem.startsWith(u8, line, prefix) or !std.mem.endsWith(u8, line, suffix)) return false;
+    return isDecimal(line[prefix.len .. line.len - suffix.len]);
+}
+
+fn isDecimal(value: []const u8) bool {
+    if (value.len == 0) return false;
+    for (value) |c| if (!std.ascii.isDigit(c)) return false;
+    return true;
+}
+
+test "declared omission detection recognizes only smll marker lines" {
+    try std.testing.expect(hasDeclaredOmission("(smll: omitted 5 relevant lines; rerun with smll --raw)\n"));
+    try std.testing.expect(hasDeclaredOmission("src/ (4 entries: a, b, c; 1 omitted; --raw for all)\n"));
+    try std.testing.expect(!hasDeclaredOmission("5 lines omitted by child\n"));
+    try std.testing.expect(!hasDeclaredOmission("rerun with smll --raw\n"));
+    try std.testing.expect(!hasDeclaredOmission("--raw flag was omitted\n"));
+    try std.testing.expect(!hasDeclaredOmission("child; 1 omitted; --raw for all)\n"));
+    try std.testing.expect(!hasDeclaredOmission("(smll: omitted many relevant lines; rerun with smll --raw)\n"));
 }
 
 /// Public `--raw` execution path. Inherit all three standard streams and pass
@@ -445,6 +514,14 @@ var last_filter_name: []const u8 = "passthrough";
 /// outermost `runWrapper` call reads them, so module-level state is safe.
 var last_raw_stdout: []const u8 = &.{};
 var last_raw_stderr: []const u8 = &.{};
+var last_capture_complete: bool = true;
+var last_diagnostic_bytes: usize = 0;
+
+fn writeIncompleteOutputDiagnostic(writer: *std.Io.Writer) !void {
+    try writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+    last_diagnostic_bytes += wrapper_io.incomplete_output_diagnostic.len;
+    last_capture_complete = false;
+}
 
 /// Write stdout through safe generic fallbacks: high-confidence table/list
 /// compaction first, then size-gated generic text compaction, then raw output.
@@ -586,13 +663,13 @@ fn runWrapperInner(
     if (captured.overflowed) {
         last_output_inherited = true;
         last_filter_name = "passthrough";
-        if (captured.incomplete) try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+        if (captured.incomplete) try writeIncompleteOutputDiagnostic(stderr_writer);
         return exit_code;
     }
     if (captured.incomplete) {
         last_output_inherited = true;
         passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
-        try stderr_writer.writeAll(wrapper_io.incomplete_output_diagnostic);
+        try writeIncompleteOutputDiagnostic(stderr_writer);
         return exit_code;
     }
 
