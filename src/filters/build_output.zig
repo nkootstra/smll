@@ -1,5 +1,6 @@
 const std = @import("std");
 const ansi = @import("ansi");
+const util = @import("util");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
 
@@ -81,7 +82,7 @@ pub fn apply(allocator: Allocator, stdout: []const u8, stderr: []const u8, write
         try writer.writeAll("build complete\n");
         return;
     }
-    try writer.writeAll(scratch.items);
+    try util.writeHeadTail(writer, scratch.items, 120, 80);
 }
 
 const max_asset_rows = 5;
@@ -160,14 +161,10 @@ fn scanAndKeep(
 ) !void {
     if (input.len == 0) return;
     var lines = std.mem.splitScalar(u8, input, '\n');
-    // 200 lines is enough for Vite/Next/Nuxt builds in normal projects:
-    // ~30 chunks, ~30 routes, warnings, summary. Bound prevents runaway.
-    const head_cap: usize = 200;
     var strip_buf: std.ArrayList(u8) = .empty;
     defer strip_buf.deinit(allocator);
     var prev_blank: bool = false;
     while (lines.next()) |raw| {
-        if (kept.* >= head_cap) break;
         const line = ansi.stripInto(&strip_buf, allocator, raw) catch raw;
         const trimmed = std.mem.trimEnd(u8, line, " \t\r");
         // Collapse consecutive blanks.

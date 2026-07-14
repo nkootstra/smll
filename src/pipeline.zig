@@ -115,7 +115,13 @@ pub fn dispatch(
             if (!gate(s)) continue;
         }
         if (entry.match(input)) {
-            try entry.apply(allocator, input, &.{}, writer);
+            var compact = Writer.Allocating.init(allocator);
+            defer compact.deinit();
+            entry.apply(allocator, input, &.{}, &compact.writer) catch {
+                try writer.writeAll(input);
+                return;
+            };
+            try writer.writeAll(compact.written());
             return;
         }
     }
@@ -180,6 +186,23 @@ test "filter match routes through apply" {
 
     try run(allocator, &reader, &out.writer, .{Upper});
     try std.testing.expectEqualStrings("HELLO", out.written());
+}
+
+test "filter failure discards partial output and falls open to raw input once" {
+    const Failing = struct {
+        pub fn matches(_: []const u8) bool {
+            return true;
+        }
+        pub fn apply(_: Allocator, _: []const u8, _: []const u8, w: *Writer) !void {
+            try w.writeAll("partial");
+            return error.BadFilter;
+        }
+    };
+
+    var out = Writer.Allocating.init(std.testing.allocator);
+    defer out.deinit();
+    try dispatch(std.testing.allocator, "raw input\n", &out.writer, .{Failing});
+    try std.testing.expectEqualStrings("raw input\n", out.written());
 }
 
 const UpperFilter = struct {

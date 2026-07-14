@@ -200,9 +200,9 @@ const modules = [_]ModuleEntry{
     .{ .name = "signals", .path = "src/signals.zig" },
 
     // Test-runner filters.
-    .{ .name = "cargo_test", .needs_ansi = true, .extra_deps = &.{"signals"} },
-    .{ .name = "pytest", .needs_ansi = true, .extra_deps = &.{"signals"} },
-    .{ .name = "jest", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
+    .{ .name = "cargo_test", .needs_util = true, .needs_ansi = true, .extra_deps = &.{"signals"} },
+    .{ .name = "pytest", .needs_util = true, .needs_ansi = true, .extra_deps = &.{"signals"} },
+    .{ .name = "jest", .needs_util = true, .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_jest_failing", .path = "tests/fixtures/jest_failing.txt" },
     } },
     .{ .name = "js_test", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
@@ -212,7 +212,7 @@ const modules = [_]ModuleEntry{
     .{ .name = "tsc", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_tsc_errors", .path = "tests/fixtures/tsc_errors.txt" },
     } },
-    .{ .name = "go_test", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
+    .{ .name = "go_test", .needs_util = true, .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_go_test_v", .path = "tests/fixtures/go_test_v.txt" },
     } },
 
@@ -221,7 +221,7 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_docker_logs", .path = "tests/fixtures/docker_logs.txt" },
         .{ .name = "fixture_docker_compose_logs", .path = "tests/fixtures/docker_compose_logs.txt" },
     } },
-    .{ .name = "npm_install", .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
+    .{ .name = "npm_install", .needs_util = true, .needs_ansi = true, .extra_deps = &.{"signals"}, .fixtures = &.{
         .{ .name = "fixture_npm_install", .path = "tests/fixtures/npm_install.txt" },
         .{ .name = "fixture_pnpm_install", .path = "tests/fixtures/pnpm_install.txt" },
         .{ .name = "fixture_pnpm9_install", .path = "tests/fixtures/pnpm9_install.txt" },
@@ -229,7 +229,7 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_yarn_install", .path = "tests/fixtures/yarn_install.txt" },
         .{ .name = "fixture_composer_require", .path = "tests/fixtures/composer_require.txt" },
     } },
-    .{ .name = "build_output", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "build_output", .needs_util = true, .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_vite_build", .path = "tests/fixtures/vite_build.txt" },
         .{ .name = "fixture_next_build", .path = "tests/fixtures/next_build.txt" },
         .{ .name = "fixture_nuxt_build", .path = "tests/fixtures/nuxt_build.txt" },

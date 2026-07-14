@@ -45,18 +45,23 @@ pub noinline fn passthrough(writer: *std.Io.Writer, stderr_writer: *std.Io.Write
     stderr_writer.writeAll(stderr_slice) catch {};
 }
 
+pub const FilterFn = *const fn (std.mem.Allocator, []const u8, []const u8, *std.Io.Writer) anyerror!void;
+
 pub fn applyFilter(
-    comptime apply: anytype,
+    apply: FilterFn,
     allocator: std.mem.Allocator,
     stdout_slice: []const u8,
     stderr_slice: []const u8,
     writer: *std.Io.Writer,
     stderr_writer: *std.Io.Writer,
 ) bool {
-    apply(allocator, stdout_slice, stderr_slice, writer) catch {
+    var compact = std.Io.Writer.Allocating.init(allocator);
+    defer compact.deinit();
+    apply(allocator, stdout_slice, stderr_slice, &compact.writer) catch {
         passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
         return false;
     };
+    writer.writeAll(compact.written()) catch return false;
     return true;
 }
 
@@ -95,3 +100,27 @@ pub const CountingWriter = struct {
         w.end = 0;
     }
 };
+
+test "applyFilter discards partial compact output and writes raw streams once on failure" {
+    const Failing = struct {
+        fn apply(_: std.mem.Allocator, _: []const u8, _: []const u8, writer: *std.Io.Writer) !void {
+            try writer.writeAll("partial compact\n");
+            return error.BadFilter;
+        }
+    };
+
+    var stdout = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer stderr.deinit();
+    try std.testing.expect(!applyFilter(
+        Failing.apply,
+        std.testing.allocator,
+        "raw out\n",
+        "raw err\n",
+        &stdout.writer,
+        &stderr.writer,
+    ));
+    try std.testing.expectEqualStrings("raw out\n", stdout.written());
+    try std.testing.expectEqualStrings("raw err\n", stderr.written());
+}
