@@ -85,6 +85,7 @@ pub fn writeFileAtomic(io: std.Io, path: []const u8, data: []const u8) !void {
         .replace = true,
     });
     defer atomic_file.deinit(io);
+    if (builtin.os.tag != .windows) try atomic_file.file.setPermissions(io, permissions);
     try atomic_file.file.writePositionalAll(io, data, 0);
     try atomic_file.replace(io);
 }
@@ -372,6 +373,26 @@ test "atomic setup writes preserve existing permissions" {
     const data = try tmp.dir.readFileAlloc(std.testing.io, "config.json", allocator, .limited(64));
     defer allocator.free(data);
     try std.testing.expectEqualStrings("new\n", data);
+}
+
+test "atomic setup writes preserve existing permissions under restrictive umask" {
+    if (builtin.os.tag == .windows or !builtin.link_libc) return;
+
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile(std.testing.io, "config.json", .{});
+    try file.setPermissions(std.testing.io, .fromMode(0o644));
+    file.close(std.testing.io);
+    const path = try tmp.dir.realPathFileAlloc(std.testing.io, "config.json", allocator);
+    defer allocator.free(path);
+
+    const previous_umask = std.c.umask(0o077);
+    defer _ = std.c.umask(previous_umask);
+    try writeFileAtomic(std.testing.io, path, "new\n");
+
+    const st = try tmp.dir.statFile(std.testing.io, "config.json", .{});
+    try std.testing.expectEqual(@as(std.posix.mode_t, 0o644), st.permissions.toMode() & 0o777);
 }
 
 test "setup backups never widen source permissions" {
