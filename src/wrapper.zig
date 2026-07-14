@@ -44,6 +44,7 @@ const json_compact = @import("json_compact");
 const package_tree = @import("package_tree");
 const generic_compact = @import("generic_compact");
 const cat_compact = @import("cat_compact");
+const ansi = @import("ansi");
 const pipeline = @import("pipeline.zig");
 const pipe_filters = @import("pipe_filters.zig");
 
@@ -104,7 +105,11 @@ fn writeNoOutputHint(writer: *std.Io.Writer, argv: []const []const u8, exit_code
         }
     }
 
-    try writer.print("(smll: {s} exited {d} with no output)\n", .{ cmd, exit_code });
+    try writer.writeAll("(smll: ");
+    try writer.writeAll(cmd);
+    try writer.writeAll(" exited ");
+    try ansi.writeDecimal(writer, exit_code);
+    try writer.writeAll(" with no output)\n");
 }
 
 fn isSyntheticSuccess(output: []const u8) bool {
@@ -159,6 +164,17 @@ fn findHasTypeFile(argv: []const []const u8) bool {
     return false;
 }
 
+fn findRequestsExactOutput(argv: []const []const u8) bool {
+    for (argv[1..]) |arg| {
+        if (eqAny(arg, &.{
+            "-ls",      "-fls",  "-printf",  "-fprintf", "-print0",
+            "-fprint0", "-exec", "-execdir", "-ok",      "-okdir",
+            "-delete",  "-D",
+        })) return true;
+    }
+    return false;
+}
+
 fn lsRequestsExactOutput(argv: []const []const u8) bool {
     var parse_options = true;
     for (argv[1..]) |arg| {
@@ -187,6 +203,16 @@ fn isHumanLsFormat(arg: []const u8) bool {
     if (!std.mem.startsWith(u8, arg, "--format=")) return false;
     const format = arg["--format=".len..];
     return eqAny(format, &.{ "across", "commas", "horizontal", "single-column", "vertical" });
+}
+
+fn treeRequestsExactOutput(argv: []const []const u8) bool {
+    for (argv[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--")) break;
+        if (arg.len < 2 or arg[0] != '-') continue;
+        if (eqAny(arg, &.{ "-a", "-d", "-L", "-I", "-P", "--dirsfirst", "--noreport", "--prune" })) continue;
+        return true;
+    }
+    return false;
 }
 
 fn ghWantsDataOutput(argv: []const []const u8) bool {
@@ -297,8 +323,11 @@ pub fn run(
     if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
         const home = environ.get("HOME") orelse "";
         if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
-            if (!failed_filter_output)
-                final_stdout.writer.print("\n(smll: full output saved to {s})\n", .{path}) catch {};
+            if (!failed_filter_output) {
+                final_stdout.writer.writeAll("\n(smll: full output saved to ") catch {};
+                final_stdout.writer.writeAll(path) catch {};
+                final_stdout.writer.writeAll(")\n") catch {};
+            }
         }
     }
 
@@ -591,10 +620,9 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    // Path-list wrappers (rg --files, find): path-per-line output, compresses
-    // via dirname RLE. `find -ls` goes through find_compact instead
-    // (columnar inode/mode/size/path → path-only). SMLL_LOSSLESS=1 bypasses
-    // both.
+    // Path-list wrappers (rg --files, plain find): path-per-line output,
+    // compressed via dirname RLE. Metadata-bearing find actions are exact
+    // output contracts and pass through unchanged.
     const is_rg_cmd = std.mem.eql(u8, cmd_basename, "rg");
     const is_find_cmd = std.mem.eql(u8, cmd_basename, "find");
     if (is_rg_cmd or is_find_cmd) {
@@ -610,8 +638,9 @@ fn runWrapperInner(
                 hasArg(argv, "-l") or
                 hasArg(argv, "--files-with-matches"));
         const is_find_plain = is_find_cmd and !is_find_ls;
-        if (lossless) {
-            try writer.writeAll(stdout_slice);
+        if (lossless or (is_find_cmd and findRequestsExactOutput(argv))) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            return exit_code;
         } else if (is_find_ls and find_compact.matches(stdout_slice)) {
             if (!applyFilter(find_compact.apply, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
         } else if (is_find_plain and !is_find_print0 and find_compact.matchesPlain(stdout_slice)) {
@@ -663,6 +692,10 @@ fn runWrapperInner(
     if (std.mem.eql(u8, cmd_basename, "tree") or
         std.mem.eql(u8, cmd_basename, "bun"))
     {
+        if (std.mem.eql(u8, cmd_basename, "tree") and treeRequestsExactOutput(argv)) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            return exit_code;
+        }
         if (tree.matches(stdout_slice)) {
             if (!applyFilter(tree.applyCompact, allocator, stdout_slice, stderr_slice, writer, stderr_writer)) return exit_code;
             try stderr_writer.writeAll(stderr_slice);
@@ -1065,11 +1098,16 @@ fn runWrapperInner(
         return exit_code;
     }
 
-    // ls wrapper — LOSSY compaction (filenames only) by default (v0.6).
-    // Set SMLL_LOSSLESS=1 for raw passthrough.
+    // Default human ls output is compacted; metadata, quoting, and custom
+    // format requests are exact-output contracts. SMLL_LOSSLESS=1 also passes
+    // through unchanged.
     if (std.mem.eql(u8, cmd_basename, "ls")) {
-        if (!lossless and ls_compact.matches(stdout_slice)) {
-            // Long format (`ls -l`/`-la`): filenames-only summary.
+        if (lossless or lsRequestsExactOutput(argv)) {
+            passthrough(writer, stderr_writer, stdout_slice, stderr_slice);
+            return exit_code;
+        } else if (ls_compact.matches(stdout_slice)) {
+            // Defensive content-based fallback for long-shaped output emitted
+            // without a metadata-requesting argv flag.
             var compact = std.Io.Writer.Allocating.init(allocator);
             defer compact.deinit();
             ls_compact.apply(allocator, stdout_slice, stderr_slice, &compact.writer) catch |err| {
@@ -1083,7 +1121,7 @@ fn runWrapperInner(
                 return exit_code;
             };
             try writer.writeAll(compact.written());
-        } else if (!lossless) {
+        } else {
             // Plain `ls` (no `-l`): one-name-per-line normalization, `.`/`..`
             // dropped, multi-directory listings collapsed per dir. Argv proves
             // the source, so `-C`/`-x`/`-m` column splitting is safe here.
@@ -1100,8 +1138,6 @@ fn runWrapperInner(
                 return exit_code;
             };
             try writer.writeAll(compact.written());
-        } else {
-            try writeWithFallback(allocator, stdout_slice, writer);
         }
         try stderr_writer.writeAll(stderr_slice);
         return exit_code;

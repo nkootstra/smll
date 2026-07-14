@@ -380,7 +380,12 @@ const GhRunWatchSide = struct {
         for (self.last_states.items) |*entry| {
             if (!std.mem.eql(u8, entry.name, name)) continue;
             if (entry.state == state) return;
-            try writer.print("{s}: {s}->{s}\n", .{ name, entry.state.label(), state.label() });
+            try writer.writeAll(name);
+            try writer.writeAll(": ");
+            try writer.writeAll(entry.state.label());
+            try writer.writeAll("->");
+            try writer.writeAll(state.label());
+            try writer.writeByte('\n');
             entry.state = state;
             return;
         }
@@ -388,7 +393,10 @@ const GhRunWatchSide = struct {
         const owned_name = try self.allocator.dupe(u8, name);
         errdefer self.allocator.free(owned_name);
         try self.last_states.append(self.allocator, .{ .name = owned_name, .state = state });
-        try writer.print("{s}: {s}\n", .{ name, state.label() });
+        try writer.writeAll(name);
+        try writer.writeAll(": ");
+        try writer.writeAll(state.label());
+        try writer.writeByte('\n');
     }
 };
 

@@ -121,7 +121,7 @@ const modules = [_]ModuleEntry{
     .{ .name = "rg", .fixtures = &.{
         .{ .name = "fixture_rg_files", .path = "tests/fixtures/rg_files.txt" },
     } },
-    .{ .name = "tree", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "tree", .needs_util = true, .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_tree_src", .path = "tests/fixtures/tree_src.txt" },
         .{ .name = "fixture_tree_large", .path = "tests/fixtures/tree_large.txt" },
         .{ .name = "fixture_tree_ascii_large", .path = "tests/fixtures/tree_ascii_large.txt" },
@@ -136,14 +136,14 @@ const modules = [_]ModuleEntry{
         .{ .name = "fixture_docker_compose_ps", .path = "tests/fixtures/docker_compose_ps.txt" },
         .{ .name = "fixture_docker_images", .path = "tests/fixtures/docker_images.txt" },
     } },
-    .{ .name = "ls_compact", .fixtures = &.{
+    .{ .name = "ls_compact", .needs_util = true, .fixtures = &.{
         .{ .name = "fixture_ls_la", .path = "tests/fixtures/ls_la.txt" },
         .{ .name = "fixture_ls_columns", .path = "tests/fixtures/ls_columns.txt" },
         .{ .name = "fixture_ls_comma", .path = "tests/fixtures/ls_comma.txt" },
         .{ .name = "fixture_ls_multi_dir", .path = "tests/fixtures/ls_multi_dir.txt" },
         .{ .name = "fixture_ls_recursive", .path = "tests/fixtures/ls_recursive.txt" },
     } },
-    .{ .name = "find_compact", .needs_ansi = true, .fixtures = &.{
+    .{ .name = "find_compact", .needs_util = true, .needs_ansi = true, .fixtures = &.{
         .{ .name = "fixture_find_ls", .path = "tests/fixtures/find_ls.txt" },
         .{ .name = "fixture_find_plain_many", .path = "tests/fixtures/find_plain_many.txt" },
     } },
@@ -433,6 +433,7 @@ pub fn build(b: *std.Build) void {
     // create pass so any extra_dep entry can reference any module
     // regardless of declaration order.
     const ansi_mod = registry.get("ansi") orelse @panic("ansi module missing");
+    ansi_mod.addImport("util", util_mod);
     exe_mod.addImport("ansi", ansi_mod);
     for (modules) |m| {
         const mod = registry.get(m.name) orelse unreachable;
@@ -489,6 +490,11 @@ pub fn build(b: *std.Build) void {
     // eliminate the __DATA_CONST segment (saves 16KB from page alignment waste).
     // On other platforms: use standard executable linking.
     const is_macos = target.result.os.tag == .macos;
+    const trim_elf_mod = b.createModule(.{
+        .root_source_file = b.path("tools/trim_elf.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseSmall,
+    });
     const release_bin = blk: {
         if (is_macos) {
             const release_obj = b.addObject(.{ .name = "smll", .root_module = release_mod });
@@ -512,6 +518,13 @@ pub fn build(b: *std.Build) void {
             rel_exe.link_data_sections = true;
             rel_exe.link_gc_sections = true;
             rel_exe.pie = false;
+            if (target.result.os.tag == .linux) {
+                const trim_exe = b.addExecutable(.{ .name = "trim-elf", .root_module = trim_elf_mod });
+                const trim_run = b.addRunArtifact(trim_exe);
+                trim_run.addFileArg(rel_exe.getEmittedBin());
+                const trimmed_bin = trim_run.addOutputFileArg("smll");
+                break :blk trimmed_bin;
+            }
             break :blk rel_exe.getEmittedBin();
         }
     };
@@ -525,6 +538,10 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{ .root_module = exe_mod, .filters = test_filters });
     const run_exe_tests = b.addRunArtifact(exe_tests);
     test_step.dependOn(&run_exe_tests.step);
+
+    const trim_elf_tests = b.addTest(.{ .root_module = trim_elf_mod, .filters = test_filters });
+    const run_trim_elf_tests = b.addRunArtifact(trim_elf_tests);
+    test_step.dependOn(&run_trim_elf_tests.step);
 
     for ([_]*std.Build.Module{ util_mod, stats_mod, history_mod, filter_catalog_mod, setup_mod, setup_hooks_mod, setup_io_mod, setup_json_mod, wrapper_io_mod, wrapper_util_mod }) |mod| {
         const t = b.addTest(.{ .root_module = mod, .filters = test_filters });

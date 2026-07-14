@@ -70,7 +70,7 @@ pub fn dispatch(
     // If git failed, preserve its raw diagnostic streams verbatim. Most git
     // filters intentionally consume benign stderr chatter on success, but
     // failed commands need every error line for the agent's next step.
-    if (exit_code != 0 and stderr_slice.len > 0) {
+    if (exit_code != 0) {
         try writer.writeAll(stdout_slice);
         try writer.writeAll(stderr_slice);
         return exit_code;

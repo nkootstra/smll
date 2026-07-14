@@ -389,6 +389,33 @@ test "diff simple fixture: smll output == git_diff.apply byte-for-byte" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
 }
 
+test "pipe contract: git log patch is detected before log compaction" {
+    const allocator = std.testing.allocator;
+    const input =
+        "commit 0123456789012345678901234567890123456789\n" ++
+        "Author: Test User <test@example.com>\n" ++
+        "Date:   Mon Jul 13 12:00:00 2026 +0200\n\n" ++
+        "    preserve patch semantics\n\n" ++
+        "diff --git a/src/example.zig b/src/example.zig\n" ++
+        "index 1111111..2222222 100644\n" ++
+        "--- a/src/example.zig\n" ++
+        "+++ b/src/example.zig\n" ++
+        "@@ -1,2 +1,2 @@ full_context_name_that_must_not_be_truncated\n" ++
+        " keep this context\n" ++
+        "-old\n" ++
+        "+new\n" ++
+        "\\ No newline at end of file\n";
+
+    var result = try runSmll(allocator, input);
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "d src/example.zig") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, " keep this context") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "full_context_name_that_must_not_be_truncated") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "\\ No newline at end of file") != null);
+}
+
 test "diff multi fixture: smll output == git_diff.apply byte-for-byte" {
     const allocator = std.testing.allocator;
     const expected = try expectedApplyOutput(git_diff.apply, allocator, diff_multi_fixture);
@@ -1704,32 +1731,9 @@ test "show simple fixture: compact header + d sigil, no diff --git or Author/Dat
 }
 
 // ---------------------------------------------------------------------------
-// R3 gate: diff/log/show fixtures ≤ 80% of raw bytes.
+// R3 gate: log/show fixtures ≤ 80% of raw bytes. Diff filters prioritize
+// complete patch context and assert only directional compression.
 // ---------------------------------------------------------------------------
-
-test "diff simple fixture: R3 gate — smll ≤ 80% of raw bytes" {
-    const allocator = std.testing.allocator;
-    var result = try runSmll(allocator, diff_simple_fixture);
-    defer result.deinit(allocator);
-    const target = (diff_simple_fixture.len * 80) / 100;
-    try std.testing.expect(result.stdout.len <= target);
-}
-
-test "diff multi fixture: R3 gate — smll ≤ 80% of raw bytes" {
-    const allocator = std.testing.allocator;
-    var result = try runSmll(allocator, diff_multi_fixture);
-    defer result.deinit(allocator);
-    const target = (diff_multi_fixture.len * 80) / 100;
-    try std.testing.expect(result.stdout.len <= target);
-}
-
-test "diff rename+modify fixture: R3 gate — smll ≤ 80% of raw bytes" {
-    const allocator = std.testing.allocator;
-    var result = try runSmll(allocator, diff_rename_modify_fixture);
-    defer result.deinit(allocator);
-    const target = (diff_rename_modify_fixture.len * 80) / 100;
-    try std.testing.expect(result.stdout.len <= target);
-}
 
 test "log linear fixture: R3 gate — smll ≤ 80% of raw bytes" {
     const allocator = std.testing.allocator;
@@ -1760,14 +1764,6 @@ test "show body fixture: R3 gate — smll ≤ 80% of raw bytes" {
     var result = try runSmll(allocator, show_body_fixture);
     defer result.deinit(allocator);
     const target = (show_body_fixture.len * 80) / 100;
-    try std.testing.expect(result.stdout.len <= target);
-}
-
-test "large diff fixture: R3 gate — smll ≤ 80% of raw bytes" {
-    const allocator = std.testing.allocator;
-    var result = try runSmll(allocator, diff_large_fixture);
-    defer result.deinit(allocator);
-    const target = (diff_large_fixture.len * 80) / 100;
     try std.testing.expect(result.stdout.len <= target);
 }
 
@@ -3354,7 +3350,7 @@ test "broken pipe mid-stream returns non-zero exit without panic" {
 // Columnar filter dispatch (default-lossy; SMLL_LOSSLESS=1 opts out)
 // ---------------------------------------------------------------------------
 
-test "wrapper: ls -la fixture compacts without crashing" {
+test "metadata contract: ls long listing passes through byte-identically" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3365,12 +3361,28 @@ test "wrapper: ls -la fixture compacts without crashing" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(result.stdout.len < ls_la_fixture.len);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "filters/") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "main.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "pipeline.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "nielskootstra") == null);
+    try std.testing.expectEqualSlices(u8, ls_la_fixture, result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "metadata contract: ls metadata and quoting flags pass through byte-identically" {
+    const allocator = std.testing.allocator;
+    const metadata = "12345 8 -rw-r--r-- 1 501 20 42 2026-07-13 12:00:00.000000000 +0200 \"name with spaces\"\n";
+    const flags = [_][]const u8{
+        "-i", "-s", "-n", "-T", "-Q", "-@", "-e", "--full-time", "--quoting-style=shell",
+    };
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "ls", metadata);
+    defer allocator.free(bin_dir);
+
+    for (flags) |flag| {
+        var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "ls", flag }, &.{});
+        defer result.deinit(allocator);
+        try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+        try std.testing.expectEqualSlices(u8, metadata, result.stdout);
+    }
 }
 
 test "wrapper: plain ls column output normalizes to one name per line" {
@@ -3403,7 +3415,7 @@ test "wrapper: plain find groups dense parent directories" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < find_plain_many_fixture.len);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 entries: analyzer.zig, cache.zig, config.zig)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 entries: analyzer.zig, cache.zig, config.zig; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "tests/fixtures/ (12 entries:") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "README.md\n") != null);
     try std.testing.expectEqualStrings("", result.stderr);
@@ -3421,6 +3433,7 @@ test "wrapper: find -type f groups with files noun" {
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(std.mem.find(u8, result.stdout, "src/core/ (12 files:") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "entries:") == null);
 }
 
@@ -3437,8 +3450,8 @@ test "wrapper: tree uses readable structural summary" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < tree_large_fixture.len);
     try std.testing.expect(std.mem.find(u8, result.stdout, "  src/\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig, ...)") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "    fixtures/ (5 files: find_plain_many.txt, git_diff_simple.txt, git_log_stat.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    filters/ (6 files: cargo_test.zig, git_diff.zig, git_log.zig; 3 omitted; --raw for all)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    fixtures/ (5 files: find_plain_many.txt, git_diff_simple.txt, git_log_stat.txt; 2 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "7 directories, 24 files") != null);
     try std.testing.expectEqualStrings("", result.stderr);
 }
@@ -3456,10 +3469,25 @@ test "wrapper: ASCII tree uses readable structural summary" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
     try std.testing.expect(result.stdout.len < tree_ascii_large_fixture.len);
     try std.testing.expect(std.mem.find(u8, result.stdout, "  .git/\n") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "    hooks/ (14 files: applypatch-msg.sample, commit-msg.sample, fsmonitor-watchman.sample, ...)") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "    core/ (12 files: file_000.txt, file_001.txt, file_003.txt, ...)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    hooks/ (14 files: applypatch-msg.sample, commit-msg.sample, fsmonitor-watchman.sample; 11 omitted; --raw for all)") != null);
+    try std.testing.expect(std.mem.find(u8, result.stdout, "    core/ (12 files: file_000.txt, file_001.txt, file_003.txt; 9 omitted; --raw for all)") != null);
     try std.testing.expect(std.mem.find(u8, result.stdout, "167 directories, 166 files") != null);
     try std.testing.expectEqualStrings("", result.stderr);
+}
+
+test "metadata contract: tree permission listing passes through byte-identically" {
+    const allocator = std.testing.allocator;
+    const metadata = ".\n├── [-rw-r--r--]  README.md\n└── [drwx------]  secrets\n\n2 directories, 1 file\n";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "tree", metadata);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "tree", "-p" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, metadata, result.stdout);
 }
 
 fn runSmllWrapperEnv(
@@ -4233,7 +4261,7 @@ const find_ls_fixture =
     "2055941    4 -rw-r--r--   1 user staff   45 Apr 23 12:34 ./README.md\n" ++
     "2055942    0 drwxr-xr-x   2 user staff   64 Apr 23 12:34 ./tests\n";
 
-test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
+test "metadata contract: find -ls passes through byte-identically" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -4244,16 +4272,22 @@ test "smoke: find -ls drops columnar metadata, keeps paths (default)" {
     defer result.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
-    try std.testing.expect(result.stdout.len < find_ls_fixture.len);
-    // 3 entries in "." (./src, ./README.md, ./tests) collapse to a count
-    // with examples; 2 entries in "./src" survive individually.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/main.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./src/filter.zig") != null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "./ (3 entries: README.md, src/, tests/)") != null);
-    // Metadata gone.
-    try std.testing.expect(std.mem.find(u8, result.stdout, "user staff") == null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "drwxr-xr-x") == null);
-    try std.testing.expect(std.mem.find(u8, result.stdout, "Apr 23") == null);
+    try std.testing.expectEqualSlices(u8, find_ls_fixture, result.stdout);
+}
+
+test "metadata contract: find -printf passes through byte-identically" {
+    const allocator = std.testing.allocator;
+    const metadata = "33188\t42\t2026-07-13 12:00:00.000000000 +0200\t./src/main.zig\n";
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const bin_dir = try setupFakeTool(allocator, tmp.dir, "find", metadata);
+    defer allocator.free(bin_dir);
+
+    var result = try runSmllWrapperEnv(allocator, bin_dir, &.{ "find", ".", "-printf", "%m\\t%s\\t%TY-%Tm-%Td %TH:%TM:%TS %Tz\\t%p\\n" }, &.{});
+    defer result.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualSlices(u8, metadata, result.stdout);
 }
 
 test "smoke: find without -ls does NOT route through find_compact" {

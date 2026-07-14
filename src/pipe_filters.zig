@@ -82,6 +82,20 @@ pub const GitLogCompact = struct {
     }
 };
 
+/// Patch-bearing git output may start with commit metadata (`git log -p` or
+/// `git show`) instead of a diff header. Detect the patch boundary anywhere
+/// after the dedicated show shape but before log compaction can discard hunks.
+pub const GitDiffPipe = struct {
+    pub fn matches(input: []const u8) bool {
+        return std.mem.startsWith(u8, input, "diff --git a/") or
+            std.mem.find(u8, input, "\ndiff --git a/") != null;
+    }
+
+    pub fn apply(allocator: std.mem.Allocator, input: []const u8, stderr: []const u8, writer: *std.Io.Writer) !void {
+        return git_diff.apply(allocator, input, stderr, writer);
+    }
+};
+
 // The pipe-mode filter chain: first match wins, falling through to
 // GenericCompactPipe (the size-gated catch-all). Shared by stdin pipe mode
 // (src/main.zig) and the `sh -c` re-dispatch arm (src/wrapper.zig), which routes
@@ -93,7 +107,7 @@ pub const GitLogCompact = struct {
 // because its matches() always returns false (argv-only in wrapper mode).
 pub const Filters = .{
     git_status,      git_branch,    git_reflog,      git_show,
-    GitLogCompact,   git_diff,      git_commit,      git_merge,
+    GitDiffPipe,     GitLogCompact, git_commit,      git_merge,
     git_blame,       cargo_test,    jest,            js_test,
     tsc,             go_test,       pytest,          kubectl_compact,
     docker_compact,  npm_install,   tree,            ls_compact,

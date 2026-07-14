@@ -13,8 +13,10 @@ const Writer = std.Io.Writer;
 //   D <path>                  — staged deleted     (Changes to be committed: deleted:)
 //   R <old> -> <new>          — staged renamed     (Changes to be committed: renamed:)
 //   M <path>                  — unstaged modified  (Changes not staged: modified:)
+//   I <path>                  — intent to add      (Changes not staged: new file:)
 //   d <path>                  — unstaged deleted   (Changes not staged: deleted:)
 //   ? <path>                  — untracked          (Untracked files:)
+//   ! <text>                  — repository operation state (merge, rebase, cherry-pick, etc.)
 //   UU <path>                 — unmerged both modified
 //   AU <path>                 — unmerged added by us
 //   UA <path>                 — unmerged added by them
@@ -33,7 +35,7 @@ pub fn matches(input: []const u8) bool {
         if (line.len == 0) continue;
         return std.mem.startsWith(u8, line, "On branch ") or
             std.mem.startsWith(u8, line, "HEAD detached ") or
-            std.mem.startsWith(u8, line, "interactive rebase in progress");
+            isOperationState(line);
     }
     return false;
 }
@@ -65,6 +67,7 @@ const staged_prefixes = [_]StatusPrefix{
 };
 
 const unstaged_prefixes = [_]StatusPrefix{
+    .{ .prefix = "new file:   ", .code = "I" },
     .{ .prefix = "modified:   ", .code = "M" },
     .{ .prefix = "deleted:    ", .code = "d" },
 };
@@ -130,7 +133,6 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
                 const b = "rebase-in-progress";
                 @memcpy(branch_buf[0..b.len], b);
                 branch_len = b.len;
-                continue;
             } else if (line.len > 0 and line[0] == 'Y') {
                 if (std.mem.startsWith(u8, line, "Your branch is ahead")) {
                     if (findAheadBehindCount(line, "by ")) |count| ahead = count;
@@ -150,6 +152,25 @@ fn applyStreaming(input: []const u8, writer: *Writer) !void {
                     continue;
                 }
             }
+        }
+
+        if (isOperationState(line)) {
+            if (!branch_written) {
+                if (branch_len == 0) {
+                    const state = "operation-in-progress";
+                    @memcpy(branch_buf[0..state.len], state);
+                    branch_len = state.len;
+                }
+                try writeBranchLine(writer, branch_buf[0..branch_len], ahead, behind, upstream);
+                branch_written = true;
+            }
+            try flushRun(writer, run_sections[0..run_len], run_contents[0..run_len], run_dir);
+            run_len = 0;
+            run_key = "";
+            try writer.writeAll("! ");
+            try writer.writeAll(std.mem.trim(u8, line, " \t\r"));
+            try writer.writeByte('\n');
+            continue;
         }
 
         // Section headers - first byte dispatch
@@ -429,6 +450,18 @@ fn writeBranchLine(writer: *Writer, branch: []const u8, ahead: ?[]const u8, behi
 
 fn isHintLine(line: []const u8) bool {
     return std.mem.startsWith(u8, line, "  (") and std.mem.endsWith(u8, line, ")");
+}
+
+fn isOperationState(line: []const u8) bool {
+    const state = std.mem.trim(u8, line, " \t\r");
+    if (state.len == 0) return false;
+    return switch (state[0]) {
+        'i' => std.mem.startsWith(u8, state, "interactive rebase in progress"),
+        'A' => std.mem.startsWith(u8, state, "All conflicts fixed but you are still merging"),
+        'Y' => std.mem.startsWith(u8, state, "You have unmerged paths") or
+            std.mem.startsWith(u8, state, "You are currently "),
+        else => false,
+    };
 }
 
 /// Extract the number following `marker` in `line` (e.g. "by 2 commits." → "2").
@@ -819,6 +852,42 @@ test "apply: pipe-mode idempotence — v0.4 output is not re-filtered (passthrou
     // Confirm v0.4 output doesn't match pipe-mode filter.
     try std.testing.expect(!matches(out));
     // A second apply on v0.4 output would be a passthrough — verified by matches=false.
+}
+
+test "apply: preserves repository operation state details" {
+    const allocator = std.testing.allocator;
+    const cases = [_][]const u8{
+        "On branch main\nAll conflicts fixed but you are still merging.\n",
+        "interactive rebase in progress; onto abc1234\nYou are currently editing a commit while rebasing branch 'feature' on 'abc1234'.\n",
+        "On branch main\nYou are currently cherry-picking commit deadbee.\n",
+        "On branch main\nYou are currently reverting commit cafe123.\n",
+        "On branch main\nYou are currently bisecting, started from branch 'main'.\n",
+    };
+    const expected = [_][]const u8{
+        "All conflicts fixed but you are still merging.",
+        "interactive rebase in progress; onto abc1234",
+        "You are currently cherry-picking commit deadbee.",
+        "You are currently reverting commit cafe123.",
+        "You are currently bisecting, started from branch 'main'.",
+    };
+
+    for (cases, expected) |input, state| {
+        const out = try applyToString(allocator, input);
+        defer allocator.free(out);
+        try std.testing.expect(std.mem.find(u8, out, state) != null);
+    }
+}
+
+test "apply: intent-to-add is distinct from staged and untracked files" {
+    const allocator = std.testing.allocator;
+    const input =
+        "On branch main\n" ++
+        "Changes not staged for commit:\n" ++
+        "  (use \"git add <file>...\" to update what will be committed)\n\n" ++
+        "\tnew file:   src/intent.zig\n";
+    const out = try applyToString(allocator, input);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "I src/intent.zig\n") != null);
 }
 
 // ---------------------------------------------------------------------------
