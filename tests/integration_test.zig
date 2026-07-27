@@ -1599,6 +1599,42 @@ test "wrapper: tee publication failure omits breadcrumb but preserves matching a
     try std.testing.expect(std.mem.find(u8, history_jsonl, "\"exit\":31") != null);
 }
 
+test "wrapper: state lock failure preserves command output and exit without state" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "lock-failer",
+        \\#!/bin/sh
+        \\printf 'stdout survives\n'
+        \\printf 'stderr survives\n' >&2
+        \\exit 37
+    );
+    try tmp.dir.writeFile(io, .{
+        .sub_path = ".smll",
+        .data = "regular file blocks state lock creation\n",
+    });
+
+    var wrapped = try runSmllWrapperEnv(allocator, bin_path, &.{"lock-failer"}, &.{
+        .{ "HOME", home_path },
+        .{ "SMLL_TEE", "1" },
+    });
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 37 }, wrapped.term);
+    try std.testing.expectEqualStrings("stdout survives\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("stderr survives\n", wrapped.stderr);
+
+    const blocker = try tmp.dir.readFileAlloc(io, ".smll", allocator, .limited(128));
+    defer allocator.free(blocker);
+    try std.testing.expectEqualStrings("regular file blocks state lock creation\n", blocker);
+}
+
 test "wrapper: declared find omissions are not formatting savings" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -1990,7 +2026,14 @@ test "wrapper: concurrent stats writers preserve every update" {
     try std.testing.expectEqual(@as(usize, writer_count), std.mem.count(u8, history, "\"cmd\":\"state-writer\""));
 }
 
-fn expectQueryWaitsForStateLock(query_arg: []const u8, state_file: []const u8, state_data: []const u8) !void {
+fn expectQueryWaitsForStateLock(
+    query_arg: []const u8,
+    state_file: []const u8,
+    initial_data: []const u8,
+    post_lock_data: []const u8,
+    expected_output: []const u8,
+    stale_output: []const u8,
+) !void {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -2001,7 +2044,7 @@ fn expectQueryWaitsForStateLock(query_arg: []const u8, state_file: []const u8, s
     try tmp.dir.createDirPath(io, ".smll");
     try tmp.dir.writeFile(io, .{
         .sub_path = state_file,
-        .data = state_data,
+        .data = initial_data,
     });
     const held_state_lock = tmp.dir.createFile(io, ".smll/state.lock", .{
         .read = true,
@@ -2016,7 +2059,7 @@ fn expectQueryWaitsForStateLock(query_arg: []const u8, state_file: []const u8, s
 
     const launcher = try std.fmt.allocPrint(
         allocator,
-        "#!/bin/sh\n: > \"$HOME/query.ready\"\nexec '{s}' '{s}'\n",
+        "#!/bin/sh\n: > \"$HOME/query.ready\"\n'{s}' '{s}' > \"$HOME/query.out\"\nstatus=$?\n: > \"$HOME/query.done\"\nexit \"$status\"\n",
         .{ exe_path, query_arg },
     );
     defer allocator.free(launcher);
@@ -2036,44 +2079,30 @@ fn expectQueryWaitsForStateLock(query_arg: []const u8, state_file: []const u8, s
     });
     defer child.kill(io);
 
-    const WaitStatus = enum(u8) { waiting, succeeded, failed };
-    var wait_status: std.atomic.Value(WaitStatus) = .init(.waiting);
-    var term: std.process.Child.Term = undefined;
-    const WaitContext = struct {
-        child: *std.process.Child,
-        status: *std.atomic.Value(WaitStatus),
-        term: *std.process.Child.Term,
-
-        fn run(ctx: @This()) void {
-            ctx.term.* = ctx.child.wait(std.testing.io) catch {
-                ctx.status.store(.failed, .release);
-                return;
-            };
-            ctx.status.store(.succeeded, .release);
-        }
-    };
-    const waiter = try std.Thread.spawn(.{}, WaitContext.run, .{WaitContext{
-        .child = &child,
-        .status = &wait_status,
-        .term = &term,
-    }});
-
     try waitForPath(tmp.dir, "query.ready", 5 * std.time.ns_per_s);
     const observation_deadline = std.Io.Clock.real.now(io).toNanoseconds() + 250 * std.time.ns_per_ms;
-    while (wait_status.load(.acquire) == .waiting and
+    while (!pathExists(tmp.dir, "query.done") and
         std.Io.Clock.real.now(io).toNanoseconds() < observation_deadline)
     {
         try std.Thread.yield();
     }
-    const returned_while_locked = wait_status.load(.acquire) == .succeeded;
+    const returned_while_locked = pathExists(tmp.dir, "query.done");
+
+    try tmp.dir.writeFile(io, .{
+        .sub_path = state_file,
+        .data = post_lock_data,
+    });
 
     state_lock.?.close(io);
     state_lock = null;
-    waiter.join();
+    const term = try child.wait(io);
 
     try std.testing.expect(!returned_while_locked);
-    try std.testing.expectEqual(WaitStatus.succeeded, wait_status.load(.acquire));
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, term);
+    const output = try tmp.dir.readFileAlloc(io, "query.out", allocator, .limited(4096));
+    defer allocator.free(output);
+    try std.testing.expect(std.mem.find(u8, output, expected_output) != null);
+    try std.testing.expect(std.mem.find(u8, output, stale_output) == null);
 }
 
 test "stats query waits for the shared state lock" {
@@ -2081,6 +2110,9 @@ test "stats query waits for the shared state lock" {
         "--stats",
         ".smll/stats.json",
         "{\"v\":2,\"commands\":1,\"raw_bytes\":8,\"displayed_bytes\":4,\"omitted_bytes\":0,\"diagnostic_bytes\":0,\"formatting_saved_bytes\":4}\n",
+        "{\"v\":2,\"commands\":2,\"raw_bytes\":16,\"displayed_bytes\":8,\"omitted_bytes\":0,\"diagnostic_bytes\":0,\"formatting_saved_bytes\":8}\n",
+        "Commands:      2\n",
+        "Commands:      1\n",
     );
 }
 
@@ -2088,8 +2120,48 @@ test "discover query waits for the shared state lock" {
     try expectQueryWaitsForStateLock(
         "--discover",
         ".smll/history.jsonl",
-        "{\"v\":2,\"ts_ms\":1,\"project\":\"/tmp\",\"cwd\":\"/tmp\",\"cmd\":\"git status\",\"filter\":\"git-status\",\"exit\":0,\"raw\":8,\"displayed\":4,\"omitted\":0,\"diagnostics\":0,\"saved\":4,\"duration_ms\":1}\n",
+        "{\"v\":2,\"ts_ms\":1,\"project\":\"/tmp\",\"cwd\":\"/tmp\",\"cmd\":\"stale-command\",\"filter\":\"git-status\",\"exit\":0,\"raw\":8,\"displayed\":4,\"omitted\":0,\"diagnostics\":0,\"saved\":4,\"duration_ms\":1}\n",
+        "{\"v\":2,\"ts_ms\":2,\"project\":\"/tmp\",\"cwd\":\"/tmp\",\"cmd\":\"fresh-command\",\"filter\":\"git-status\",\"exit\":0,\"raw\":8,\"displayed\":4,\"omitted\":0,\"diagnostics\":0,\"saved\":4,\"duration_ms\":1}\n",
+        "fresh-command",
+        "stale-command",
     );
+}
+
+test "analytics queries fall back to readable snapshots when the state lock cannot open" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+
+    try tmp.dir.createDirPath(io, ".smll/state.lock");
+    try tmp.dir.writeFile(io, .{
+        .sub_path = ".smll/stats.json",
+        .data = "{\"v\":2,\"commands\":7,\"raw_bytes\":80,\"displayed_bytes\":40,\"omitted_bytes\":0,\"diagnostic_bytes\":0,\"formatting_saved_bytes\":40}\n",
+    });
+    try tmp.dir.writeFile(io, .{
+        .sub_path = ".smll/history.jsonl",
+        .data = "{\"v\":2,\"ts_ms\":9999999999999,\"project\":\"/tmp\",\"cwd\":\"/tmp\",\"cmd\":\"fallback-command\",\"filter\":\"git-status\",\"exit\":0,\"raw\":8,\"displayed\":4,\"omitted\":0,\"diagnostics\":0,\"saved\":4,\"duration_ms\":1}\n",
+    });
+
+    var stats_result = try runSmllInnerEnv(allocator, &.{"--stats"}, &.{.{ "HOME", home_path }});
+    defer stats_result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, stats_result.term);
+    try std.testing.expect(std.mem.find(u8, stats_result.stdout, "Commands:      7\n") != null);
+    try std.testing.expectEqualStrings("", stats_result.stderr);
+
+    var filtered_result = try runSmllInnerEnv(allocator, &.{ "--stats", "--since", "24h" }, &.{.{ "HOME", home_path }});
+    defer filtered_result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, filtered_result.term);
+    try std.testing.expect(std.mem.find(u8, filtered_result.stdout, "Commands:      1\n") != null);
+    try std.testing.expectEqualStrings("", filtered_result.stderr);
+
+    var discover_result = try runSmllInnerEnv(allocator, &.{"--discover"}, &.{.{ "HOME", home_path }});
+    defer discover_result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, discover_result.term);
+    try std.testing.expect(std.mem.find(u8, discover_result.stdout, "fallback-command") != null);
+    try std.testing.expectEqualStrings("", discover_result.stderr);
 }
 
 fn seedResetState(dir: std.Io.Dir, ownership_path: []const u8) !void {

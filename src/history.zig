@@ -235,8 +235,13 @@ fn readHistorySnapshot(
     history_path: []const u8,
     max_size: usize,
 ) !HistoryData {
-    const state_lock = try state_io.openStateLock(allocator, io, home);
+    const state_lock = state_io.openStateLock(allocator, io, home) catch
+        return readHistoryTailOrEmpty(allocator, io, history_path, max_size);
     defer if (state_lock) |file| file.close(io);
+    return readHistoryTailOrEmpty(allocator, io, history_path, max_size);
+}
+
+fn readHistoryTailOrEmpty(allocator: Allocator, io: Io, history_path: []const u8, max_size: usize) !HistoryData {
     return readHistoryTail(allocator, io, history_path, max_size) catch |err| switch (err) {
         error.FileNotFound => emptyHistoryData(allocator),
         else => |e| return e,

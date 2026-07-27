@@ -62,7 +62,8 @@ pub fn copyFileUnderStateLock(
     path: []const u8,
     max_size: usize,
 ) ![]u8 {
-    const state_lock = try openStateLock(allocator, io, home);
+    const state_lock = openStateLock(allocator, io, home) catch
+        return Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_size));
     defer if (state_lock) |file| file.close(io);
     return Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_size));
 }
