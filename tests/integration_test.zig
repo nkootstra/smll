@@ -2608,6 +2608,216 @@ test "hook eval opencode keeps command mutation behavior for an eligible command
     try std.testing.expect(!std.mem.startsWith(u8, result.stdout, "smll "));
 }
 
+const dual_setup_paths = [_][]const u8{
+    ".claude/settings.json",
+    ".smll/setup/claude.owned",
+    ".config/opencode/opencode.json",
+    ".config/opencode/plugins/smll-proxy/index.ts",
+    ".config/opencode/plugins/smll-proxy/package.json",
+    ".smll/setup/opencode.owned",
+};
+
+const DualSetupSnapshot = struct {
+    files: [dual_setup_paths.len][]u8,
+
+    fn capture(allocator: std.mem.Allocator, dir: std.Io.Dir) !DualSetupSnapshot {
+        var snapshot: DualSetupSnapshot = undefined;
+        var captured: usize = 0;
+        errdefer for (snapshot.files[0..captured]) |data| allocator.free(data);
+        for (dual_setup_paths, &snapshot.files) |path, *data| {
+            data.* = try dir.readFileAlloc(std.testing.io, path, allocator, .limited(64 * 1024));
+            captured += 1;
+        }
+        return snapshot;
+    }
+
+    fn deinit(self: *DualSetupSnapshot, allocator: std.mem.Allocator) void {
+        for (self.files) |data| allocator.free(data);
+    }
+
+    fn expectEqual(self: *const DualSetupSnapshot, other: *const DualSetupSnapshot) !void {
+        for (self.files, other.files) |expected, actual| {
+            try std.testing.expectEqualSlices(u8, expected, actual);
+        }
+    }
+
+    fn expectRangeUnchanged(
+        self: *const DualSetupSnapshot,
+        allocator: std.mem.Allocator,
+        dir: std.Io.Dir,
+        start: usize,
+        end: usize,
+    ) !void {
+        for (dual_setup_paths[start..end], self.files[start..end]) |path, expected| {
+            const actual = try dir.readFileAlloc(std.testing.io, path, allocator, .limited(64 * 1024));
+            defer allocator.free(actual);
+            try std.testing.expectEqualSlices(u8, expected, actual);
+        }
+    }
+};
+
+fn runHomeCommand(
+    allocator: std.mem.Allocator,
+    home: []const u8,
+    args: []const []const u8,
+) !void {
+    var result = try runSmllInnerEnv(allocator, args, &.{.{ "HOME", home }});
+    defer result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, result.term);
+    try std.testing.expectEqualStrings("", result.stderr);
+}
+
+fn expectDualSetupInstalled(dir: std.Io.Dir, allocator: std.mem.Allocator) !void {
+    var snapshot = try DualSetupSnapshot.capture(allocator, dir);
+    defer snapshot.deinit(allocator);
+
+    try std.testing.expect(std.mem.find(u8, snapshot.files[0], exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.files[0], "--hook-eval claude") != null);
+    try std.testing.expect(std.mem.startsWith(u8, snapshot.files[1], "smll-setup-v1\n"));
+    try std.testing.expect(std.mem.find(u8, snapshot.files[1], exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.files[1], "--hook-eval claude") != null);
+
+    try std.testing.expect(std.mem.find(u8, snapshot.files[2], "smll-proxy") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.files[3], exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.files[3], "--hook-eval") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.files[3], "opencode") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.files[4], "\"name\":\"smll-proxy\"") != null);
+    try std.testing.expect(std.mem.startsWith(u8, snapshot.files[5], "smll-setup-v1\n"));
+}
+
+test "setup coexistence: both install orders are idempotent" {
+    const allocator = std.testing.allocator;
+    const orders = [_][2][]const u8{
+        .{ "claude", "opencode" },
+        .{ "opencode", "claude" },
+    };
+
+    for (orders) |order| {
+        var tmp = std.testing.tmpDir(.{});
+        defer tmp.cleanup();
+        const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+        defer allocator.free(home);
+
+        for (order) |target| try runHomeCommand(allocator, home, &.{ "--setup", target });
+        try expectDualSetupInstalled(tmp.dir, allocator);
+
+        var installed = try DualSetupSnapshot.capture(allocator, tmp.dir);
+        defer installed.deinit(allocator);
+        for (order) |target| try runHomeCommand(allocator, home, &.{ "--setup", target });
+        var reinstalled = try DualSetupSnapshot.capture(allocator, tmp.dir);
+        defer reinstalled.deinit(allocator);
+        try installed.expectEqual(&reinstalled);
+    }
+}
+
+test "setup coexistence: either integration can be removed independently" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+
+    try runHomeCommand(allocator, home, &.{ "--setup", "claude" });
+    try runHomeCommand(allocator, home, &.{ "--setup", "opencode" });
+    var both_installed = try DualSetupSnapshot.capture(allocator, tmp.dir);
+    defer both_installed.deinit(allocator);
+
+    try runHomeCommand(allocator, home, &.{ "--unsetup", "claude" });
+    try both_installed.expectRangeUnchanged(allocator, tmp.dir, 2, dual_setup_paths.len);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/setup/claude.owned"));
+    const claude_settings = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        ".claude/settings.json",
+        allocator,
+        .limited(64 * 1024),
+    );
+    defer allocator.free(claude_settings);
+    try std.testing.expect(std.mem.find(u8, claude_settings, "--hook-eval claude") == null);
+
+    var opencode_eval = try runHookEval(
+        allocator,
+        "opencode",
+        "{\"tool_input\":{\"command\":\"git status\"}}\n",
+    );
+    defer opencode_eval.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, opencode_eval.term);
+    try std.testing.expectEqualStrings("", opencode_eval.stderr);
+    try std.testing.expect(std.mem.find(u8, opencode_eval.stdout, exe_path) != null);
+    try std.testing.expect(std.mem.endsWith(u8, opencode_eval.stdout, "' git status\n"));
+
+    try runHomeCommand(allocator, home, &.{ "--setup", "claude" });
+    var reinstalled = try DualSetupSnapshot.capture(allocator, tmp.dir);
+    defer reinstalled.deinit(allocator);
+
+    try runHomeCommand(allocator, home, &.{ "--unsetup", "opencode" });
+    try reinstalled.expectRangeUnchanged(allocator, tmp.dir, 0, 2);
+    inline for (.{
+        ".config/opencode/plugins/smll-proxy/index.ts",
+        ".config/opencode/plugins/smll-proxy/package.json",
+        ".smll/setup/opencode.owned",
+    }) |path| {
+        try std.testing.expect(!pathExists(tmp.dir, path));
+    }
+    const opencode_config = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        ".config/opencode/opencode.json",
+        allocator,
+        .limited(64 * 1024),
+    );
+    defer allocator.free(opencode_config);
+    try std.testing.expect(std.mem.find(u8, opencode_config, "smll-proxy") == null);
+
+    var claude_eval = try runHookEval(
+        allocator,
+        "claude",
+        "{\"tool_input\":{\"command\":\"git status\"}}\n",
+    );
+    defer claude_eval.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, claude_eval.term);
+    try std.testing.expectEqualStrings("", claude_eval.stdout);
+    try std.testing.expectEqualStrings(
+        "smll hook: wrap noisy command with smll (example: smll git status)\n",
+        claude_eval.stderr,
+    );
+}
+
+test "setup coexistence: runtime resets preserve both integrations byte-identically" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home);
+
+    try runHomeCommand(allocator, home, &.{ "--setup", "claude" });
+    try runHomeCommand(allocator, home, &.{ "--setup", "opencode" });
+    var installed = try DualSetupSnapshot.capture(allocator, tmp.dir);
+    defer installed.deinit(allocator);
+
+    try tmp.dir.createDirPath(io, ".smll/tee");
+    try tmp.dir.writeFile(io, .{ .sub_path = ".smll/stats.json", .data = "old stats\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = ".smll/history.jsonl", .data = "old history\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = ".smll/tee/old.log", .data = "old tee\n" });
+
+    try runHomeCommand(allocator, home, &.{ "--stats", "--reset" });
+    var after_reset = try DualSetupSnapshot.capture(allocator, tmp.dir);
+    defer after_reset.deinit(allocator);
+    try installed.expectEqual(&after_reset);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/stats.json"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/history.jsonl"));
+    try std.testing.expect(pathExists(tmp.dir, ".smll/tee/old.log"));
+
+    try tmp.dir.writeFile(io, .{ .sub_path = ".smll/stats.json", .data = "new stats\n" });
+    try tmp.dir.writeFile(io, .{ .sub_path = ".smll/history.jsonl", .data = "new history\n" });
+    try runHomeCommand(allocator, home, &.{ "--stats", "--reset", "--all" });
+    var after_reset_all = try DualSetupSnapshot.capture(allocator, tmp.dir);
+    defer after_reset_all.deinit(allocator);
+    try installed.expectEqual(&after_reset_all);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/stats.json"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/history.jsonl"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
+}
+
 test "hook setup codex invokes the absolute smll evaluator without a generated script" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
