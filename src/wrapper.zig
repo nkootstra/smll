@@ -77,6 +77,7 @@ pub const Result = struct {
     bytes: accounting.Bytes,
     filter_name: []const u8,
     record_stats: bool,
+    pending_tee: ?tee.Pending = null,
 };
 
 /// Emit a hint to stdout when the wrapped child produced no stdout AND no
@@ -319,23 +320,23 @@ pub fn run(
         try final_stdout.writer.writeAll(output);
     }
 
-    // Tee recovery: on a failed wrapped command, persist the *raw* (pre-filter)
-    // stdout+stderr under `~/.smll/tee/` and append a breadcrumb to stdout so
-    // the agent can fetch the unredacted output when the compact summary isn't
-    // enough. Streaming/lossless modes inherit stdio directly so there's
-    // nothing to record. Best-effort: failures never surface to the user.
-    if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) {
+    // Prepare tee recovery entirely in memory. Shared filesystem publication,
+    // breadcrumb accounting, and analytics are finalized together by main
+    // after child execution. Streaming/lossless modes inherit stdio directly,
+    // so there is no private payload to prepare.
+    const pending_tee = if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) blk: {
         const home = environ.get("HOME") orelse "";
-        if (tee.maybeRecord(allocator, io, home, argv, exit_code, last_raw_stdout, last_raw_stderr)) |path| {
-            if (!failed_filter_output) {
-                const before = final_stdout.written().len;
-                final_stdout.writer.writeAll("\n(smll: full output saved to ") catch {};
-                final_stdout.writer.writeAll(path) catch {};
-                final_stdout.writer.writeAll(")\n") catch {};
-                last_diagnostic_bytes += final_stdout.written().len - before;
-            }
-        }
-    }
+        break :blk tee.maybePrepare(
+            allocator,
+            io,
+            home,
+            argv,
+            exit_code,
+            last_raw_stdout,
+            last_raw_stderr,
+            !failed_filter_output,
+        );
+    } else null;
 
     const final_stdout_bytes = final_stdout.written().len;
     try writer.writeAll(final_stdout.written());
@@ -355,6 +356,7 @@ pub fn run(
         ),
         .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
+        .pending_tee = pending_tee,
     };
 }
 

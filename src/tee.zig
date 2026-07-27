@@ -23,6 +23,57 @@ const MAX_TEE_FILES: usize = 20;
 const MAX_LABEL_LEN: usize = 48;
 var file_sequence: std.atomic.Value(u64) = .init(0);
 
+pub const Pending = struct {
+    path: []u8,
+    content: []u8,
+    emit_breadcrumb: bool,
+
+    pub fn deinit(self: *Pending, allocator: Allocator) void {
+        allocator.free(self.path);
+        allocator.free(self.content);
+        self.* = undefined;
+    }
+
+    pub fn breadcrumbBytes(self: Pending) usize {
+        if (!self.emit_breadcrumb) return 0;
+        return "\n(smll: full output saved to ".len + self.path.len + ")\n".len;
+    }
+
+    pub fn writeBreadcrumb(self: Pending, writer: *Writer) !void {
+        if (!self.emit_breadcrumb) return;
+        try writer.writeAll("\n(smll: full output saved to ");
+        try writer.writeAll(self.path);
+        try writer.writeAll(")\n");
+    }
+};
+
+/// Construct an invocation-private failure payload entirely in memory. The
+/// returned value has no filesystem visibility until `publish` succeeds.
+pub fn maybePrepare(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    argv: []const []const u8,
+    exit_code: u8,
+    stdout_slice: []const u8,
+    stderr_slice: []const u8,
+    emit_breadcrumb: bool,
+) ?Pending {
+    if (home.len == 0) return null;
+    if (exit_code == 0) return null;
+    if (stdout_slice.len == 0 and stderr_slice.len == 0) return null;
+    return prepareInner(
+        allocator,
+        io,
+        home,
+        argv,
+        exit_code,
+        stdout_slice,
+        stderr_slice,
+        emit_breadcrumb,
+    ) catch null;
+}
+
 /// Persist raw output for a failed wrapped command. Returns the absolute
 /// path on success so the caller can emit a breadcrumb; returns null when
 /// disabled, the command succeeded, nothing was captured, or any I/O step
@@ -36,13 +87,25 @@ pub fn maybeRecord(
     stdout_slice: []const u8,
     stderr_slice: []const u8,
 ) ?[]const u8 {
-    if (home.len == 0) return null;
-    if (exit_code == 0) return null;
-    if (stdout_slice.len == 0 and stderr_slice.len == 0) return null;
-    return recordInner(allocator, io, home, argv, exit_code, stdout_slice, stderr_slice) catch null;
+    var pending = maybePrepare(
+        allocator,
+        io,
+        home,
+        argv,
+        exit_code,
+        stdout_slice,
+        stderr_slice,
+        true,
+    ) orelse return null;
+    if (!publish(allocator, io, home, pending)) {
+        pending.deinit(allocator);
+        return null;
+    }
+    allocator.free(pending.content);
+    return pending.path;
 }
 
-fn recordInner(
+fn prepareInner(
     allocator: Allocator,
     io: Io,
     home: []const u8,
@@ -50,13 +113,10 @@ fn recordInner(
     exit_code: u8,
     stdout_slice: []const u8,
     stderr_slice: []const u8,
-) ![]const u8 {
+    emit_breadcrumb: bool,
+) !Pending {
     const dir_path = try util.joinPath(allocator, home, tee_subdir);
     defer allocator.free(dir_path);
-    const root_path = try util.joinPath(allocator, home, ".smll");
-    defer allocator.free(root_path);
-    try state_io.ensurePrivateDir(io, root_path);
-    try state_io.ensurePrivateDir(io, dir_path);
 
     var label_buf: [MAX_LABEL_LEN]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
@@ -83,11 +143,31 @@ fn recordInner(
         if (stderr_slice[stderr_slice.len - 1] != '\n') try content.writer.writeByte('\n');
     }
 
-    try state_io.writePrivateFileAtomic(io, file_path, content.written());
+    const owned_content = try allocator.dupe(u8, content.written());
+    errdefer allocator.free(owned_content);
+    return .{
+        .path = file_path,
+        .content = owned_content,
+        .emit_breadcrumb = emit_breadcrumb,
+    };
+}
 
+/// Publish a prepared failure payload and rotate retained logs. The caller
+/// owns shared-state serialization; publication itself remains best-effort.
+pub fn publish(allocator: Allocator, io: Io, home: []const u8, pending: Pending) bool {
+    publishInner(allocator, io, home, pending) catch return false;
+    return true;
+}
+
+fn publishInner(allocator: Allocator, io: Io, home: []const u8, pending: Pending) !void {
+    const root_path = try util.joinPath(allocator, home, ".smll");
+    defer allocator.free(root_path);
+    const dir_path = try util.joinPath(allocator, home, tee_subdir);
+    defer allocator.free(dir_path);
+    try state_io.ensurePrivateDir(io, root_path);
+    try state_io.ensurePrivateDir(io, dir_path);
+    try state_io.writePrivateFileAtomic(io, pending.path, pending.content);
     rotate(allocator, io, dir_path) catch {};
-
-    return file_path;
 }
 
 fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {

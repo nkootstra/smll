@@ -11,7 +11,6 @@ const Writer = std.Io.Writer;
 /// Best-effort: stats failures never block command execution.
 const stats_dir = ".smll";
 const stats_file = ".smll/stats.json";
-const state_lock_file = ".smll/state.lock";
 const stats_lock_file = ".smll/stats.lock";
 const history_lock_file = ".smll/history.lock";
 const tee_dir = ".smll/tee";
@@ -67,6 +66,21 @@ pub fn record(
     bytes: Bytes,
     options: RecordOptions,
 ) bool {
+    const state_lock = state_io.openStateLock(allocator, io, home) catch return false;
+    defer if (state_lock) |file| file.close(io);
+    return recordUnderStateLock(allocator, io, home, argv, bytes, options);
+}
+
+/// Record while the caller owns `.smll/state.lock`. Best-effort, matching
+/// `record`, but without reacquiring the shared command-finalization lock.
+pub fn recordUnderStateLock(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    argv: []const []const u8,
+    bytes: Bytes,
+    options: RecordOptions,
+) bool {
     recordInner(allocator, io, home, argv, bytes, options) catch return false;
     return true;
 }
@@ -83,12 +97,7 @@ fn recordInner(
     defer allocator.free(path);
     const dir_path = try joinPath(allocator, home, stats_dir);
     defer allocator.free(dir_path);
-    const state_lock_path = try joinPath(allocator, home, state_lock_file);
-    defer allocator.free(state_lock_path);
-
     try state_io.ensurePrivateDir(io, dir_path);
-    const state_lock = try state_io.openExclusivePrivateLock(io, state_lock_path);
-    defer if (state_lock) |file| file.close(io);
 
     var label_buf: [64]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
@@ -389,12 +398,7 @@ fn parseDurationMs(s: []const u8) !i64 {
 }
 
 fn reset(allocator: Allocator, io: Io, home: []const u8, all: bool) !void {
-    const dir_path = try joinPath(allocator, home, stats_dir);
-    defer allocator.free(dir_path);
-    try state_io.ensurePrivateDir(io, dir_path);
-    const state_lock_path = try joinPath(allocator, home, state_lock_file);
-    defer allocator.free(state_lock_path);
-    const state_lock = try state_io.openExclusivePrivateLock(io, state_lock_path);
+    const state_lock = try state_io.openStateLock(allocator, io, home);
     defer if (state_lock) |file| file.close(io);
 
     const path = try joinPath(allocator, home, stats_file);
@@ -791,9 +795,7 @@ test "reset waits for the state writer lock" {
     defer allocator.free(home);
     try tmp.dir.createDirPath(io, ".smll");
 
-    const lock_path = try joinPath(allocator, home, state_lock_file);
-    defer allocator.free(lock_path);
-    const maybe_lock = try state_io.openExclusivePrivateLock(io, lock_path);
+    const maybe_lock = try state_io.openStateLock(allocator, io, home);
     if (maybe_lock == null) return;
     const held_lock = maybe_lock.?;
 

@@ -9,7 +9,9 @@ pub const std_options: std.Options = .{
 const pipe_filters = @import("pipe_filters.zig");
 const filter_catalog = @import("filter_catalog.zig");
 const pipeline = @import("pipeline.zig");
+const state_io = @import("state_io.zig");
 const stats = @import("stats.zig");
+const tee = @import("tee.zig");
 const wrapper = @import("wrapper.zig");
 const wrapper_git = @import("wrapper_git.zig");
 const wrapper_util = @import("wrapper_util.zig");
@@ -436,7 +438,7 @@ fn runWrappedAndRecord(
     const allocator = arena.allocator();
 
     const start = std.Io.Clock.Timestamp.now(io, .awake);
-    const result = try wrapper.run(
+    var result = try wrapper.run(
         allocator,
         io,
         environ,
@@ -444,17 +446,38 @@ fn runWrappedAndRecord(
         stdout,
         stderr,
     );
+    defer if (result.pending_tee) |*pending| pending.deinit(allocator);
     const duration_ms = elapsedMs(start, io);
 
     const should_record = result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK");
     var recorded = false;
+    var tee_published = false;
     if (should_record) {
         const history_filter_name = try historyFilterName(allocator, mode, result.filter_name);
-        recorded = stats.record(allocator, io, home, child_argv, result.bytes, .{
-            .exit_code = result.exit_code,
-            .filter_name = history_filter_name,
-            .duration_ms = duration_ms,
-        });
+        if (state_io.openStateLock(allocator, io, home)) |state_lock| {
+            defer if (state_lock) |file| file.close(io);
+
+            if (result.pending_tee) |pending| {
+                tee_published = tee.publish(allocator, io, home, pending);
+                if (tee_published) {
+                    const breadcrumb_bytes = pending.breadcrumbBytes();
+                    result.bytes.displayed_bytes += breadcrumb_bytes;
+                    result.bytes.diagnostic_bytes += breadcrumb_bytes;
+                }
+            }
+
+            recorded = stats.recordUnderStateLock(allocator, io, home, child_argv, result.bytes, .{
+                .exit_code = result.exit_code,
+                .filter_name = history_filter_name,
+                .duration_ms = duration_ms,
+            });
+        } else |_| {}
+    }
+
+    // Process output remains outside the shared-state lock. The breadcrumb is
+    // emitted only after its matching private log was successfully published.
+    if (tee_published) {
+        if (result.pending_tee) |pending| pending.writeBreadcrumb(stdout) catch {};
     }
 
     if (mode == .explain) {

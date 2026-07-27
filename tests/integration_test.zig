@@ -193,6 +193,20 @@ fn expectNoStatsFile(dir: std.Io.Dir) !void {
     return error.UnexpectedStatsFile;
 }
 
+fn pathExists(dir: std.Io.Dir, path: []const u8) bool {
+    dir.access(std.testing.io, path, .{}) catch return false;
+    return true;
+}
+
+fn waitForPath(dir: std.Io.Dir, path: []const u8, timeout_ns: i128) !void {
+    const io = std.testing.io;
+    const deadline = std.Io.Clock.real.now(io).toNanoseconds() + timeout_ns;
+    while (!pathExists(dir, path)) {
+        if (std.Io.Clock.real.now(io).toNanoseconds() >= deadline) return error.BarrierTimeout;
+        try std.Thread.yield();
+    }
+}
+
 test "echo hello passes through" {
     const allocator = std.testing.allocator;
     var result = try runSmll(allocator, "hello\n");
@@ -1254,7 +1268,7 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     defer allocator.free(path);
     try env.put("PATH", path);
     try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "0");
+    try env.put("SMLL_TEE", "1");
 
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = &.{ exe_path, "noisy" },
@@ -1290,6 +1304,7 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     try std.testing.expect(std.mem.find(u8, history, "\"diagnostics\":0") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"saved\":0") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"duration_ms\":") != null);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 }
 
 test "wrapper: tee breadcrumb is diagnostic rather than formatting savings" {
@@ -1339,6 +1354,173 @@ test "wrapper: tee breadcrumb is diagnostic rather than formatting savings" {
     try std.testing.expect(std.mem.find(u8, stats_json, displayed_field) != null);
     try std.testing.expect(std.mem.find(u8, stats_json, diagnostics_field) != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"formatting_saved_bytes\":0") != null);
+}
+
+test "wrapper: failure artifacts remain invisible while the shared state lock is held" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "locked-failer",
+        \\#!/bin/sh
+        \\: > "$HOME/child.ready"
+        \\while [ ! -e "$HOME/child.release" ]; do :; done
+        \\printf 'failure sentinel\n'
+        \\printf 'stderr sentinel\n' >&2
+        \\exit 23
+    );
+    try tmp.dir.createDirPath(io, ".smll");
+    const held_state_lock = tmp.dir.createFile(io, ".smll/state.lock", .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+    }) catch |err| switch (err) {
+        error.FileLocksUnsupported => return,
+        else => |e| return e,
+    };
+    var state_lock: ?std.Io.File = held_state_lock;
+    defer if (state_lock) |file| file.close(io);
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "1");
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ exe_path, "locked-failer" },
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .environ_map = &env,
+    });
+    defer child.kill(io);
+    child.stdin.?.close(io);
+    child.stdin = null;
+
+    try waitForPath(tmp.dir, "child.ready", 5 * std.time.ns_per_s);
+    try tmp.dir.writeFile(io, .{ .sub_path = "child.release", .data = "" });
+
+    // Give the already-running wrapper a bounded opportunity to reach its
+    // post-child persistence boundary. A split implementation publishes tee
+    // state here even though statistics remain blocked by state.lock.
+    const observation_deadline = std.Io.Clock.real.now(io).toNanoseconds() + 250 * std.time.ns_per_ms;
+    while (std.Io.Clock.real.now(io).toNanoseconds() < observation_deadline and
+        !pathExists(tmp.dir, ".smll/tee") and
+        !pathExists(tmp.dir, ".smll/stats.json") and
+        !pathExists(tmp.dir, ".smll/history.jsonl"))
+    {
+        try std.Thread.yield();
+    }
+
+    if (pathExists(tmp.dir, ".smll/tee")) {
+        std.debug.print("tee directory became visible while .smll/state.lock was held\n", .{});
+        return error.TeeVisibleWhileStateLockHeld;
+    }
+    if (pathExists(tmp.dir, ".smll/stats.json")) return error.StatsVisibleWhileStateLockHeld;
+    if (pathExists(tmp.dir, ".smll/history.jsonl")) return error.HistoryVisibleWhileStateLockHeld;
+
+    state_lock.?.close(io);
+    state_lock = null;
+    var wrapped = try drainChild(allocator, io, &child);
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, wrapped.term);
+    try std.testing.expect(std.mem.startsWith(u8, wrapped.stdout, "failure sentinel\n"));
+    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "full output saved") != null);
+    try std.testing.expectEqualStrings("stderr sentinel\n", wrapped.stderr);
+
+    const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":1") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"locked-failer\":{\"n\":1") != null);
+
+    const history_jsonl = try tmp.dir.readFileAlloc(io, ".smll/history.jsonl", allocator, .limited(4096));
+    defer allocator.free(history_jsonl);
+    try std.testing.expect(std.mem.find(u8, history_jsonl, "\"cmd\":\"locked-failer\"") != null);
+    try std.testing.expect(std.mem.find(u8, history_jsonl, "\"exit\":23") != null);
+
+    var tee_dir = try tmp.dir.openDir(io, ".smll/tee", .{ .iterate = true });
+    defer tee_dir.close(io);
+    var tee_it = tee_dir.iterate();
+    const tee_entry = (try tee_it.next(io)) orelse return error.ExpectedTeeLog;
+    try std.testing.expect(tee_entry.kind == .file);
+    try std.testing.expect(std.mem.endsWith(u8, tee_entry.name, ".log"));
+    try std.testing.expect((try tee_it.next(io)) == null);
+    const tee_log = try tee_dir.readFileAlloc(io, tee_entry.name, allocator, .limited(4096));
+    defer allocator.free(tee_log);
+    try std.testing.expect(std.mem.find(u8, tee_log, "failure sentinel\n") != null);
+    try std.testing.expect(std.mem.find(u8, tee_log, "stderr sentinel\n") != null);
+    try std.testing.expect(std.mem.find(u8, tee_log, "# exit: 23") != null);
+}
+
+test "wrapper: tee publication failure omits breadcrumb but preserves matching analytics" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "tee-failer",
+        \\#!/bin/sh
+        \\printf 'failure without tee\n'
+        \\exit 31
+    );
+    try tmp.dir.createDirPath(io, ".smll");
+    try tmp.dir.writeFile(io, .{
+        .sub_path = ".smll/tee",
+        .data = "regular file blocks tee directory creation\n",
+    });
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "1");
+
+    const result = try std.process.run(allocator, io, .{
+        .argv = &.{ exe_path, "tee-failer" },
+        .stdout_limit = .limited(4096),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    var wrapped: RunResult = .{
+        .stdout = result.stdout,
+        .stderr = result.stderr,
+        .term = result.term,
+    };
+    defer wrapped.deinit(allocator);
+
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 31 }, wrapped.term);
+    try std.testing.expectEqualStrings("failure without tee\n", wrapped.stdout);
+    try std.testing.expectEqualStrings("", wrapped.stderr);
+
+    const blocker = try tmp.dir.readFileAlloc(io, ".smll/tee", allocator, .limited(128));
+    defer allocator.free(blocker);
+    try std.testing.expectEqualStrings("regular file blocks tee directory creation\n", blocker);
+
+    const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":1") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"tee-failer\":{\"n\":1") != null);
+    const history_jsonl = try tmp.dir.readFileAlloc(io, ".smll/history.jsonl", allocator, .limited(4096));
+    defer allocator.free(history_jsonl);
+    try std.testing.expect(std.mem.find(u8, history_jsonl, "\"cmd\":\"tee-failer\"") != null);
+    try std.testing.expect(std.mem.find(u8, history_jsonl, "\"exit\":31") != null);
 }
 
 test "wrapper: declared find omissions are not formatting savings" {
