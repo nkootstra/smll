@@ -1483,26 +1483,10 @@ test "wrapper: tee publication failure omits breadcrumb but preserves matching a
         .data = "regular file blocks tee directory creation\n",
     });
 
-    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
-    defer env.deinit();
-    const old_path = env.get("PATH") orelse "";
-    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
-    defer allocator.free(path);
-    try env.put("PATH", path);
-    try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "1");
-
-    const result = try std.process.run(allocator, io, .{
-        .argv = &.{ exe_path, "tee-failer" },
-        .stdout_limit = .limited(4096),
-        .stderr_limit = .limited(1024),
-        .environ_map = &env,
+    var wrapped = try runSmllWrapperEnv(allocator, bin_path, &.{"tee-failer"}, &.{
+        .{ "HOME", home_path },
+        .{ "SMLL_TEE", "1" },
     });
-    var wrapped: RunResult = .{
-        .stdout = result.stdout,
-        .stderr = result.stderr,
-        .term = result.term,
-    };
     defer wrapped.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 31 }, wrapped.term);

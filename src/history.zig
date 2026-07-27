@@ -287,15 +287,6 @@ fn openLockFile(io: Io, lock_path: []const u8) !?Io.File {
     return state_io.openExclusivePrivateLock(io, lock_path);
 }
 
-fn readHistoryData(allocator: Allocator, io: Io, history_path: []const u8, max_size: usize) !HistoryData {
-    const data = Io.Dir.cwd().readFileAlloc(io, history_path, allocator, .limited(max_size)) catch |err| switch (err) {
-        error.FileNotFound => return emptyHistoryData(allocator),
-        error.StreamTooLong => return readHistoryTail(allocator, io, history_path, max_size),
-        else => |e| return e,
-    };
-    return .{ .owned = data, .lines = data };
-}
-
 fn emptyHistoryData(allocator: Allocator) !HistoryData {
     const empty = try allocator.alloc(u8, 0);
     return .{ .owned = empty, .lines = empty };

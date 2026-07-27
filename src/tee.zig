@@ -143,7 +143,7 @@ fn prepareInner(
         if (stderr_slice[stderr_slice.len - 1] != '\n') try content.writer.writeByte('\n');
     }
 
-    const owned_content = try allocator.dupe(u8, content.written());
+    const owned_content = try content.toOwnedSlice();
     errdefer allocator.free(owned_content);
     return .{
         .path = file_path,
