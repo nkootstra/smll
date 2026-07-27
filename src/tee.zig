@@ -21,6 +21,8 @@ const Writer = std.Io.Writer;
 const tee_subdir = ".smll/tee";
 const MAX_TEE_FILES: usize = 20;
 const MAX_LABEL_LEN: usize = 48;
+const breadcrumb_prefix = "\n(smll: full output saved to ";
+const breadcrumb_suffix = ")\n";
 var file_sequence: std.atomic.Value(u64) = .init(0);
 
 pub const Pending = struct {
@@ -36,14 +38,14 @@ pub const Pending = struct {
 
     pub fn breadcrumbBytes(self: Pending) usize {
         if (!self.emit_breadcrumb) return 0;
-        return "\n(smll: full output saved to ".len + self.path.len + ")\n".len;
+        return breadcrumb_prefix.len + self.path.len + breadcrumb_suffix.len;
     }
 
     pub fn writeBreadcrumb(self: Pending, writer: *Writer) !void {
         if (!self.emit_breadcrumb) return;
-        try writer.writeAll("\n(smll: full output saved to ");
+        try writer.writeAll(breadcrumb_prefix);
         try writer.writeAll(self.path);
-        try writer.writeAll(")\n");
+        try writer.writeAll(breadcrumb_suffix);
     }
 };
 

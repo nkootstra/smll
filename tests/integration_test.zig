@@ -1476,7 +1476,7 @@ test "wrapper: failure artifacts remain invisible while the shared state lock is
     try writeFakeScript(tmp.dir, "locked-failer",
         \\#!/bin/sh
         \\: > "$HOME/child.ready"
-        \\while [ ! -e "$HOME/child.release" ]; do :; done
+        \\IFS= read -r release
         \\printf 'failure sentinel\n'
         \\printf 'stderr sentinel\n' >&2
         \\exit 23
@@ -1493,28 +1493,13 @@ test "wrapper: failure artifacts remain invisible while the shared state lock is
     var state_lock: ?std.Io.File = held_state_lock;
     defer if (state_lock) |file| file.close(io);
 
-    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
     defer env.deinit();
-    const old_path = env.get("PATH") orelse "";
-    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
-    defer allocator.free(path);
-    try env.put("PATH", path);
-    try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "1");
-
-    var child = try std.process.spawn(io, .{
-        .argv = &.{ exe_path, "locked-failer" },
-        .stdin = .pipe,
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .environ_map = &env,
-    });
+    var child = try spawnSmllWrapper(allocator, io, &env, &.{"locked-failer"});
     defer child.kill(io);
-    child.stdin.?.close(io);
-    child.stdin = null;
 
     try waitForPath(tmp.dir, "child.ready", 5 * std.time.ns_per_s);
-    try tmp.dir.writeFile(io, .{ .sub_path = "child.release", .data = "" });
+    try releaseSmllWrapper(io, &child);
 
     // Give the already-running wrapper a bounded opportunity to reach its
     // post-child persistence boundary. A split implementation publishes tee
@@ -2161,27 +2146,14 @@ test "reset ordering: ordinary reset before command finalization preserves tee a
     try writeFakeScript(tmp.dir, "reset-writer",
         \\#!/bin/sh
         \\: > "$HOME/child.ready"
-        \\while [ ! -e "$HOME/child.release" ]; do :; done
+        \\IFS= read -r release
         \\printf 'post-reset output\n'
     );
     try seedResetState(tmp.dir, ".smll/setup/claude.owned");
 
-    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
     defer env.deinit();
-    const old_path = env.get("PATH") orelse "";
-    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
-    defer allocator.free(path);
-    try env.put("PATH", path);
-    try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "1");
-
-    var child = try std.process.spawn(io, .{
-        .argv = &.{ exe_path, "reset-writer" },
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .environ_map = &env,
-    });
+    var child = try spawnSmllWrapper(allocator, io, &env, &.{"reset-writer"});
     defer child.kill(io);
     try waitForPath(tmp.dir, "child.ready", 5 * std.time.ns_per_s);
 
@@ -2199,8 +2171,12 @@ test "reset ordering: ordinary reset before command finalization preserves tee a
     try std.testing.expect(!pathExists(tmp.dir, ".smll/stats.json"));
     try std.testing.expect(!pathExists(tmp.dir, ".smll/history.jsonl"));
 
-    try tmp.dir.writeFile(io, .{ .sub_path = "child.release", .data = "" });
-    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, try child.wait(io));
+    try releaseSmllWrapper(io, &child);
+    var child_result = try drainChild(allocator, io, &child);
+    defer child_result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, child_result.term);
+    try std.testing.expectEqualStrings("post-reset output\n", child_result.stdout);
+    try std.testing.expectEqualStrings("", child_result.stderr);
 
     try expectSingleAnalyticsRecord(tmp.dir, allocator, "reset-writer", 0);
 
@@ -2228,32 +2204,17 @@ test "reset ordering: reset all before failing finalization recreates one comple
     try writeFakeScript(tmp.dir, "reset-failer",
         \\#!/bin/sh
         \\: > "$HOME/child.ready"
-        \\while [ ! -e "$HOME/child.release" ]; do :; done
+        \\IFS= read -r release
         \\printf 'post-reset failure\n'
         \\printf 'post-reset stderr\n' >&2
         \\exit 23
     );
     try seedResetState(tmp.dir, ".smll/setup/opencode.owned");
 
-    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
     defer env.deinit();
-    const old_path = env.get("PATH") orelse "";
-    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
-    defer allocator.free(path);
-    try env.put("PATH", path);
-    try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "1");
-
-    var writer = try std.process.spawn(io, .{
-        .argv = &.{ exe_path, "reset-failer" },
-        .stdin = .pipe,
-        .stdout = .pipe,
-        .stderr = .pipe,
-        .environ_map = &env,
-    });
+    var writer = try spawnSmllWrapper(allocator, io, &env, &.{"reset-failer"});
     defer writer.kill(io);
-    writer.stdin.?.close(io);
-    writer.stdin = null;
     try waitForPath(tmp.dir, "child.ready", 5 * std.time.ns_per_s);
 
     const reset_result = try std.process.run(allocator, io, .{
@@ -2275,7 +2236,7 @@ test "reset ordering: reset all before failing finalization recreates one comple
     try std.testing.expect(pathExists(tmp.dir, ".smll/state.lock"));
     try std.testing.expect(pathExists(tmp.dir, ".smll/setup/opencode.owned"));
 
-    try tmp.dir.writeFile(io, .{ .sub_path = "child.release", .data = "" });
+    try releaseSmllWrapper(io, &writer);
     var writer_result = try drainChild(allocator, io, &writer);
     defer writer_result.deinit(allocator);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, writer_result.term);
@@ -2608,6 +2569,15 @@ test "hook eval opencode keeps command mutation behavior for an eligible command
     try std.testing.expect(!std.mem.startsWith(u8, result.stdout, "smll "));
 }
 
+const DualSetupArtifact = enum(usize) {
+    claude_config,
+    claude_ownership,
+    opencode_config,
+    opencode_index,
+    opencode_package,
+    opencode_ownership,
+};
+
 const dual_setup_paths = [_][]const u8{
     ".claude/settings.json",
     ".smll/setup/claude.owned",
@@ -2615,6 +2585,14 @@ const dual_setup_paths = [_][]const u8{
     ".config/opencode/plugins/smll-proxy/index.ts",
     ".config/opencode/plugins/smll-proxy/package.json",
     ".smll/setup/opencode.owned",
+};
+
+const claude_setup_artifacts = [_]DualSetupArtifact{ .claude_config, .claude_ownership };
+const opencode_setup_artifacts = [_]DualSetupArtifact{
+    .opencode_config,
+    .opencode_index,
+    .opencode_package,
+    .opencode_ownership,
 };
 
 const DualSetupSnapshot = struct {
@@ -2641,17 +2619,21 @@ const DualSetupSnapshot = struct {
         }
     }
 
-    fn expectRangeUnchanged(
+    fn get(self: *const DualSetupSnapshot, artifact: DualSetupArtifact) []const u8 {
+        return self.files[@intFromEnum(artifact)];
+    }
+
+    fn expectArtifactsUnchanged(
         self: *const DualSetupSnapshot,
         allocator: std.mem.Allocator,
         dir: std.Io.Dir,
-        start: usize,
-        end: usize,
+        artifacts: []const DualSetupArtifact,
     ) !void {
-        for (dual_setup_paths[start..end], self.files[start..end]) |path, expected| {
+        for (artifacts) |artifact| {
+            const path = dual_setup_paths[@intFromEnum(artifact)];
             const actual = try dir.readFileAlloc(std.testing.io, path, allocator, .limited(64 * 1024));
             defer allocator.free(actual);
-            try std.testing.expectEqualSlices(u8, expected, actual);
+            try std.testing.expectEqualSlices(u8, self.get(artifact), actual);
         }
     }
 };
@@ -2671,18 +2653,18 @@ fn expectDualSetupInstalled(dir: std.Io.Dir, allocator: std.mem.Allocator) !void
     var snapshot = try DualSetupSnapshot.capture(allocator, dir);
     defer snapshot.deinit(allocator);
 
-    try std.testing.expect(std.mem.find(u8, snapshot.files[0], exe_path) != null);
-    try std.testing.expect(std.mem.find(u8, snapshot.files[0], "--hook-eval claude") != null);
-    try std.testing.expect(std.mem.startsWith(u8, snapshot.files[1], "smll-setup-v1\n"));
-    try std.testing.expect(std.mem.find(u8, snapshot.files[1], exe_path) != null);
-    try std.testing.expect(std.mem.find(u8, snapshot.files[1], "--hook-eval claude") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.claude_config), exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.claude_config), "--hook-eval claude") != null);
+    try std.testing.expect(std.mem.startsWith(u8, snapshot.get(.claude_ownership), "smll-setup-v1\n"));
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.claude_ownership), exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.claude_ownership), "--hook-eval claude") != null);
 
-    try std.testing.expect(std.mem.find(u8, snapshot.files[2], "smll-proxy") != null);
-    try std.testing.expect(std.mem.find(u8, snapshot.files[3], exe_path) != null);
-    try std.testing.expect(std.mem.find(u8, snapshot.files[3], "--hook-eval") != null);
-    try std.testing.expect(std.mem.find(u8, snapshot.files[3], "opencode") != null);
-    try std.testing.expect(std.mem.find(u8, snapshot.files[4], "\"name\":\"smll-proxy\"") != null);
-    try std.testing.expect(std.mem.startsWith(u8, snapshot.files[5], "smll-setup-v1\n"));
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.opencode_config), "smll-proxy") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.opencode_index), exe_path) != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.opencode_index), "--hook-eval") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.opencode_index), "opencode") != null);
+    try std.testing.expect(std.mem.find(u8, snapshot.get(.opencode_package), "\"name\":\"smll-proxy\"") != null);
+    try std.testing.expect(std.mem.startsWith(u8, snapshot.get(.opencode_ownership), "smll-setup-v1\n"));
 }
 
 test "setup coexistence: both install orders are idempotent" {
@@ -2723,7 +2705,7 @@ test "setup coexistence: either integration can be removed independently" {
     defer both_installed.deinit(allocator);
 
     try runHomeCommand(allocator, home, &.{ "--unsetup", "claude" });
-    try both_installed.expectRangeUnchanged(allocator, tmp.dir, 2, dual_setup_paths.len);
+    try both_installed.expectArtifactsUnchanged(allocator, tmp.dir, &opencode_setup_artifacts);
     try std.testing.expect(!pathExists(tmp.dir, ".smll/setup/claude.owned"));
     const claude_settings = try tmp.dir.readFileAlloc(
         std.testing.io,
@@ -2750,7 +2732,7 @@ test "setup coexistence: either integration can be removed independently" {
     defer reinstalled.deinit(allocator);
 
     try runHomeCommand(allocator, home, &.{ "--unsetup", "opencode" });
-    try reinstalled.expectRangeUnchanged(allocator, tmp.dir, 0, 2);
+    try reinstalled.expectArtifactsUnchanged(allocator, tmp.dir, &claude_setup_artifacts);
     inline for (.{
         ".config/opencode/plugins/smll-proxy/index.ts",
         ".config/opencode/plugins/smll-proxy/package.json",
