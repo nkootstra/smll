@@ -188,7 +188,10 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
     const cwd = Io.Dir.cwd();
     const data = cwd.readFileAlloc(io, path, allocator, .limited(MAX_JSON_SIZE)) catch return emptyStats();
     defer allocator.free(data);
+    return parseStats(data);
+}
 
+fn parseStats(data: []const u8) Stats {
     var s = emptyStats();
     // Hand-rolled parser for the fixed stats JSON schema. Version 1 had no
     // explicit schema marker and stored only input/output byte totals.
@@ -246,6 +249,12 @@ fn loadInner(allocator: Allocator, io: Io, path: []const u8) !Stats {
         s.cmd_count += 1;
     }
     return s;
+}
+
+fn loadSnapshot(allocator: Allocator, io: Io, home: []const u8, path: []const u8) Stats {
+    const data = state_io.copyFileUnderStateLock(allocator, io, home, path, MAX_JSON_SIZE) catch return emptyStats();
+    defer allocator.free(data);
+    return parseStats(data);
 }
 
 fn emptyStats() Stats {
@@ -429,7 +438,7 @@ fn displayStats(allocator: Allocator, io: Io, home: []const u8, opts: QueryOptio
         return;
     }
 
-    const s = load(allocator, io, path);
+    const s = loadSnapshot(allocator, io, home, path);
     if (s.commands == 0) {
         try stdout.writeAll("no commands recorded yet\n");
         return;

@@ -55,6 +55,18 @@ pub fn openStateLock(allocator: Allocator, io: Io, home: []const u8) !?Io.File {
     return openExclusivePrivateLock(io, lock_path);
 }
 
+pub fn copyFileUnderStateLock(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    path: []const u8,
+    max_size: usize,
+) ![]u8 {
+    const state_lock = try openStateLock(allocator, io, home);
+    defer if (state_lock) |file| file.close(io);
+    return Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_size));
+}
+
 pub fn writePrivateFileAtomic(io: Io, path: []const u8, data: []const u8) !void {
     var atomic_file = try Io.Dir.cwd().createFileAtomic(io, path, .{
         .permissions = privateFilePermissions(),

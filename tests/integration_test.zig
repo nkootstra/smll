@@ -1612,6 +1612,304 @@ test "wrapper: concurrent stats writers preserve every update" {
     try std.testing.expectEqual(@as(usize, writer_count), std.mem.count(u8, history, "\"cmd\":\"state-writer\""));
 }
 
+fn expectQueryWaitsForStateLock(query_arg: []const u8, state_file: []const u8, state_data: []const u8) !void {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+
+    try tmp.dir.createDirPath(io, ".smll");
+    try tmp.dir.writeFile(io, .{
+        .sub_path = state_file,
+        .data = state_data,
+    });
+    const held_state_lock = tmp.dir.createFile(io, ".smll/state.lock", .{
+        .read = true,
+        .truncate = false,
+        .lock = .exclusive,
+    }) catch |err| switch (err) {
+        error.FileLocksUnsupported => return,
+        else => |e| return e,
+    };
+    var state_lock: ?std.Io.File = held_state_lock;
+    defer if (state_lock) |file| file.close(io);
+
+    const launcher = try std.fmt.allocPrint(
+        allocator,
+        "#!/bin/sh\n: > \"$HOME/query.ready\"\nexec '{s}' '{s}'\n",
+        .{ exe_path, query_arg },
+    );
+    defer allocator.free(launcher);
+    try writeFakeScript(tmp.dir, "run-stats-query", launcher);
+    const launcher_path = try tmp.dir.realPathFileAlloc(io, "run-stats-query", allocator);
+    defer allocator.free(launcher_path);
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    try env.put("HOME", home_path);
+    var child = try std.process.spawn(io, .{
+        .argv = &.{launcher_path},
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .environ_map = &env,
+    });
+    defer child.kill(io);
+
+    const WaitStatus = enum(u8) { waiting, succeeded, failed };
+    var wait_status: std.atomic.Value(WaitStatus) = .init(.waiting);
+    var term: std.process.Child.Term = undefined;
+    const WaitContext = struct {
+        child: *std.process.Child,
+        status: *std.atomic.Value(WaitStatus),
+        term: *std.process.Child.Term,
+
+        fn run(ctx: @This()) void {
+            ctx.term.* = ctx.child.wait(std.testing.io) catch {
+                ctx.status.store(.failed, .release);
+                return;
+            };
+            ctx.status.store(.succeeded, .release);
+        }
+    };
+    const waiter = try std.Thread.spawn(.{}, WaitContext.run, .{WaitContext{
+        .child = &child,
+        .status = &wait_status,
+        .term = &term,
+    }});
+
+    try waitForPath(tmp.dir, "query.ready", 5 * std.time.ns_per_s);
+    const observation_deadline = std.Io.Clock.real.now(io).toNanoseconds() + 250 * std.time.ns_per_ms;
+    while (wait_status.load(.acquire) == .waiting and
+        std.Io.Clock.real.now(io).toNanoseconds() < observation_deadline)
+    {
+        try std.Thread.yield();
+    }
+    const returned_while_locked = wait_status.load(.acquire) == .succeeded;
+
+    state_lock.?.close(io);
+    state_lock = null;
+    waiter.join();
+
+    try std.testing.expect(!returned_while_locked);
+    try std.testing.expectEqual(WaitStatus.succeeded, wait_status.load(.acquire));
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, term);
+}
+
+test "stats query waits for the shared state lock" {
+    try expectQueryWaitsForStateLock(
+        "--stats",
+        ".smll/stats.json",
+        "{\"v\":2,\"commands\":1,\"raw_bytes\":8,\"displayed_bytes\":4,\"omitted_bytes\":0,\"diagnostic_bytes\":0,\"formatting_saved_bytes\":4}\n",
+    );
+}
+
+test "discover query waits for the shared state lock" {
+    try expectQueryWaitsForStateLock(
+        "--discover",
+        ".smll/history.jsonl",
+        "{\"v\":2,\"ts_ms\":1,\"project\":\"/tmp\",\"cwd\":\"/tmp\",\"cmd\":\"git status\",\"filter\":\"git-status\",\"exit\":0,\"raw\":8,\"displayed\":4,\"omitted\":0,\"diagnostics\":0,\"saved\":4,\"duration_ms\":1}\n",
+    );
+}
+
+fn seedResetState(dir: std.Io.Dir, ownership_path: []const u8) !void {
+    const io = std.testing.io;
+    try dir.createDirPath(io, ".smll/tee");
+    try dir.createDirPath(io, ".smll/setup");
+    inline for (.{ "stats.lock", "history.lock" }) |name| {
+        try dir.writeFile(io, .{ .sub_path = ".smll/" ++ name, .data = "old lock\n" });
+    }
+    try dir.writeFile(io, .{
+        .sub_path = ".smll/stats.json",
+        .data = "{\"v\":2,\"commands\":9,\"raw_bytes\":9,\"displayed_bytes\":9,\"omitted_bytes\":0,\"diagnostic_bytes\":0,\"formatting_saved_bytes\":0}\n",
+    });
+    try dir.writeFile(io, .{
+        .sub_path = ".smll/history.jsonl",
+        .data = "{\"v\":2,\"ts_ms\":1,\"project\":\"old\",\"cwd\":\"old\",\"cmd\":\"old-command\",\"filter\":\"old\",\"exit\":0,\"raw\":9,\"displayed\":9,\"omitted\":0,\"diagnostics\":0,\"saved\":0,\"duration_ms\":1}\n",
+    });
+    try dir.writeFile(io, .{ .sub_path = ".smll/tee/old.log", .data = "old tee\n" });
+    try dir.writeFile(io, .{ .sub_path = ownership_path, .data = "old ownership\n" });
+}
+
+fn expectSingleAnalyticsRecord(dir: std.Io.Dir, allocator: std.mem.Allocator, label: []const u8, exit_code: u8) !void {
+    const io = std.testing.io;
+    const stats_label = try std.fmt.allocPrint(allocator, "\"{s}\":{{\"n\":1", .{label});
+    defer allocator.free(stats_label);
+    const history_label = try std.fmt.allocPrint(allocator, "\"cmd\":\"{s}\"", .{label});
+    defer allocator.free(history_label);
+    const history_exit = try std.fmt.allocPrint(allocator, "\"exit\":{d}", .{exit_code});
+    defer allocator.free(history_exit);
+
+    const stats_json = try dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(stats_json);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":1") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, stats_label) != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":9") == null);
+
+    const history_jsonl = try dir.readFileAlloc(io, ".smll/history.jsonl", allocator, .limited(4096));
+    defer allocator.free(history_jsonl);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history_jsonl, history_label));
+    try std.testing.expect(std.mem.find(u8, history_jsonl, history_exit) != null);
+    try std.testing.expect(std.mem.find(u8, history_jsonl, "old-command") == null);
+}
+
+test "reset ordering: ordinary reset before command finalization preserves tee and setup state" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "reset-writer",
+        \\#!/bin/sh
+        \\: > "$HOME/child.ready"
+        \\while [ ! -e "$HOME/child.release" ]; do :; done
+        \\printf 'post-reset output\n'
+    );
+    try seedResetState(tmp.dir, ".smll/setup/claude.owned");
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "1");
+
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ exe_path, "reset-writer" },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+        .environ_map = &env,
+    });
+    defer child.kill(io);
+    try waitForPath(tmp.dir, "child.ready", 5 * std.time.ns_per_s);
+
+    const reset_result = try std.process.run(allocator, io, .{
+        .argv = &.{ exe_path, "--stats", "--reset" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    defer allocator.free(reset_result.stdout);
+    defer allocator.free(reset_result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, reset_result.term);
+    try std.testing.expectEqualStrings("stats reset\n", reset_result.stdout);
+    try std.testing.expectEqualStrings("", reset_result.stderr);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/stats.json"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/history.jsonl"));
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "child.release", .data = "" });
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, try child.wait(io));
+
+    try expectSingleAnalyticsRecord(tmp.dir, allocator, "reset-writer", 0);
+
+    inline for (.{
+        ".smll/tee/old.log",
+        ".smll/setup/claude.owned",
+        ".smll/stats.lock",
+        ".smll/history.lock",
+        ".smll/state.lock",
+    }) |name| {
+        try std.testing.expect(pathExists(tmp.dir, name));
+    }
+}
+
+test "reset ordering: reset all before failing finalization recreates one complete state" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(home_path);
+    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(bin_path);
+
+    try writeFakeScript(tmp.dir, "reset-failer",
+        \\#!/bin/sh
+        \\: > "$HOME/child.ready"
+        \\while [ ! -e "$HOME/child.release" ]; do :; done
+        \\printf 'post-reset failure\n'
+        \\printf 'post-reset stderr\n' >&2
+        \\exit 23
+    );
+    try seedResetState(tmp.dir, ".smll/setup/opencode.owned");
+
+    var env = try std.process.Environ.createMap(std.testing.environ, allocator);
+    defer env.deinit();
+    const old_path = env.get("PATH") orelse "";
+    const path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_path, old_path });
+    defer allocator.free(path);
+    try env.put("PATH", path);
+    try env.put("HOME", home_path);
+    try env.put("SMLL_TEE", "1");
+
+    var writer = try std.process.spawn(io, .{
+        .argv = &.{ exe_path, "reset-failer" },
+        .stdin = .pipe,
+        .stdout = .pipe,
+        .stderr = .pipe,
+        .environ_map = &env,
+    });
+    defer writer.kill(io);
+    writer.stdin.?.close(io);
+    writer.stdin = null;
+    try waitForPath(tmp.dir, "child.ready", 5 * std.time.ns_per_s);
+
+    const reset_result = try std.process.run(allocator, io, .{
+        .argv = &.{ exe_path, "--stats", "--reset", "--all" },
+        .stdout_limit = .limited(1024),
+        .stderr_limit = .limited(1024),
+        .environ_map = &env,
+    });
+    defer allocator.free(reset_result.stdout);
+    defer allocator.free(reset_result.stderr);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 0 }, reset_result.term);
+    try std.testing.expectEqualStrings("all local state reset\n", reset_result.stdout);
+    try std.testing.expectEqualStrings("", reset_result.stderr);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/stats.json"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/history.jsonl"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/stats.lock"));
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/history.lock"));
+    try std.testing.expect(pathExists(tmp.dir, ".smll/state.lock"));
+    try std.testing.expect(pathExists(tmp.dir, ".smll/setup/opencode.owned"));
+
+    try tmp.dir.writeFile(io, .{ .sub_path = "child.release", .data = "" });
+    var writer_result = try drainChild(allocator, io, &writer);
+    defer writer_result.deinit(allocator);
+    try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, writer_result.term);
+    try std.testing.expect(std.mem.startsWith(u8, writer_result.stdout, "post-reset failure\n"));
+    try std.testing.expect(std.mem.find(u8, writer_result.stdout, "full output saved") != null);
+    try std.testing.expectEqualStrings("post-reset stderr\n", writer_result.stderr);
+
+    const ownership = try tmp.dir.readFileAlloc(io, ".smll/setup/opencode.owned", allocator, .limited(128));
+    defer allocator.free(ownership);
+    try std.testing.expectEqualStrings("old ownership\n", ownership);
+
+    try expectSingleAnalyticsRecord(tmp.dir, allocator, "reset-failer", 23);
+
+    var tee_dir = try tmp.dir.openDir(io, ".smll/tee", .{ .iterate = true });
+    defer tee_dir.close(io);
+    var tee_it = tee_dir.iterate();
+    const tee_entry = (try tee_it.next(io)) orelse return error.ExpectedTeeLog;
+    try std.testing.expect(tee_entry.kind == .file);
+    try std.testing.expect(!std.mem.eql(u8, tee_entry.name, "old.log"));
+    try std.testing.expect((try tee_it.next(io)) == null);
+    const tee_log = try tee_dir.readFileAlloc(io, tee_entry.name, allocator, .limited(4096));
+    defer allocator.free(tee_log);
+    try std.testing.expect(std.mem.find(u8, tee_log, "post-reset failure\n") != null);
+    try std.testing.expect(std.mem.find(u8, tee_log, "post-reset stderr\n") != null);
+    try std.testing.expect(std.mem.find(u8, tee_log, "# exit: 23") != null);
+}
+
 test "wrapper: explain preserves output and emits stderr footer" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});

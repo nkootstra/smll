@@ -182,7 +182,7 @@ pub fn aggregate(allocator: Allocator, io: Io, home: []const u8, opts: QueryOpti
     const history_path = try joinPath(allocator, home, history_file);
     defer allocator.free(history_path);
 
-    const data = try readHistoryData(allocator, io, history_path, MAX_HISTORY_SIZE);
+    const data = try readHistorySnapshot(allocator, io, home, history_path, MAX_HISTORY_SIZE);
     defer allocator.free(data.owned);
 
     const cutoff_ms: ?i64 = if (opts.since_ms) |since_ms| blk: {
@@ -227,6 +227,21 @@ const HistoryData = struct {
     owned: []u8,
     lines: []const u8,
 };
+
+fn readHistorySnapshot(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    history_path: []const u8,
+    max_size: usize,
+) !HistoryData {
+    const state_lock = try state_io.openStateLock(allocator, io, home);
+    defer if (state_lock) |file| file.close(io);
+    return readHistoryTail(allocator, io, history_path, max_size) catch |err| switch (err) {
+        error.FileNotFound => emptyHistoryData(allocator),
+        else => |e| return e,
+    };
+}
 
 fn appendLineBounded(allocator: Allocator, io: Io, history_path: []const u8, lock_path: []const u8, line: []const u8, max_size: usize) !void {
     if (line.len > max_size) return;
@@ -274,14 +289,16 @@ fn openLockFile(io: Io, lock_path: []const u8) !?Io.File {
 
 fn readHistoryData(allocator: Allocator, io: Io, history_path: []const u8, max_size: usize) !HistoryData {
     const data = Io.Dir.cwd().readFileAlloc(io, history_path, allocator, .limited(max_size)) catch |err| switch (err) {
-        error.FileNotFound => {
-            const empty = try allocator.alloc(u8, 0);
-            return .{ .owned = empty, .lines = empty };
-        },
+        error.FileNotFound => return emptyHistoryData(allocator),
         error.StreamTooLong => return readHistoryTail(allocator, io, history_path, max_size),
         else => |e| return e,
     };
     return .{ .owned = data, .lines = data };
+}
+
+fn emptyHistoryData(allocator: Allocator) !HistoryData {
+    const empty = try allocator.alloc(u8, 0);
+    return .{ .owned = empty, .lines = empty };
 }
 
 fn readHistoryTail(allocator: Allocator, io: Io, history_path: []const u8, max_size: usize) !HistoryData {
@@ -289,10 +306,7 @@ fn readHistoryTail(allocator: Allocator, io: Io, history_path: []const u8, max_s
     defer file.close(io);
     const st = try file.stat(io);
     const read_len: usize = @intCast(@min(st.size, max_size));
-    if (read_len == 0) {
-        const empty = try allocator.alloc(u8, 0);
-        return .{ .owned = empty, .lines = empty };
-    }
+    if (read_len == 0) return emptyHistoryData(allocator);
 
     const offset = st.size - read_len;
     const buf = try allocator.alloc(u8, read_len);
@@ -878,7 +892,7 @@ test "history append strictly bounds size when the new line exceeds half the cap
     try std.testing.expect(std.mem.find(u8, got, "xxxxxxxxxxxxx\n") != null);
 }
 
-test "history reader tails oversized files from a complete line" {
+test "history snapshot tails oversized files from a complete line" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -900,7 +914,7 @@ test "history reader tails oversized files from a complete line" {
 
     const history_path = try joinPath(allocator, home, history_file);
     defer allocator.free(history_path);
-    const data = try readHistoryData(allocator, std.testing.io, history_path, content.written().len - 8);
+    const data = try readHistorySnapshot(allocator, std.testing.io, home, history_path, content.written().len - 8);
     defer allocator.free(data.owned);
 
     try std.testing.expect(!std.mem.startsWith(u8, data.lines, "partial-prefix"));
