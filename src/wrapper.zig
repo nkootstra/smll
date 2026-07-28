@@ -2,7 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const accounting = @import("accounting.zig");
 
-const tee = @import("tee.zig");
 const wrapper_git = @import("wrapper_git.zig");
 const wrapper_io = @import("wrapper_io.zig");
 const wrapper_stream = @import("wrapper_stream.zig");
@@ -72,13 +71,23 @@ const AcliFilterFn = *const fn (std.mem.Allocator, []const u8, []const u8, *std.
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CURL_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
+pub const TeeAction = enum {
+    none,
+    publish,
+    publish_with_breadcrumb,
+};
+
 pub const Result = struct {
     exit_code: u8,
     bytes: accounting.Bytes,
     filter_name: []const u8,
     record_stats: bool,
-    pending_tee: ?tee.Pending = null,
+    tee_action: TeeAction = .none,
 };
+
+pub fn rawOutput() struct { stdout: []const u8, stderr: []const u8 } {
+    return .{ .stdout = last_raw_stdout, .stderr = last_raw_stderr };
+}
 
 /// Emit a hint to stdout when the wrapped child produced no stdout AND no
 /// stderr. Without a hint, agents commonly retry the command in a loop,
@@ -240,7 +249,7 @@ fn hasPackagePrelude(input: []const u8) bool {
     return false;
 }
 
-pub fn run(
+pub noinline fn run(
     allocator: std.mem.Allocator,
     io: std.Io,
     environ: *const std.process.Environ.Map,
@@ -320,23 +329,14 @@ pub fn run(
         try final_stdout.writer.writeAll(output);
     }
 
-    // Prepare tee recovery entirely in memory. Shared filesystem publication,
-    // breadcrumb accounting, and analytics are finalized together by main
-    // after child execution. Streaming/lossless modes inherit stdio directly,
-    // so there is no private payload to prepare.
-    const pending_tee = if (exit_code != 0 and !last_output_inherited and teeEnabled(environ)) blk: {
-        const home = environ.get("HOME") orelse "";
-        break :blk tee.maybePrepare(
-            allocator,
-            io,
-            home,
-            argv,
-            exit_code,
-            last_raw_stdout,
-            last_raw_stderr,
-            !failed_filter_output,
-        );
-    } else null;
+    // Shared filesystem publication, breadcrumb accounting, and analytics are
+    // finalized together by main after child execution. Streaming/lossless
+    // modes inherit stdio directly, so there is no private payload to retain.
+    const tee_action: TeeAction = if (exit_code != 0 and !last_output_inherited and
+        (last_raw_stdout.len > 0 or last_raw_stderr.len > 0) and teeEnabled(environ))
+        if (failed_filter_output) .publish else .publish_with_breadcrumb
+    else
+        .none;
 
     const final_stdout_bytes = final_stdout.written().len;
     try writer.writeAll(final_stdout.written());
@@ -356,7 +356,7 @@ pub fn run(
         ),
         .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
-        .pending_tee = pending_tee,
+        .tee_action = tee_action,
     };
 }
 

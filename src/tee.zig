@@ -25,55 +25,14 @@ const breadcrumb_prefix = "\n(smll: full output saved to ";
 const breadcrumb_suffix = ")\n";
 var file_sequence: std.atomic.Value(u64) = .init(0);
 
-pub const Pending = struct {
-    path: []u8,
-    content: []u8,
-    emit_breadcrumb: bool,
+pub fn breadcrumbBytes(path: []const u8) usize {
+    return breadcrumb_prefix.len + path.len + breadcrumb_suffix.len;
+}
 
-    pub fn deinit(self: *Pending, allocator: Allocator) void {
-        allocator.free(self.path);
-        allocator.free(self.content);
-        self.* = undefined;
-    }
-
-    pub fn breadcrumbBytes(self: Pending) usize {
-        if (!self.emit_breadcrumb) return 0;
-        return breadcrumb_prefix.len + self.path.len + breadcrumb_suffix.len;
-    }
-
-    pub fn writeBreadcrumb(self: Pending, writer: *Writer) !void {
-        if (!self.emit_breadcrumb) return;
-        try writer.writeAll(breadcrumb_prefix);
-        try writer.writeAll(self.path);
-        try writer.writeAll(breadcrumb_suffix);
-    }
-};
-
-/// Construct an invocation-private failure payload entirely in memory. The
-/// returned value has no filesystem visibility until `publish` succeeds.
-pub fn maybePrepare(
-    allocator: Allocator,
-    io: Io,
-    home: []const u8,
-    argv: []const []const u8,
-    exit_code: u8,
-    stdout_slice: []const u8,
-    stderr_slice: []const u8,
-    emit_breadcrumb: bool,
-) ?Pending {
-    if (home.len == 0) return null;
-    if (exit_code == 0) return null;
-    if (stdout_slice.len == 0 and stderr_slice.len == 0) return null;
-    return prepareInner(
-        allocator,
-        io,
-        home,
-        argv,
-        exit_code,
-        stdout_slice,
-        stderr_slice,
-        emit_breadcrumb,
-    ) catch null;
+pub fn writeBreadcrumb(writer: *Writer, path: []const u8) !void {
+    try writer.writeAll(breadcrumb_prefix);
+    try writer.writeAll(path);
+    try writer.writeAll(breadcrumb_suffix);
 }
 
 /// Persist raw output for a failed wrapped command. Returns the absolute
@@ -89,25 +48,13 @@ pub fn maybeRecord(
     stdout_slice: []const u8,
     stderr_slice: []const u8,
 ) ?[]const u8 {
-    var pending = maybePrepare(
-        allocator,
-        io,
-        home,
-        argv,
-        exit_code,
-        stdout_slice,
-        stderr_slice,
-        true,
-    ) orelse return null;
-    if (!publish(allocator, io, home, pending)) {
-        pending.deinit(allocator);
-        return null;
-    }
-    allocator.free(pending.content);
-    return pending.path;
+    if (home.len == 0) return null;
+    if (exit_code == 0) return null;
+    if (stdout_slice.len == 0 and stderr_slice.len == 0) return null;
+    return recordInner(allocator, io, home, argv, exit_code, stdout_slice, stderr_slice, true) catch null;
 }
 
-fn prepareInner(
+pub fn recordUnderStateLock(
     allocator: Allocator,
     io: Io,
     home: []const u8,
@@ -115,10 +62,28 @@ fn prepareInner(
     exit_code: u8,
     stdout_slice: []const u8,
     stderr_slice: []const u8,
-    emit_breadcrumb: bool,
-) !Pending {
+) ?[]const u8 {
+    return recordInner(allocator, io, home, argv, exit_code, stdout_slice, stderr_slice, false) catch null;
+}
+
+fn recordInner(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    argv: []const []const u8,
+    exit_code: u8,
+    stdout_slice: []const u8,
+    stderr_slice: []const u8,
+    ensure_root: bool,
+) ![]const u8 {
     const dir_path = try util.joinPath(allocator, home, tee_subdir);
     defer allocator.free(dir_path);
+    if (ensure_root) {
+        const root_path = try util.joinPath(allocator, home, ".smll");
+        defer allocator.free(root_path);
+        try state_io.ensurePrivateDir(io, root_path);
+    }
+    try state_io.ensurePrivateDir(io, dir_path);
 
     var label_buf: [MAX_LABEL_LEN]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
@@ -145,36 +110,15 @@ fn prepareInner(
         if (stderr_slice[stderr_slice.len - 1] != '\n') try content.writer.writeByte('\n');
     }
 
-    const owned_content = try content.toOwnedSlice();
-    errdefer allocator.free(owned_content);
-    return .{
-        .path = file_path,
-        .content = owned_content,
-        .emit_breadcrumb = emit_breadcrumb,
-    };
-}
-
-/// Publish a prepared failure payload and rotate retained logs. The caller
-/// owns shared-state serialization; publication itself remains best-effort.
-pub fn publish(allocator: Allocator, io: Io, home: []const u8, pending: Pending) bool {
-    publishInner(allocator, io, home, pending) catch return false;
-    return true;
-}
-
-fn publishInner(allocator: Allocator, io: Io, home: []const u8, pending: Pending) !void {
-    const root_path = try util.joinPath(allocator, home, ".smll");
-    defer allocator.free(root_path);
-    const dir_path = try util.joinPath(allocator, home, tee_subdir);
-    defer allocator.free(dir_path);
-    try state_io.ensurePrivateDir(io, root_path);
-    try state_io.ensurePrivateDir(io, dir_path);
-    try state_io.writePrivateFileAtomic(io, pending.path, pending.content);
+    try state_io.writePrivateFileAtomic(io, file_path, content.written());
     rotate(allocator, io, dir_path) catch {};
+
+    return file_path;
 }
 
-fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
-    try w.writeAll("# smll tee — raw output from failed wrapped command\n");
-    try w.writeAll("# note: command output is raw and may contain secrets\n");
+noinline fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
+    try w.writeAll("# smll tee raw failed output\n");
+    try w.writeAll("# raw output may contain secrets\n");
     try w.writeAll("# argv:");
     var redact_next = false;
     for (argv) |arg| {
@@ -266,7 +210,7 @@ fn writeUnsigned(out: []u8, value: u64) usize {
 
 /// Build a filesystem-safe `<basename>[_<subcmd>]` label, mirroring
 /// stats.zig.buildLabel but stricter on character classes.
-fn buildLabel(argv: []const []const u8, buf: *[MAX_LABEL_LEN]u8) []const u8 {
+noinline fn buildLabel(argv: []const []const u8, buf: *[MAX_LABEL_LEN]u8) []const u8 {
     if (argv.len == 0) return appendSafe("cmd", buf, 0);
 
     const cmd = argv[0];

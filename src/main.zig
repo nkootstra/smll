@@ -446,39 +446,13 @@ fn runWrappedAndRecord(
         stdout,
         stderr,
     );
-    defer if (result.pending_tee) |*pending| pending.deinit(allocator);
     const duration_ms = elapsedMs(start, io);
 
     const should_record = result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK");
-    var recorded = false;
-    var tee_published = false;
-    if (should_record) {
+    const recorded = if (should_record) blk: {
         const history_filter_name = try historyFilterName(allocator, mode, result.filter_name);
-        if (state_io.openStateLock(allocator, io, home)) |state_lock| {
-            defer if (state_lock) |file| file.close(io);
-
-            if (result.pending_tee) |pending| {
-                tee_published = tee.publish(allocator, io, home, pending);
-                if (tee_published) {
-                    const breadcrumb_bytes = pending.breadcrumbBytes();
-                    result.bytes.displayed_bytes += breadcrumb_bytes;
-                    result.bytes.diagnostic_bytes += breadcrumb_bytes;
-                }
-            }
-
-            recorded = stats.recordUnderStateLock(allocator, io, home, child_argv, result.bytes, .{
-                .exit_code = result.exit_code,
-                .filter_name = history_filter_name,
-                .duration_ms = duration_ms,
-            });
-        } else |_| {}
-    }
-
-    // Process output remains outside the shared-state lock. The breadcrumb is
-    // emitted only after its matching private log was successfully published.
-    if (tee_published) {
-        if (result.pending_tee) |pending| pending.writeBreadcrumb(stdout) catch {};
-    }
+        break :blk finalizeState(allocator, io, home, child_argv, history_filter_name, duration_ms, &result, stdout);
+    } else false;
 
     if (mode == .explain) {
         const pct = if (result.bytes.raw_bytes > 0)
@@ -501,6 +475,57 @@ fn runWrappedAndRecord(
     }
 
     return result.exit_code;
+}
+
+fn finalizeState(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    home: []const u8,
+    child_argv: []const []const u8,
+    history_filter_name: []const u8,
+    duration_ms: u64,
+    result: *wrapper.Result,
+    stdout: *std.Io.Writer,
+) bool {
+    var tee_path: ?[]const u8 = null;
+    var recorded = false;
+    {
+        const state_lock = state_io.openStateLock(allocator, io, home) catch return false;
+        defer if (state_lock) |file| file.close(io);
+
+        if (result.tee_action != .none) {
+            const raw = wrapper.rawOutput();
+            tee_path = tee.recordUnderStateLock(
+                allocator,
+                io,
+                home,
+                child_argv,
+                result.exit_code,
+                raw.stdout,
+                raw.stderr,
+            );
+            if (tee_path) |path| {
+                if (result.tee_action == .publish_with_breadcrumb) {
+                    const breadcrumb_bytes = tee.breadcrumbBytes(path);
+                    result.bytes.displayed_bytes += breadcrumb_bytes;
+                    result.bytes.diagnostic_bytes += breadcrumb_bytes;
+                }
+            }
+        }
+
+        recorded = stats.recordUnderStateLock(allocator, io, home, child_argv, result.bytes, .{
+            .exit_code = result.exit_code,
+            .filter_name = history_filter_name,
+            .duration_ms = duration_ms,
+        });
+    }
+
+    // Process output remains outside the shared-state lock. The breadcrumb is
+    // emitted only after its matching private log was successfully published.
+    if (tee_path) |path| {
+        if (result.tee_action == .publish_with_breadcrumb) tee.writeBreadcrumb(stdout, path) catch {};
+    }
+    return recorded;
 }
 
 fn historyFilterName(allocator: std.mem.Allocator, mode: RunMode, filter_name: []const u8) ![]const u8 {

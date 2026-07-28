@@ -9,7 +9,6 @@ const Writer = std.Io.Writer;
 
 /// Cumulative token-savings stats stored in ~/.smll/stats.json.
 /// Best-effort: stats failures never block command execution.
-const stats_dir = ".smll";
 const stats_file = ".smll/stats.json";
 const stats_lock_file = ".smll/stats.lock";
 const history_lock_file = ".smll/history.lock";
@@ -95,9 +94,6 @@ fn recordInner(
 ) !void {
     const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
-    const dir_path = try joinPath(allocator, home, stats_dir);
-    defer allocator.free(dir_path);
-    try state_io.ensurePrivateDir(io, dir_path);
 
     var label_buf: [64]u8 = undefined;
     const label = buildLabel(argv, &label_buf);
@@ -137,17 +133,17 @@ fn recordInner(
             addBytes(&entry.stats.formatting_saved_bytes, bytes.formatting_saved_bytes);
         }
 
-        try saveJson(allocator, io, dir_path, path, s);
+        try saveJson(allocator, io, path, s);
     }
 
-    try history.appendUnderStateLock(allocator, io, home, dir_path, label, bytes, options);
+    try history.appendUnderStateLock(allocator, io, home, label, bytes, options);
 }
 
 fn addBytes(total: *u64, value: usize) void {
     total.* +|= std.math.cast(u64, value) orelse std.math.maxInt(u64);
 }
 
-pub fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
+pub noinline fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
     if (argv.len == 0) return "unknown";
     const cmd = argv[0];
     const basename = pathBasename(cmd);
@@ -274,9 +270,7 @@ fn findJsonU64(data: []const u8, key: []const u8) u64 {
     return util.findJsonU64Opt(data, key) orelse 0;
 }
 
-fn saveJson(allocator: Allocator, io: Io, dir_path: []const u8, path: []const u8, s: Stats) !void {
-    try state_io.ensurePrivateDir(io, dir_path);
-
+fn saveJson(allocator: Allocator, io: Io, path: []const u8, s: Stats) !void {
     var out = Writer.Allocating.init(allocator);
     defer out.deinit();
     const w = &out.writer;

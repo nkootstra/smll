@@ -94,33 +94,30 @@ pub fn append(
     bytes: accounting.Bytes,
     options: RecordOptions,
 ) !void {
-    return appendInner(allocator, io, home, dir_path, label, bytes, options, true);
+    try state_io.ensurePrivateDir(io, dir_path);
+    return appendInner(allocator, io, home, label, bytes, options, true);
 }
 
 pub fn appendUnderStateLock(
     allocator: Allocator,
     io: Io,
     home: []const u8,
-    dir_path: []const u8,
     label: []const u8,
     bytes: accounting.Bytes,
     options: RecordOptions,
 ) !void {
-    return appendInner(allocator, io, home, dir_path, label, bytes, options, false);
+    return appendInner(allocator, io, home, label, bytes, options, false);
 }
 
 fn appendInner(
     allocator: Allocator,
     io: Io,
     home: []const u8,
-    dir_path: []const u8,
     label: []const u8,
     bytes: accounting.Bytes,
     options: RecordOptions,
     acquire_history_lock: bool,
 ) !void {
-    try state_io.ensurePrivateDir(io, dir_path);
-
     const history_path = try joinPath(allocator, home, history_file);
     defer allocator.free(history_path);
 
@@ -235,8 +232,7 @@ fn readHistorySnapshot(
     history_path: []const u8,
     max_size: usize,
 ) !HistoryData {
-    const state_lock = state_io.openStateLock(allocator, io, home) catch
-        return readHistoryTailOrEmpty(allocator, io, history_path, max_size);
+    const state_lock = state_io.openStateLock(allocator, io, home) catch null;
     defer if (state_lock) |file| file.close(io);
     return readHistoryTailOrEmpty(allocator, io, history_path, max_size);
 }
