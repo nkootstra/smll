@@ -9,13 +9,7 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
-## [1.8.3] - 2026-07-28
-
-### Changed
-
-- `smll` release metadata was bumped to `1.8.3`.
-
-## [1.9.0] - 2026-07-14
+## [1.9.0] - 2026-07-28
 
 ### Added
 
@@ -502,8 +496,7 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.8.3...HEAD
-[1.8.3]: https://github.com/nkootstra/smll/compare/v1.8.2...v1.8.3
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.9.0...HEAD
 [1.9.0]: https://github.com/nkootstra/smll/compare/v1.8.2...v1.9.0
 [1.8.2]: https://github.com/nkootstra/smll/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/nkootstra/smll/compare/v1.8.0...v1.8.1
