@@ -21,7 +21,19 @@ const Writer = std.Io.Writer;
 const tee_subdir = ".smll/tee";
 const MAX_TEE_FILES: usize = 20;
 const MAX_LABEL_LEN: usize = 48;
+const breadcrumb_prefix = "\n(smll: full output saved to ";
+const breadcrumb_suffix = ")\n";
 var file_sequence: std.atomic.Value(u64) = .init(0);
+
+pub fn breadcrumbBytes(path: []const u8) usize {
+    return breadcrumb_prefix.len + path.len + breadcrumb_suffix.len;
+}
+
+pub fn writeBreadcrumb(writer: *Writer, path: []const u8) !void {
+    try writer.writeAll(breadcrumb_prefix);
+    try writer.writeAll(path);
+    try writer.writeAll(breadcrumb_suffix);
+}
 
 /// Persist raw output for a failed wrapped command. Returns the absolute
 /// path on success so the caller can emit a breadcrumb; returns null when
@@ -39,7 +51,19 @@ pub fn maybeRecord(
     if (home.len == 0) return null;
     if (exit_code == 0) return null;
     if (stdout_slice.len == 0 and stderr_slice.len == 0) return null;
-    return recordInner(allocator, io, home, argv, exit_code, stdout_slice, stderr_slice) catch null;
+    return recordInner(allocator, io, home, argv, exit_code, stdout_slice, stderr_slice, true) catch null;
+}
+
+pub fn recordUnderStateLock(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    argv: []const []const u8,
+    exit_code: u8,
+    stdout_slice: []const u8,
+    stderr_slice: []const u8,
+) ?[]const u8 {
+    return recordInner(allocator, io, home, argv, exit_code, stdout_slice, stderr_slice, false) catch null;
 }
 
 fn recordInner(
@@ -50,12 +74,15 @@ fn recordInner(
     exit_code: u8,
     stdout_slice: []const u8,
     stderr_slice: []const u8,
+    ensure_root: bool,
 ) ![]const u8 {
     const dir_path = try util.joinPath(allocator, home, tee_subdir);
     defer allocator.free(dir_path);
-    const root_path = try util.joinPath(allocator, home, ".smll");
-    defer allocator.free(root_path);
-    try state_io.ensurePrivateDir(io, root_path);
+    if (ensure_root) {
+        const root_path = try util.joinPath(allocator, home, ".smll");
+        defer allocator.free(root_path);
+        try state_io.ensurePrivateDir(io, root_path);
+    }
     try state_io.ensurePrivateDir(io, dir_path);
 
     var label_buf: [MAX_LABEL_LEN]u8 = undefined;
@@ -84,15 +111,14 @@ fn recordInner(
     }
 
     try state_io.writePrivateFileAtomic(io, file_path, content.written());
-
     rotate(allocator, io, dir_path) catch {};
 
     return file_path;
 }
 
-fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
-    try w.writeAll("# smll tee — raw output from failed wrapped command\n");
-    try w.writeAll("# note: command output is raw and may contain secrets\n");
+noinline fn writeHeader(w: *Writer, argv: []const []const u8, exit_code: u8) !void {
+    try w.writeAll("# smll tee raw failed output\n");
+    try w.writeAll("# raw output may contain secrets\n");
     try w.writeAll("# argv:");
     var redact_next = false;
     for (argv) |arg| {
@@ -184,7 +210,7 @@ fn writeUnsigned(out: []u8, value: u64) usize {
 
 /// Build a filesystem-safe `<basename>[_<subcmd>]` label, mirroring
 /// stats.zig.buildLabel but stricter on character classes.
-fn buildLabel(argv: []const []const u8, buf: *[MAX_LABEL_LEN]u8) []const u8 {
+noinline fn buildLabel(argv: []const []const u8, buf: *[MAX_LABEL_LEN]u8) []const u8 {
     if (argv.len == 0) return appendSafe("cmd", buf, 0);
 
     const cmd = argv[0];

@@ -1,6 +1,11 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const util = @import("util");
+const Allocator = std.mem.Allocator;
 const Io = std.Io;
+
+const state_lock_file = ".smll/state.lock";
+const state_lock_name = "/state.lock";
 
 pub fn privateFilePermissions() Io.File.Permissions {
     return if (builtin.os.tag == .windows) .default_file else .fromMode(0o600);
@@ -38,6 +43,25 @@ pub fn openExclusivePrivateLock(io: Io, path: []const u8) !?Io.File {
         error.FileLocksUnsupported => return null,
         else => |e| return e,
     };
+}
+
+pub fn openStateLock(allocator: Allocator, io: Io, home: []const u8) !?Io.File {
+    const lock_path = try util.joinPath(allocator, home, state_lock_file);
+    defer allocator.free(lock_path);
+    try ensurePrivateDir(io, lock_path[0 .. lock_path.len - state_lock_name.len]);
+    return openExclusivePrivateLock(io, lock_path);
+}
+
+pub fn copyFileUnderStateLock(
+    allocator: Allocator,
+    io: Io,
+    home: []const u8,
+    path: []const u8,
+    max_size: usize,
+) ![]u8 {
+    const state_lock = openStateLock(allocator, io, home) catch null;
+    defer if (state_lock) |file| file.close(io);
+    return Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(max_size));
 }
 
 pub fn writePrivateFileAtomic(io: Io, path: []const u8, data: []const u8) !void {
