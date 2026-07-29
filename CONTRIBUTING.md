@@ -19,9 +19,9 @@ contributor-facing rules.
    but discards the next-step evidence is a regression even if tests
    pass.
 4. **Small, no deps, no telemetry.** No new runtime dependencies. No
-   network calls. The only file smll writes outside the working
-   directory is `~/.smll/stats.json` (and, in the future, files under
-   `~/.smll/tee/`).
+   network calls. Local state stays under `~/.smll/` and is limited to
+   stats, append-only command history, locks, and setup ownership metadata.
+   Raw command output must never be persisted.
 5. **Lossless escape hatch is sacred.** `SMLL_LOSSLESS=1` is a contract:
    it must produce byte-identical passthrough for every supported
    command. Any change that breaks that is a bug.
@@ -49,8 +49,8 @@ Out of scope without a prior discussion issue:
 - New runtime dependencies (`build.zig.zon` `.dependencies` must stay
   empty).
 - Telemetry, analytics, or any network call.
-- Daemon mode, IPC, or persistent background state beyond
-  `~/.smll/stats.json`.
+- Daemon mode, IPC, or persistent background state beyond the documented
+  files under `~/.smll/`.
 - Project-local filter overrides (e.g. loading a config file from the
   current working directory). smll's filter set is built-in by design.
 - A plugin or extension system that allows loading filters from outside

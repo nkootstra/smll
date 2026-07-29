@@ -75,6 +75,7 @@ pub const Value = union(enum) {
     null,
     bool: bool,
     integer: i64,
+    number: []const u8,
     string: []const u8,
     array: Array,
     object: Object,
@@ -127,6 +128,7 @@ pub fn writeValue(w: *std.Io.Writer, val: Value) !void {
             }
             try w.writeAll(buf[pos..]);
         },
+        .number => |number| try w.writeAll(number),
         .string => |s| try writeString(w, s),
         .array => |arr| {
             try w.writeByte('[');
@@ -143,9 +145,8 @@ pub fn writeValue(w: *std.Io.Writer, val: Value) !void {
             while (it.next()) |kv| {
                 if (!first) try w.writeByte(',');
                 first = false;
-                try w.writeByte('"');
-                try w.writeAll(kv.key_ptr.*);
-                try w.writeAll("\":");
+                try writeString(w, kv.key_ptr.*);
+                try w.writeByte(':');
                 try writeValue(w, kv.value_ptr.*);
             }
             try w.writeByte('}');
@@ -286,7 +287,10 @@ fn parseString(pa: std.mem.Allocator, input: []const u8, pos: *usize) ParseError
             if (pos.* + 1 >= input.len) return error.UnexpectedEndOfInput;
             has_escape = true;
             pos.* += 2;
-        } else pos.* += 1;
+        } else {
+            if (input[pos.*] < 0x20) return error.InvalidSyntax;
+            pos.* += 1;
+        }
     }
     const raw = input[start..pos.*];
     if (pos.* >= input.len) return error.UnexpectedEndOfInput;
@@ -297,45 +301,78 @@ fn parseString(pa: std.mem.Allocator, input: []const u8, pos: *usize) ParseError
     var i: usize = 0;
     var o: usize = 0;
     while (i < raw.len) {
-        if (raw[i] == '\\' and i + 1 < raw.len) {
-            i += 1;
-            buf[o] = switch (raw[i]) {
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                else => raw[i],
-            };
-            o += 1;
-            i += 1;
-        } else {
+        if (raw[i] != '\\') {
             buf[o] = raw[i];
             o += 1;
             i += 1;
+            continue;
+        }
+
+        i += 1;
+        if (i >= raw.len) return error.UnexpectedEndOfInput;
+        switch (raw[i]) {
+            '"', '\\', '/' => {
+                buf[o] = raw[i];
+                o += 1;
+                i += 1;
+            },
+            'b', 'f', 'n', 'r', 't' => {
+                buf[o] = switch (raw[i]) {
+                    'b' => 0x08,
+                    'f' => 0x0c,
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    else => unreachable,
+                };
+                o += 1;
+                i += 1;
+            },
+            'u' => {
+                if (i + 5 > raw.len) return error.UnexpectedEndOfInput;
+                var codepoint: u21 = try parseHexCodeUnit(raw[i + 1 .. i + 5]);
+                i += 5;
+
+                if (codepoint >= 0xd800 and codepoint <= 0xdbff) {
+                    if (i + 6 > raw.len or raw[i] != '\\' or raw[i + 1] != 'u') return error.InvalidSyntax;
+                    const low = try parseHexCodeUnit(raw[i + 2 .. i + 6]);
+                    if (low < 0xdc00 or low > 0xdfff) return error.InvalidSyntax;
+                    codepoint = 0x10000 + (codepoint - 0xd800) * 0x400 + (low - 0xdc00);
+                    i += 6;
+                } else if (codepoint >= 0xdc00 and codepoint <= 0xdfff) {
+                    return error.InvalidSyntax;
+                }
+
+                var encoded: [4]u8 = undefined;
+                const encoded_len = std.unicode.utf8Encode(codepoint, &encoded) catch return error.InvalidSyntax;
+                @memcpy(buf[o .. o + encoded_len], encoded[0..encoded_len]);
+                o += encoded_len;
+            },
+            else => return error.InvalidSyntax,
         }
     }
     return buf[0..o];
+}
+
+fn parseHexCodeUnit(hex: []const u8) ParseError!u16 {
+    if (hex.len != 4) return error.InvalidSyntax;
+    var bytes: [2]u8 = undefined;
+    _ = std.fmt.hexToBytes(&bytes, hex) catch return error.InvalidSyntax;
+    return std.mem.readInt(u16, &bytes, .big);
 }
 
 fn parseNumber(input: []const u8, pos: *usize) ParseError!Value {
     const start = pos.*;
     if (input[pos.*] == '-') pos.* += 1;
     if (pos.* >= input.len or input[pos.*] < '0' or input[pos.*] > '9') return error.InvalidSyntax;
-    while (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') pos.* += 1;
+    if (input[pos.*] == '0') {
+        pos.* += 1;
+        if (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') return error.InvalidSyntax;
+    } else {
+        while (pos.* < input.len and input[pos.*] >= '0' and input[pos.*] <= '9') pos.* += 1;
+    }
     if (pos.* < input.len and (input[pos.*] == '.' or input[pos.*] == 'e' or input[pos.*] == 'E')) return error.InvalidSyntax;
-    const num_str = input[start..pos.*];
-
-    var neg = false;
-    var idx: usize = 0;
-    if (num_str[0] == '-') {
-        neg = true;
-        idx = 1;
-    }
-    var val: i64 = 0;
-    while (idx < num_str.len and num_str[idx] >= '0' and num_str[idx] <= '9') {
-        val = val *| 10 +| (num_str[idx] - '0');
-        idx += 1;
-    }
-    return .{ .integer = if (neg) -val else val };
+    return .{ .number = input[start..pos.*] };
 }
 
 fn expectParseFails(input: []const u8) !void {
@@ -350,6 +387,13 @@ test "parse rejects malformed JSON" {
     try expectParseFails("t");
     try expectParseFails("{\"plugin\" [\"missing colon\"]}");
     try expectParseFails("{\"plugin\":[]} trailing");
+    try expectParseFails("{\"value\":\"invalid \\q escape\"}");
+    try expectParseFails("{\"value\":\"line\nbreak\"}");
+    try expectParseFails("{\"value\":\"\\uD800\"}");
+    try expectParseFails("{\"value\":\"\\uDC00\"}");
+    try expectParseFails("{\"value\":\"\\uD800\\u0041\"}");
+    try expectParseFails("{\"value\":\"\\uGGGG\"}");
+    try expectParseFails("{\"value\":01}");
 }
 
 test "loadOrCreateObject preserves historical trailing-content tolerance" {
@@ -367,4 +411,53 @@ test "setup JSON preserves UTF-8 string bytes" {
 
     try writeString(&output.writer, "caf\xc3\xa9 \xe2\x98\x83");
     try std.testing.expectEqualStrings("\"caf\xc3\xa9 \xe2\x98\x83\"", output.written());
+}
+
+test "setup JSON round trip decodes every string escape" {
+    const allocator = std.testing.allocator;
+    var parsed = try parse(
+        allocator,
+        "{\"value\":\"quote:\\\" slash:\\\\ solidus:\\/ backspace:\\b formfeed:\\f snowman:\\u2603 emoji:\\uD83D\\uDE03\"}",
+    );
+    defer parsed.deinit();
+
+    const value = parsed.value.object.get("value") orelse return error.MissingValue;
+    try std.testing.expectEqualStrings(
+        "quote:\" slash:\\ solidus:/ backspace:\x08 formfeed:\x0c snowman:\xe2\x98\x83 emoji:\xf0\x9f\x98\x83",
+        value.string,
+    );
+
+    var output = std.Io.Writer.Allocating.init(allocator);
+    defer output.deinit();
+    try writeValue(&output.writer, parsed.value);
+    try std.testing.expectEqualStrings(
+        "{\"value\":\"quote:\\\" slash:\\\\ solidus:/ backspace:\\u0008 formfeed:\\u000c snowman:\xe2\x98\x83 emoji:\xf0\x9f\x98\x83\"}",
+        output.written(),
+    );
+}
+
+test "setup JSON round trip escapes object keys" {
+    const allocator = std.testing.allocator;
+    var parsed = try parse(allocator, "{\"quote\\\" slash\\\\ snowman\\u2603\":true}");
+    defer parsed.deinit();
+
+    var output = std.Io.Writer.Allocating.init(allocator);
+    defer output.deinit();
+    try writeValue(&output.writer, parsed.value);
+    try std.testing.expectEqualStrings(
+        "{\"quote\\\" slash\\\\ snowman\xe2\x98\x83\":true}",
+        output.written(),
+    );
+}
+
+test "setup JSON round trip preserves integers outside i64" {
+    const allocator = std.testing.allocator;
+    const input = "{\"large\":9223372036854775808,\"negative\":-9223372036854775809}";
+    var parsed = try parse(allocator, input);
+    defer parsed.deinit();
+
+    var output = std.Io.Writer.Allocating.init(allocator);
+    defer output.deinit();
+    try writeValue(&output.writer, parsed.value);
+    try std.testing.expectEqualStrings(input, output.written());
 }

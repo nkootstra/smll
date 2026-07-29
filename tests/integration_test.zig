@@ -114,7 +114,6 @@ fn runSmll(allocator: std.mem.Allocator, input: []const u8) !RunResult {
 fn runSmllWithEnv(allocator: std.mem.Allocator, input: []const u8, extra_env: []const [2][]const u8) !RunResult {
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
-    try env.put("SMLL_TEE", "0");
     for (extra_env) |kv| try env.put(kv[0], kv[1]);
 
     const io = std.testing.io;
@@ -188,7 +187,6 @@ fn makeWrapperEnv(
     allocator: std.mem.Allocator,
     bin_dir: []const u8,
     home: []const u8,
-    tee_enabled: bool,
 ) !std.process.Environ.Map {
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     errdefer env.deinit();
@@ -197,7 +195,6 @@ fn makeWrapperEnv(
     defer allocator.free(new_path);
     try env.put("PATH", new_path);
     try env.put("HOME", home);
-    try env.put("SMLL_TEE", if (tee_enabled) "1" else "0");
     return env;
 }
 
@@ -296,13 +293,6 @@ fn expectNoStatsFile(dir: std.Io.Dir) !void {
 fn pathExists(dir: std.Io.Dir, path: []const u8) bool {
     dir.access(std.testing.io, path, .{}) catch return false;
     return true;
-}
-
-fn teePathFromOutput(output: []const u8) ![]const u8 {
-    const marker = "\n(smll: full output saved to ";
-    const start = (std.mem.find(u8, output, marker) orelse return error.MissingTeeBreadcrumb) + marker.len;
-    const end = std.mem.findPos(u8, output, start, ")\n") orelse return error.MissingTeeBreadcrumb;
-    return output[start..end];
 }
 
 fn waitForPath(dir: std.Io.Dir, path: []const u8, timeout_ns: i128) !void {
@@ -675,7 +665,6 @@ fn runSmllWrapperWithStdin(
 
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
-    try env.put("SMLL_TEE", "0");
 
     const io = std.testing.io;
     var child = try std.process.spawn(io, .{
@@ -737,7 +726,6 @@ test "process contract: descendant-held pipes stop after drain grace and preserv
     const start = std.Io.Clock.Timestamp.now(std.testing.io, .awake);
     var result = try runSmllWrapperEnv(allocator, bin_dir, &.{"pipe-holder"}, &.{
         .{ "HOME", home_path },
-        .{ "SMLL_TEE", "1" },
     });
     defer result.deinit(allocator);
     const elapsed_ms = @divTrunc(start.untilNow(std.testing.io).raw.nanoseconds, std.time.ns_per_ms);
@@ -954,7 +942,6 @@ fn runSmllInnerEnv(
 
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
-    try env.put("SMLL_TEE", "0");
     for (extra_env) |kv| try env.put(kv[0], kv[1]);
 
     const io = std.testing.io;
@@ -1135,7 +1122,6 @@ test "meta: --version prints package version" {
     const allocator = std.testing.allocator;
     var env = try std.process.Environ.createMap(std.testing.environ, allocator);
     defer env.deinit();
-    try env.put("SMLL_TEE", "0");
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = &.{ exe_path, "--version" },
         .stdout_limit = .limited(1024),
@@ -1375,7 +1361,6 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     defer allocator.free(path);
     try env.put("PATH", path);
     try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "1");
 
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = &.{ exe_path, "noisy" },
@@ -1392,7 +1377,7 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
 
     const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(1024));
     defer allocator.free(stats_json);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"v\":2") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"v\":3") != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"raw_bytes\":15") != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"displayed_bytes\":15") != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"omitted_bytes\":0") != null);
@@ -1411,10 +1396,9 @@ test "wrapper: stats record agent-visible stdout and stderr bytes" {
     try std.testing.expect(std.mem.find(u8, history, "\"diagnostics\":0") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"saved\":0") != null);
     try std.testing.expect(std.mem.find(u8, history, "\"duration_ms\":") != null);
-    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 }
 
-test "wrapper: tee breadcrumb is diagnostic rather than formatting savings" {
+test "wrapper: failed output is never persisted" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -1447,23 +1431,18 @@ test "wrapper: tee breadcrumb is diagnostic rather than formatting savings" {
     defer wrapped.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 1 }, wrapped.term);
-    try std.testing.expect(std.mem.startsWith(u8, wrapped.stdout, "failure\n"));
-    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "full output saved") != null);
-    const breadcrumb_bytes = wrapped.stdout.len - "failure\n".len;
+    try std.testing.expectEqualStrings("failure\n", wrapped.stdout);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 
     const stats_json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
     defer allocator.free(stats_json);
-    const displayed_field = try std.fmt.allocPrint(allocator, "\"displayed_bytes\":{d}", .{wrapped.stdout.len});
-    defer allocator.free(displayed_field);
-    const diagnostics_field = try std.fmt.allocPrint(allocator, "\"diagnostic_bytes\":{d}", .{breadcrumb_bytes});
-    defer allocator.free(diagnostics_field);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"raw_bytes\":8") != null);
-    try std.testing.expect(std.mem.find(u8, stats_json, displayed_field) != null);
-    try std.testing.expect(std.mem.find(u8, stats_json, diagnostics_field) != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"displayed_bytes\":8") != null);
+    try std.testing.expect(std.mem.find(u8, stats_json, "\"diagnostic_bytes\":0") != null);
     try std.testing.expect(std.mem.find(u8, stats_json, "\"formatting_saved_bytes\":0") != null);
 }
 
-test "wrapper: failure artifacts remain invisible while the shared state lock is held" {
+test "wrapper: analytics remain invisible while the shared state lock is held" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1493,7 +1472,7 @@ test "wrapper: failure artifacts remain invisible while the shared state lock is
     var state_lock: ?std.Io.File = held_state_lock;
     defer if (state_lock) |file| file.close(io);
 
-    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path);
     defer env.deinit();
     var child = try spawnSmllWrapper(allocator, io, &env, &.{"locked-failer"});
     defer child.kill(io);
@@ -1502,21 +1481,15 @@ test "wrapper: failure artifacts remain invisible while the shared state lock is
     try releaseSmllWrapper(io, &child);
 
     // Give the already-running wrapper a bounded opportunity to reach its
-    // post-child persistence boundary. A split implementation publishes tee
-    // state here even though statistics remain blocked by state.lock.
+    // post-child persistence boundary.
     const observation_deadline = std.Io.Clock.real.now(io).toNanoseconds() + 250 * std.time.ns_per_ms;
     while (std.Io.Clock.real.now(io).toNanoseconds() < observation_deadline and
-        !pathExists(tmp.dir, ".smll/tee") and
         !pathExists(tmp.dir, ".smll/stats.json") and
         !pathExists(tmp.dir, ".smll/history.jsonl"))
     {
         try std.Thread.yield();
     }
 
-    if (pathExists(tmp.dir, ".smll/tee")) {
-        std.debug.print("tee directory became visible while .smll/state.lock was held\n", .{});
-        return error.TeeVisibleWhileStateLockHeld;
-    }
     if (pathExists(tmp.dir, ".smll/stats.json")) return error.StatsVisibleWhileStateLockHeld;
     if (pathExists(tmp.dir, ".smll/history.jsonl")) return error.HistoryVisibleWhileStateLockHeld;
 
@@ -1526,9 +1499,9 @@ test "wrapper: failure artifacts remain invisible while the shared state lock is
     defer wrapped.deinit(allocator);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, wrapped.term);
-    try std.testing.expect(std.mem.startsWith(u8, wrapped.stdout, "failure sentinel\n"));
-    try std.testing.expect(std.mem.find(u8, wrapped.stdout, "full output saved") != null);
+    try std.testing.expectEqualStrings("failure sentinel\n", wrapped.stdout);
     try std.testing.expectEqualStrings("stderr sentinel\n", wrapped.stderr);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 
     const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(4096));
     defer allocator.free(stats_json);
@@ -1539,64 +1512,6 @@ test "wrapper: failure artifacts remain invisible while the shared state lock is
     defer allocator.free(history_jsonl);
     try std.testing.expect(std.mem.find(u8, history_jsonl, "\"cmd\":\"locked-failer\"") != null);
     try std.testing.expect(std.mem.find(u8, history_jsonl, "\"exit\":23") != null);
-
-    var tee_dir = try tmp.dir.openDir(io, ".smll/tee", .{ .iterate = true });
-    defer tee_dir.close(io);
-    var tee_it = tee_dir.iterate();
-    const tee_entry = (try tee_it.next(io)) orelse return error.ExpectedTeeLog;
-    try std.testing.expect(tee_entry.kind == .file);
-    try std.testing.expect(std.mem.endsWith(u8, tee_entry.name, ".log"));
-    try std.testing.expect((try tee_it.next(io)) == null);
-    const tee_log = try tee_dir.readFileAlloc(io, tee_entry.name, allocator, .limited(4096));
-    defer allocator.free(tee_log);
-    try std.testing.expect(std.mem.find(u8, tee_log, "failure sentinel\n") != null);
-    try std.testing.expect(std.mem.find(u8, tee_log, "stderr sentinel\n") != null);
-    try std.testing.expect(std.mem.find(u8, tee_log, "# exit: 23") != null);
-}
-
-test "wrapper: tee publication failure omits breadcrumb but preserves matching analytics" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
-    defer allocator.free(home_path);
-    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
-    defer allocator.free(bin_path);
-
-    try writeFakeScript(tmp.dir, "tee-failer",
-        \\#!/bin/sh
-        \\printf 'failure without tee\n'
-        \\exit 31
-    );
-    try tmp.dir.createDirPath(io, ".smll");
-    try tmp.dir.writeFile(io, .{
-        .sub_path = ".smll/tee",
-        .data = "regular file blocks tee directory creation\n",
-    });
-
-    var wrapped = try runSmllWrapperEnv(allocator, bin_path, &.{"tee-failer"}, &.{
-        .{ "HOME", home_path },
-        .{ "SMLL_TEE", "1" },
-    });
-    defer wrapped.deinit(allocator);
-
-    try std.testing.expectEqual(std.process.Child.Term{ .exited = 31 }, wrapped.term);
-    try std.testing.expectEqualStrings("failure without tee\n", wrapped.stdout);
-    try std.testing.expectEqualStrings("", wrapped.stderr);
-
-    const blocker = try tmp.dir.readFileAlloc(io, ".smll/tee", allocator, .limited(128));
-    defer allocator.free(blocker);
-    try std.testing.expectEqualStrings("regular file blocks tee directory creation\n", blocker);
-
-    const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(4096));
-    defer allocator.free(stats_json);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":1") != null);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"tee-failer\":{\"n\":1") != null);
-    const history_jsonl = try tmp.dir.readFileAlloc(io, ".smll/history.jsonl", allocator, .limited(4096));
-    defer allocator.free(history_jsonl);
-    try std.testing.expect(std.mem.find(u8, history_jsonl, "\"cmd\":\"tee-failer\"") != null);
-    try std.testing.expect(std.mem.find(u8, history_jsonl, "\"exit\":31") != null);
 }
 
 test "wrapper: state lock failure preserves command output and exit without state" {
@@ -1622,7 +1537,6 @@ test "wrapper: state lock failure preserves command output and exit without stat
 
     var wrapped = try runSmllWrapperEnv(allocator, bin_path, &.{"lock-failer"}, &.{
         .{ "HOME", home_path },
-        .{ "SMLL_TEE", "1" },
     });
     defer wrapped.deinit(allocator);
 
@@ -1701,7 +1615,7 @@ test "sessions: concurrent wrappers isolate process output and preserve analytic
         \\exit 29
     );
 
-    var env = try makeWrapperEnv(allocator, bin_path, home_path, false);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path);
     defer env.deinit();
     var children: [2]std.process.Child = undefined;
     var spawned: usize = 0;
@@ -1745,7 +1659,7 @@ test "sessions: concurrent wrappers isolate process output and preserve analytic
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history, "\"exit\":29"));
 }
 
-test "sessions: concurrent failures publish isolated tee logs and matching analytics" {
+test "sessions: concurrent failures never persist output and preserve analytics" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -1772,7 +1686,7 @@ test "sessions: concurrent failures publish isolated tee logs and matching analy
         \\exit 41
     );
 
-    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path);
     defer env.deinit();
     var children: [2]std.process.Child = undefined;
     var spawned: usize = 0;
@@ -1791,34 +1705,18 @@ test "sessions: concurrent failures publish isolated tee logs and matching analy
     defer deinitRunResults(allocator, &results);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 37 }, results[0].term);
-    try std.testing.expect(std.mem.startsWith(u8, results[0].stdout, "CLAUDE-FAILURE-RAW-OUT\n"));
+    try std.testing.expectEqualStrings("CLAUDE-FAILURE-RAW-OUT\n", results[0].stdout);
     try std.testing.expectEqualStrings("CLAUDE-FAILURE-RAW-ERR\n", results[0].stderr);
     try std.testing.expect(std.mem.find(u8, results[0].stdout, "OPENCODE-FAILURE") == null);
     try std.testing.expect(std.mem.find(u8, results[0].stderr, "OPENCODE-FAILURE") == null);
 
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 41 }, results[1].term);
-    try std.testing.expect(std.mem.startsWith(u8, results[1].stdout, "OPENCODE-FAILURE-RAW-OUT\n"));
+    try std.testing.expectEqualStrings("OPENCODE-FAILURE-RAW-OUT\n", results[1].stdout);
     try std.testing.expectEqualStrings("OPENCODE-FAILURE-RAW-ERR\n", results[1].stderr);
     try std.testing.expect(std.mem.find(u8, results[1].stdout, "CLAUDE-FAILURE") == null);
     try std.testing.expect(std.mem.find(u8, results[1].stderr, "CLAUDE-FAILURE") == null);
 
-    const claude_log_path = try teePathFromOutput(results[0].stdout);
-    const opencode_log_path = try teePathFromOutput(results[1].stdout);
-    try std.testing.expect(!std.mem.eql(u8, claude_log_path, opencode_log_path));
-
-    const claude_log = try std.Io.Dir.cwd().readFileAlloc(io, claude_log_path, allocator, .limited(8192));
-    defer allocator.free(claude_log);
-    try std.testing.expect(std.mem.find(u8, claude_log, "CLAUDE-FAILURE-RAW-OUT\n") != null);
-    try std.testing.expect(std.mem.find(u8, claude_log, "CLAUDE-FAILURE-RAW-ERR\n") != null);
-    try std.testing.expect(std.mem.find(u8, claude_log, "# exit: 37") != null);
-    try std.testing.expect(std.mem.find(u8, claude_log, "OPENCODE-FAILURE") == null);
-
-    const opencode_log = try std.Io.Dir.cwd().readFileAlloc(io, opencode_log_path, allocator, .limited(8192));
-    defer allocator.free(opencode_log);
-    try std.testing.expect(std.mem.find(u8, opencode_log, "OPENCODE-FAILURE-RAW-OUT\n") != null);
-    try std.testing.expect(std.mem.find(u8, opencode_log, "OPENCODE-FAILURE-RAW-ERR\n") != null);
-    try std.testing.expect(std.mem.find(u8, opencode_log, "# exit: 41") != null);
-    try std.testing.expect(std.mem.find(u8, opencode_log, "CLAUDE-FAILURE") == null);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 
     const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(8192));
     defer allocator.free(stats_json);
@@ -1832,148 +1730,6 @@ test "sessions: concurrent failures publish isolated tee logs and matching analy
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history, "\"cmd\":\"opencode-failure\""));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history, "\"exit\":37"));
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history, "\"exit\":41"));
-}
-
-test "sessions: concurrent failure load retains 20 complete private logs and all analytics" {
-    const allocator = std.testing.allocator;
-    const io = std.testing.io;
-    const failure_count = 24;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const home_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
-    defer allocator.free(home_path);
-    const bin_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
-    defer allocator.free(bin_path);
-
-    for (0..failure_count) |i| {
-        const label = try std.fmt.allocPrint(allocator, "load-failure-{d:0>2}", .{i});
-        defer allocator.free(label);
-        const script = try std.fmt.allocPrint(
-            allocator,
-            "#!/bin/sh\n: > \"$HOME/{s}.ready\"\nIFS= read -r release\nprintf 'LOAD-FAILURE-{d:0>2}-RAW-OUT\\n'\nprintf 'LOAD-FAILURE-{d:0>2}-RAW-ERR\\n' >&2\nexit {d}\n",
-            .{ label, i, i, 50 + i },
-        );
-        defer allocator.free(script);
-        try writeFakeScript(tmp.dir, label, script);
-    }
-
-    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
-    defer env.deinit();
-    var children: [failure_count]std.process.Child = undefined;
-    var spawned: usize = 0;
-    errdefer for (children[0..spawned]) |*child| child.kill(io);
-    while (spawned < failure_count) : (spawned += 1) {
-        const label = try std.fmt.allocPrint(allocator, "load-failure-{d:0>2}", .{spawned});
-        defer allocator.free(label);
-        children[spawned] = try spawnSmllWrapper(allocator, io, &env, &.{label});
-    }
-
-    for (0..failure_count) |i| {
-        const ready_path = try std.fmt.allocPrint(allocator, "load-failure-{d:0>2}.ready", .{i});
-        defer allocator.free(ready_path);
-        try waitForPath(tmp.dir, ready_path, 5 * std.time.ns_per_s);
-    }
-    for (&children) |*child| try releaseSmllWrapper(io, child);
-
-    spawned = 0;
-    var results = try drainChildren(failure_count, allocator, io, &children);
-    defer deinitRunResults(allocator, &results);
-
-    var breadcrumb_paths: [failure_count][]const u8 = undefined;
-    for (results, 0..) |result, i| {
-        try std.testing.expectEqual(std.process.Child.Term{ .exited = @intCast(50 + i) }, result.term);
-        const stdout_sentinel = try std.fmt.allocPrint(allocator, "LOAD-FAILURE-{d:0>2}-RAW-OUT\n", .{i});
-        defer allocator.free(stdout_sentinel);
-        const stderr_sentinel = try std.fmt.allocPrint(allocator, "LOAD-FAILURE-{d:0>2}-RAW-ERR\n", .{i});
-        defer allocator.free(stderr_sentinel);
-        try std.testing.expect(std.mem.startsWith(u8, result.stdout, stdout_sentinel));
-        try std.testing.expectEqualStrings(stderr_sentinel, result.stderr);
-        breadcrumb_paths[i] = try teePathFromOutput(result.stdout);
-        for (breadcrumb_paths[0..i]) |prior| {
-            try std.testing.expect(!std.mem.eql(u8, breadcrumb_paths[i], prior));
-        }
-    }
-
-    const stats_json = try tmp.dir.readFileAlloc(io, ".smll/stats.json", allocator, .limited(64 * 1024));
-    defer allocator.free(stats_json);
-    try std.testing.expect(std.mem.find(u8, stats_json, "\"commands\":24") != null);
-    for (0..failure_count) |i| {
-        const command_field = try std.fmt.allocPrint(allocator, "\"load-failure-{d:0>2}\":{{\"n\":1", .{i});
-        defer allocator.free(command_field);
-        try std.testing.expect(std.mem.find(u8, stats_json, command_field) != null);
-    }
-
-    const history = try tmp.dir.readFileAlloc(io, ".smll/history.jsonl", allocator, .limited(64 * 1024));
-    defer allocator.free(history);
-    try std.testing.expectEqual(@as(usize, failure_count), std.mem.count(u8, history, "\"cmd\":"));
-    for (0..failure_count) |i| {
-        const command_field = try std.fmt.allocPrint(allocator, "\"cmd\":\"load-failure-{d:0>2}\"", .{i});
-        defer allocator.free(command_field);
-        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history, command_field));
-        const exit_field = try std.fmt.allocPrint(allocator, "\"exit\":{d}", .{50 + i});
-        defer allocator.free(exit_field);
-        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, history, exit_field));
-    }
-
-    var tee_dir = try tmp.dir.openDir(io, ".smll/tee", .{ .iterate = true });
-    defer tee_dir.close(io);
-    try std.testing.expectEqual(@as(std.posix.mode_t, 0o700), (try tee_dir.stat(io)).permissions.toMode() & 0o777);
-    var tee_it = tee_dir.iterate();
-    var retained: usize = 0;
-    while (try tee_it.next(io)) |entry| {
-        retained += 1;
-        try std.testing.expectEqual(std.Io.File.Kind.file, entry.kind);
-        try std.testing.expect(std.mem.endsWith(u8, entry.name, ".log"));
-        const stat = try tee_dir.statFile(io, entry.name, .{});
-        try std.testing.expectEqual(@as(std.posix.mode_t, 0o600), stat.permissions.toMode() & 0o777);
-
-        const tee_log = try tee_dir.readFileAlloc(io, entry.name, allocator, .limited(8192));
-        defer allocator.free(tee_log);
-        try std.testing.expect(std.mem.startsWith(u8, tee_log, "# smll tee"));
-        try std.testing.expect(std.mem.find(u8, tee_log, "===== stdout =====\n") != null);
-        try std.testing.expect(std.mem.find(u8, tee_log, "===== stderr =====\n") != null);
-        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, tee_log, "-RAW-OUT\n"));
-        try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, tee_log, "-RAW-ERR\n"));
-
-        var matching_sentinels: usize = 0;
-        for (0..failure_count) |i| {
-            const stdout_sentinel = try std.fmt.allocPrint(allocator, "LOAD-FAILURE-{d:0>2}-RAW-OUT\n", .{i});
-            defer allocator.free(stdout_sentinel);
-            if (std.mem.find(u8, tee_log, stdout_sentinel) == null) continue;
-            matching_sentinels += 1;
-
-            const stderr_sentinel = try std.fmt.allocPrint(allocator, "LOAD-FAILURE-{d:0>2}-RAW-ERR\n", .{i});
-            defer allocator.free(stderr_sentinel);
-            const exit_field = try std.fmt.allocPrint(allocator, "# exit: {d}", .{50 + i});
-            defer allocator.free(exit_field);
-            try std.testing.expect(std.mem.find(u8, tee_log, stderr_sentinel) != null);
-            try std.testing.expect(std.mem.find(u8, tee_log, exit_field) != null);
-        }
-        try std.testing.expectEqual(@as(usize, 1), matching_sentinels);
-    }
-    try std.testing.expectEqual(@as(usize, 20), retained);
-
-    var present_breadcrumbs: usize = 0;
-    for (breadcrumb_paths) |path| {
-        std.Io.Dir.cwd().access(io, path, .{}) catch |err| {
-            try std.testing.expectEqual(error.FileNotFound, err);
-            continue;
-        };
-        present_breadcrumbs += 1;
-    }
-    try std.testing.expectEqual(@as(usize, 20), present_breadcrumbs);
-    try std.testing.expectEqual(@as(usize, 4), failure_count - present_breadcrumbs);
-
-    var state_dir = try tmp.dir.openDir(io, ".smll", .{ .iterate = true });
-    defer state_dir.close(io);
-    var state_it = state_dir.iterate();
-    while (try state_it.next(io)) |entry| {
-        const expected = std.mem.eql(u8, entry.name, "state.lock") or
-            std.mem.eql(u8, entry.name, "stats.json") or
-            std.mem.eql(u8, entry.name, "history.jsonl") or
-            std.mem.eql(u8, entry.name, "tee");
-        try std.testing.expect(expected);
-    }
 }
 
 test "wrapper: concurrent stats writers preserve every update" {
@@ -1997,7 +1753,6 @@ test "wrapper: concurrent stats writers preserve every update" {
     defer allocator.free(path);
     try env.put("PATH", path);
     try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "0");
 
     const writer_count = 16;
     var children: [writer_count]std.process.Child = undefined;
@@ -2205,7 +1960,7 @@ fn expectSingleAnalyticsRecord(dir: std.Io.Dir, allocator: std.mem.Allocator, la
     try std.testing.expect(std.mem.find(u8, history_jsonl, "old-command") == null);
 }
 
-test "reset ordering: ordinary reset before command finalization preserves tee and setup state" {
+test "reset ordering: ordinary reset preserves legacy tee and setup state" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -2223,7 +1978,7 @@ test "reset ordering: ordinary reset before command finalization preserves tee a
     );
     try seedResetState(tmp.dir, ".smll/setup/claude.owned");
 
-    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path);
     defer env.deinit();
     var child = try spawnSmllWrapper(allocator, io, &env, &.{"reset-writer"});
     defer child.kill(io);
@@ -2263,7 +2018,7 @@ test "reset ordering: ordinary reset before command finalization preserves tee a
     }
 }
 
-test "reset ordering: reset all before failing finalization recreates one complete state" {
+test "reset ordering: reset all before failing finalization recreates analytics only" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
@@ -2283,7 +2038,7 @@ test "reset ordering: reset all before failing finalization recreates one comple
     );
     try seedResetState(tmp.dir, ".smll/setup/opencode.owned");
 
-    var env = try makeWrapperEnv(allocator, bin_path, home_path, true);
+    var env = try makeWrapperEnv(allocator, bin_path, home_path);
     defer env.deinit();
     var writer = try spawnSmllWrapper(allocator, io, &env, &.{"reset-failer"});
     defer writer.kill(io);
@@ -2312,8 +2067,7 @@ test "reset ordering: reset all before failing finalization recreates one comple
     var writer_result = try drainChild(allocator, io, &writer);
     defer writer_result.deinit(allocator);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 23 }, writer_result.term);
-    try std.testing.expect(std.mem.startsWith(u8, writer_result.stdout, "post-reset failure\n"));
-    try std.testing.expect(std.mem.find(u8, writer_result.stdout, "full output saved") != null);
+    try std.testing.expectEqualStrings("post-reset failure\n", writer_result.stdout);
     try std.testing.expectEqualStrings("post-reset stderr\n", writer_result.stderr);
 
     const ownership = try tmp.dir.readFileAlloc(io, ".smll/setup/opencode.owned", allocator, .limited(128));
@@ -2321,19 +2075,7 @@ test "reset ordering: reset all before failing finalization recreates one comple
     try std.testing.expectEqualStrings("old ownership\n", ownership);
 
     try expectSingleAnalyticsRecord(tmp.dir, allocator, "reset-failer", 23);
-
-    var tee_dir = try tmp.dir.openDir(io, ".smll/tee", .{ .iterate = true });
-    defer tee_dir.close(io);
-    var tee_it = tee_dir.iterate();
-    const tee_entry = (try tee_it.next(io)) orelse return error.ExpectedTeeLog;
-    try std.testing.expect(tee_entry.kind == .file);
-    try std.testing.expect(!std.mem.eql(u8, tee_entry.name, "old.log"));
-    try std.testing.expect((try tee_it.next(io)) == null);
-    const tee_log = try tee_dir.readFileAlloc(io, tee_entry.name, allocator, .limited(4096));
-    defer allocator.free(tee_log);
-    try std.testing.expect(std.mem.find(u8, tee_log, "post-reset failure\n") != null);
-    try std.testing.expect(std.mem.find(u8, tee_log, "post-reset stderr\n") != null);
-    try std.testing.expect(std.mem.find(u8, tee_log, "# exit: 23") != null);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 }
 
 test "wrapper: explain preserves output and emits stderr footer" {
@@ -2358,7 +2100,6 @@ test "wrapper: explain preserves output and emits stderr footer" {
     defer allocator.free(path);
     try env.put("PATH", path);
     try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "0");
 
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = &.{ exe_path, "--explain", "talker" },
@@ -2397,7 +2138,6 @@ test "wrapper: err and test modes tag history without changing output" {
     defer allocator.free(path);
     try env.put("PATH", path);
     try env.put("HOME", home_path);
-    try env.put("SMLL_TEE", "0");
 
     const err_result = try std.process.run(allocator, std.testing.io, .{
         .argv = &.{ exe_path, "--err", "talker" },
@@ -3221,7 +2961,6 @@ fn runSmllWrapperFakePathLimited(
     const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
     defer allocator.free(new_path);
     try env.put("PATH", new_path);
-    try env.put("SMLL_TEE", "0");
 
     const result = try std.process.run(allocator, std.testing.io, .{
         .argv = full.items,
@@ -3826,7 +3565,7 @@ test "wrapper: nonzero pytest cannot synthesize a passing verdict" {
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
 }
 
-test "wrapper: raw failure fallback does not append a tee recovery breadcrumb" {
+test "wrapper: raw failure fallback never persists output" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -3857,6 +3596,7 @@ test "wrapper: raw failure fallback does not append a tee recovery breadcrumb" {
     try std.testing.expectEqualStrings(raw, result.stdout);
     try std.testing.expectEqualStrings("", result.stderr);
     try std.testing.expectEqual(std.process.Child.Term{ .exited = 2 }, result.term);
+    try std.testing.expect(!pathExists(tmp.dir, ".smll/tee"));
 }
 
 test "pipe-mode: --raw preserves arbitrary input byte-identically" {
@@ -4929,7 +4669,6 @@ fn runSmllWrapperEnv(
     const new_path = try std.fmt.allocPrint(allocator, "{s}:{s}", .{ bin_dir, old_path });
     defer allocator.free(new_path);
     try env.put("PATH", new_path);
-    try env.put("SMLL_TEE", "0");
     for (extra_env) |kv| try env.put(kv[0], kv[1]);
 
     const result = try std.process.run(allocator, std.testing.io, .{

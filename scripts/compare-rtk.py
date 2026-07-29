@@ -161,7 +161,6 @@ def isolated_env(base: dict[str, str], state_dir: pathlib.Path) -> dict[str, str
             "XDG_DATA_HOME": str(state_dir / "xdg-data"),
             "RTK_TELEMETRY_DISABLED": "1",
             "DO_NOT_TRACK": "1",
-            "SMLL_TEE": "0",
             "NO_COLOR": "1",
             "TERM": "dumb",
             "LC_ALL": "C",

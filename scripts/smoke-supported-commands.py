@@ -370,7 +370,6 @@ def isolated_env(base: dict[str, str], temp_root: pathlib.Path, bin_dir: pathlib
             "XDG_CONFIG_HOME": str(temp_root / "xdg-config"),
             "XDG_DATA_HOME": str(temp_root / "xdg-data"),
             "DO_NOT_TRACK": "1",
-            "SMLL_TEE": "0",
             "NO_COLOR": "1",
             "TERM": "dumb",
             "LC_ALL": "C",

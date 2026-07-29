@@ -9,6 +9,17 @@ fixtures live under [`docs/releases/`](./docs/releases/).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-07-29
+
+### Fixed
+
+- Agent setup preserves escaped strings, Unicode object keys, and integers
+  outside the signed 64-bit range when rewriting existing JSON configuration.
+- Local statistics and history labels contain only executable names. Existing
+  vulnerable stats labels are collapsed and merged on the next write.
+- Failed commands no longer persist raw stdout, stderr, or argv under
+  `~/.smll/tee/`. Use `smll --raw <command...>` to rerun without compaction.
+
 ## [1.9.0] - 2026-07-28
 
 ### Added
@@ -496,7 +507,8 @@ migration notes.
 First tagged public release. Earlier development history is preserved
 in the git log.
 
-[Unreleased]: https://github.com/nkootstra/smll/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/nkootstra/smll/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/nkootstra/smll/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/nkootstra/smll/compare/v1.8.2...v1.9.0
 [1.8.2]: https://github.com/nkootstra/smll/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/nkootstra/smll/compare/v1.8.0...v1.8.1

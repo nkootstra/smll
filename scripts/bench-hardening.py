@@ -63,7 +63,6 @@ def regressed(baseline: Summary, candidate: Summary, threshold_pct: float) -> bo
 def clean_env() -> dict[str, str]:
     env = os.environ.copy()
     env["DO_NOT_TRACK"] = "1"
-    env["SMLL_TEE"] = "0"
     env.pop("SMLL_LOSSLESS", None)
     env.pop("SMLL_STREAM", None)
     return env
@@ -129,7 +128,6 @@ def state_write_sample(binary: pathlib.Path, workers: int) -> float:
         env.pop("DO_NOT_TRACK", None)
         env.pop("SMLL_LOSSLESS", None)
         env.pop("SMLL_STREAM", None)
-        env["SMLL_TEE"] = "0"
         env["HOME"] = str(home)
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 

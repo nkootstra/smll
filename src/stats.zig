@@ -15,7 +15,7 @@ const history_lock_file = ".smll/history.lock";
 const tee_dir = ".smll/tee";
 const MAX_TRACKED_CMDS = 32;
 const MAX_JSON_SIZE = 32 * 1024;
-const STATS_SCHEMA_VERSION = 2;
+const STATS_SCHEMA_VERSION = 3;
 
 pub const RecordOptions = history.RecordOptions;
 pub const Bytes = accounting.Bytes;
@@ -145,32 +145,7 @@ fn addBytes(total: *u64, value: usize) void {
 
 pub noinline fn buildLabel(argv: []const []const u8, buf: *[64]u8) []const u8 {
     if (argv.len == 0) return "unknown";
-    const cmd = argv[0];
-    const basename = pathBasename(cmd);
-
-    if (argv.len >= 2) {
-        const sub = argv[1];
-        if (sub.len > 0 and sub[0] != '-') {
-            if (std.mem.eql(u8, basename, "git") or
-                std.mem.eql(u8, basename, "docker") or
-                std.mem.eql(u8, basename, "kubectl") or
-                std.mem.eql(u8, basename, "cargo") or
-                std.mem.eql(u8, basename, "npm") or
-                std.mem.eql(u8, basename, "go") or
-                std.mem.eql(u8, basename, "gh") or
-                std.mem.eql(u8, basename, "bun") or
-                std.mem.eql(u8, basename, "pnpm"))
-            {
-                if (basename.len + 1 + sub.len <= buf.len) {
-                    @memcpy(buf[0..basename.len], basename);
-                    buf[basename.len] = ' ';
-                    @memcpy(buf[basename.len + 1 ..][0..sub.len], sub);
-                    return buf[0 .. basename.len + 1 + sub.len];
-                }
-                return basename;
-            }
-        }
-    }
+    const basename = pathBasename(argv[0]);
     const copy_len = @min(basename.len, buf.len);
     @memcpy(buf[0..copy_len], basename[0..copy_len]);
     return buf[0..copy_len];
@@ -211,8 +186,7 @@ fn parseStats(data: []const u8) Stats {
         while (pos < data.len and (data[pos] == ' ' or data[pos] == ',' or data[pos] == '\n' or data[pos] == '\r' or data[pos] == '\t')) pos += 1;
         if (pos >= data.len or data[pos] == '}') break;
         if (data[pos] != '"') break;
-        var entry = &s.by_cmd[s.cmd_count];
-        entry.* = .{};
+        var entry: CmdEntry = .{};
         entry.name_len = history.readJsonStringAt(data, &pos, &entry.name) orelse break;
         while (pos < data.len and data[pos] != '{') pos += 1;
         if (pos >= data.len) break;
@@ -242,9 +216,45 @@ fn parseStats(data: []const u8) Stats {
             entry.stats.displayed_bytes = findJsonU64(obj_slice, "\"out\":");
             entry.stats.formatting_saved_bytes = 0;
         }
-        s.cmd_count += 1;
+        if (s.schema_version < STATS_SCHEMA_VERSION) {
+            sanitizeLegacyLabel(&entry);
+        }
+
+        var merged = false;
+        for (s.by_cmd[0..s.cmd_count]) |*existing| {
+            if (!std.mem.eql(u8, existing.nameSlice(), entry.nameSlice())) continue;
+            mergeCmdStats(&existing.stats, entry.stats);
+            merged = true;
+            break;
+        }
+        if (!merged) {
+            s.by_cmd[s.cmd_count] = entry;
+            s.cmd_count += 1;
+        }
     }
     return s;
+}
+
+fn sanitizeLegacyLabel(entry: *CmdEntry) void {
+    const label = entry.nameSlice();
+    inline for (.{ "git", "docker", "kubectl", "cargo", "npm", "go", "gh", "bun", "pnpm" }) |command| {
+        if (label.len > command.len and
+            label[command.len] == ' ' and
+            std.mem.eql(u8, label[0..command.len], command))
+        {
+            entry.name_len = command.len;
+            return;
+        }
+    }
+}
+
+fn mergeCmdStats(dst: *CmdStats, src: CmdStats) void {
+    dst.n +|= src.n;
+    dst.raw_bytes +|= src.raw_bytes;
+    dst.displayed_bytes +|= src.displayed_bytes;
+    dst.omitted_bytes +|= src.omitted_bytes;
+    dst.diagnostic_bytes +|= src.diagnostic_bytes;
+    dst.formatting_saved_bytes +|= src.formatting_saved_bytes;
 }
 
 fn loadSnapshot(allocator: Allocator, io: Io, home: []const u8, path: []const u8) Stats {
@@ -315,7 +325,12 @@ fn saveJson(allocator: Allocator, io: Io, path: []const u8, s: Stats) !void {
 }
 
 fn pathBasename(path: []const u8) []const u8 {
-    return if (std.mem.findScalarLast(u8, path, '/')) |idx| path[idx + 1 ..] else path;
+    var i = path.len;
+    while (i > 0) {
+        i -= 1;
+        if (path[i] == '/' or path[i] == '\\') return path[i + 1 ..];
+    }
+    return path;
 }
 
 const QueryMode = enum { stats, discover };
@@ -621,9 +636,9 @@ fn writeGroupedU64(w: *Writer, val: u64) !void {
 // Tests
 // ---------------------------------------------------------------------------
 
-test "buildLabel: git subcommand" {
+test "buildLabel: command arguments are excluded" {
     var buf: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("git status", buildLabel(&.{ "git", "status" }, &buf));
+    try std.testing.expectEqualStrings("git", buildLabel(&.{ "git", "status" }, &buf));
     try std.testing.expectEqualStrings("git", buildLabel(&.{ "git", "--version" }, &buf));
 }
 
@@ -635,7 +650,12 @@ test "buildLabel: plain command" {
 
 test "buildLabel: path stripped" {
     var buf: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("git status", buildLabel(&.{ "/usr/bin/git", "status" }, &buf));
+    try std.testing.expectEqualStrings("git", buildLabel(&.{ "/usr/bin/git", "status" }, &buf));
+}
+
+test "buildLabel: Windows path stripped" {
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("git.exe", buildLabel(&.{"C:\\Program Files\\Git\\cmd\\git.exe"}, &buf));
 }
 
 test "writeHumanBytes: bytes" {
@@ -715,7 +735,7 @@ test "record appends history without full argv" {
 
     const history_data = try tmp.dir.readFileAlloc(std.testing.io, ".smll/history.jsonl", allocator, .limited(4096));
     defer allocator.free(history_data);
-    try std.testing.expect(std.mem.find(u8, history_data, "\"cmd\":\"git status\"") != null);
+    try std.testing.expect(std.mem.find(u8, history_data, "\"cmd\":\"git\"") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "\"filter\":\"git_status\"") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "\"exit\":7") != null);
     try std.testing.expect(std.mem.find(u8, history_data, "\"raw\":120") != null);
@@ -725,6 +745,90 @@ test "record appends history without full argv" {
     try std.testing.expect(std.mem.find(u8, history_data, "secret-token") == null);
 }
 
+test "record excludes command arguments from local state" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+
+    const secret = "VALIDATION_ONLY_TOKEN";
+    const recorded = record(
+        allocator,
+        std.testing.io,
+        home,
+        &.{ "npm", "https://user:" ++ secret ++ "@example.invalid/" },
+        .{ .raw_bytes = 12, .displayed_bytes = 4, .formatting_saved_bytes = 8 },
+        .{},
+    );
+    try std.testing.expect(recorded);
+
+    inline for (.{ ".smll/stats.json", ".smll/history.jsonl" }) |path| {
+        const data = try tmp.dir.readFileAlloc(std.testing.io, path, allocator, .limited(4096));
+        defer allocator.free(data);
+        try std.testing.expect(std.mem.find(u8, data, secret) == null);
+        try std.testing.expect(std.mem.find(u8, data, "\"npm\"") != null);
+    }
+}
+
+test "record removes arguments from existing stats labels" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".smll");
+
+    const secret = "OLD_VALIDATION_TOKEN";
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".smll/stats.json",
+        .data = "{\"v\":2,\"commands\":3,\"raw_bytes\":30,\"displayed_bytes\":11,\"omitted_bytes\":5,\"diagnostic_bytes\":7,\"formatting_saved_bytes\":9,\"by_cmd\":{\"npm https://user:" ++ secret ++ "@example.invalid/\":{\"n\":1,\"raw\":10,\"displayed\":4,\"omitted\":1,\"diagnostics\":2,\"saved\":3},\"npm install\":{\"n\":2,\"raw\":20,\"displayed\":7,\"omitted\":4,\"diagnostics\":5,\"saved\":6}}}\n",
+    });
+
+    try std.testing.expect(record(
+        allocator,
+        std.testing.io,
+        home,
+        &.{ "npm", "install" },
+        .{ .raw_bytes = 12, .displayed_bytes = 4, .omitted_bytes = 3, .diagnostic_bytes = 2, .formatting_saved_bytes = 5 },
+        .{},
+    ));
+
+    const data = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(data);
+    try std.testing.expect(std.mem.find(u8, data, secret) == null);
+    try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, data, "\"npm\":"));
+    try std.testing.expect(std.mem.find(u8, data, "\"npm install\"") == null);
+    try std.testing.expect(std.mem.find(u8, data, "\"npm\":{\"n\":4,\"raw\":42,\"displayed\":15,\"omitted\":8,\"diagnostics\":9,\"saved\":14}") != null);
+}
+
+test "record preserves v3 executable labels containing spaces" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".smll");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".smll/stats.json",
+        .data = "{\"v\":3,\"commands\":1,\"raw_bytes\":10,\"displayed_bytes\":4,\"omitted_bytes\":0,\"diagnostic_bytes\":0,\"formatting_saved_bytes\":6,\"by_cmd\":{\"git helper\":{\"n\":1,\"raw\":10,\"displayed\":4,\"omitted\":0,\"diagnostics\":0,\"saved\":6}}}\n",
+    });
+
+    try std.testing.expect(record(
+        allocator,
+        std.testing.io,
+        home,
+        &.{"git helper"},
+        .{ .raw_bytes = 12, .displayed_bytes = 4, .formatting_saved_bytes = 8 },
+        .{},
+    ));
+
+    const data = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
+    defer allocator.free(data);
+    try std.testing.expect(std.mem.find(u8, data, "\"git helper\":{\"n\":2") != null);
+    try std.testing.expect(std.mem.find(u8, data, "\"git\":") == null);
+}
+
 test "stats command keys are JSON escaped and round trip" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
@@ -732,7 +836,7 @@ test "stats command keys are JSON escaped and round trip" {
     const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(home);
 
-    const recorded = record(allocator, std.testing.io, home, &.{ "git", "sta\"tus\nline\x01\xff" }, .{
+    const recorded = record(allocator, std.testing.io, home, &.{"gi\"t\nline\x01\xff"}, .{
         .raw_bytes = 12,
         .displayed_bytes = 4,
         .formatting_saved_bytes = 8,
@@ -741,13 +845,13 @@ test "stats command keys are JSON escaped and round trip" {
 
     const json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
     defer allocator.free(json);
-    try std.testing.expect(std.mem.find(u8, json, "git sta\\\"tus\\nline\\u0001\\u00ff") != null);
+    try std.testing.expect(std.mem.find(u8, json, "gi\\\"t\\nline\\u0001\\u00ff") != null);
 
     const path = try joinPath(allocator, home, stats_file);
     defer allocator.free(path);
     const loaded = load(allocator, std.testing.io, path);
     try std.testing.expectEqual(@as(usize, 1), loaded.cmd_count);
-    try std.testing.expectEqualSlices(u8, "git sta\"tus\nline\x01\xff", loaded.by_cmd[0].nameSlice());
+    try std.testing.expectEqualSlices(u8, "gi\"t\nline\x01\xff", loaded.by_cmd[0].nameSlice());
 }
 
 test "record creates private state directories and files" {
@@ -883,7 +987,7 @@ test "stats output is token-first with verbose exact bytes" {
     try std.testing.expect(std.mem.find(u8, verbose.written(), "Token estimate: bytes / 4") != null);
 }
 
-test "stats schema v2 separates honest byte categories" {
+test "stats schema v3 separates honest byte categories" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -900,7 +1004,7 @@ test "stats schema v2 separates honest byte categories" {
 
     const json = try tmp.dir.readFileAlloc(std.testing.io, ".smll/stats.json", allocator, .limited(4096));
     defer allocator.free(json);
-    try std.testing.expect(std.mem.find(u8, json, "\"v\":2") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"v\":3") != null);
     try std.testing.expect(std.mem.find(u8, json, "\"raw_bytes\":1000") != null);
     try std.testing.expect(std.mem.find(u8, json, "\"displayed_bytes\":460") != null);
     try std.testing.expect(std.mem.find(u8, json, "\"omitted_bytes\":300") != null);

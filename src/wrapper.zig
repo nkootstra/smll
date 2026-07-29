@@ -55,7 +55,6 @@ const drainChildOutput = wrapper_io.drainChildOutput;
 const exitCode = wrapper_io.exitCode;
 const passthrough = wrapper_io.passthrough;
 const envFlagOn = wrapper_util.envFlagOn;
-const teeEnabled = wrapper_util.teeEnabled;
 const hasArg = wrapper_util.hasArg;
 const isEnvListingInvocation = wrapper_util.isEnvListingInvocation;
 const curlBodyLooksBinary = wrapper_util.curlBodyLooksBinary;
@@ -71,23 +70,12 @@ const AcliFilterFn = *const fn (std.mem.Allocator, []const u8, []const u8, *std.
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CURL_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
-pub const TeeAction = enum {
-    none,
-    publish,
-    publish_with_breadcrumb,
-};
-
 pub const Result = struct {
     exit_code: u8,
     bytes: accounting.Bytes,
     filter_name: []const u8,
     record_stats: bool,
-    tee_action: TeeAction = .none,
 };
-
-pub fn rawOutput() struct { stdout: []const u8, stderr: []const u8 } {
-    return .{ .stdout = last_raw_stdout, .stderr = last_raw_stderr };
-}
 
 /// Emit a hint to stdout when the wrapped child produced no stdout AND no
 /// stderr. Without a hint, agents commonly retry the command in a loop,
@@ -329,15 +317,6 @@ pub noinline fn run(
         try final_stdout.writer.writeAll(output);
     }
 
-    // Shared filesystem publication, breadcrumb accounting, and analytics are
-    // finalized together by main after child execution. Streaming/lossless
-    // modes inherit stdio directly, so there is no private payload to retain.
-    const tee_action: TeeAction = if (exit_code != 0 and !last_output_inherited and
-        (last_raw_stdout.len > 0 or last_raw_stderr.len > 0) and teeEnabled(environ))
-        if (failed_filter_output) .publish else .publish_with_breadcrumb
-    else
-        .none;
-
     const final_stdout_bytes = final_stdout.written().len;
     try writer.writeAll(final_stdout.written());
 
@@ -356,7 +335,6 @@ pub noinline fn run(
         ),
         .filter_name = last_filter_name,
         .record_stats = !last_output_inherited,
-        .tee_action = tee_action,
     };
 }
 
@@ -418,7 +396,7 @@ test "declared omission detection recognizes only smll marker lines" {
 
 /// Public `--raw` execution path. Inherit all three standard streams and pass
 /// the caller's environment through unchanged. Deliberately bypasses capture,
-/// filtering, tee recovery, and statistics.
+/// filtering and statistics.
 pub fn runRaw(
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -501,7 +479,7 @@ fn pathBasename(path: []const u8) []const u8 {
     return if (std.mem.findScalarLast(u8, path, '/')) |idx| path[idx + 1 ..] else path;
 }
 
-/// Set by runWrapperInner to communicate raw stdout+stderr bytes to runWrapper.
+/// Set by runWrapperInner to communicate byte counts to runWrapper.
 var last_input_bytes: usize = 0;
 var last_output_inherited: bool = false;
 /// Coarse dispatch label for `--explain` / `SMLL_DEBUG=1`. Each top-level
@@ -511,9 +489,7 @@ var last_output_inherited: bool = false;
 /// command-family level for v1 — the in/out byte counts in the `--explain`
 /// footer already reveal whether compaction actually happened.
 var last_filter_name: []const u8 = "passthrough";
-/// Raw child streams stashed for the tee-recovery hook in `runWrapper`. The
-/// slices remain valid for the wrapper's lifetime (arena-owned) but only the
-/// outermost `runWrapper` call reads them, so module-level state is safe.
+/// Raw child streams retained for failure fallback while the wrapper runs.
 var last_raw_stdout: []const u8 = &.{};
 var last_raw_stderr: []const u8 = &.{};
 var last_capture_complete: bool = true;

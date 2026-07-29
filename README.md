@@ -145,7 +145,7 @@ smll --stats --verbose             # exact byte counts + bytes / 4 formula
 smll --stats --since 7d            # also supports 24h, 30d, etc.
 smll --stats --project             # current nearest .git project only
 smll --stats --by-command          # command labels sorted by tokens saved
-smll --stats --reset --all         # remove stats, history, subordinate locks, and tee files
+smll --stats --reset --all         # remove stats, history, locks, and legacy tee files
 smll --discover --since 7d         # low-savings, passthrough, top raw output
 smll --discover --project
 smll --filters                     # supported filters and auto-wrap commands
@@ -164,13 +164,16 @@ declared omissions, wrapper-generated diagnostics, and formatting savings.
 Legacy reductions remain unclassified instead of being relabeled as verified
 formatting savings.
 When an output declares an omission with a `--raw` recovery path, smll
-conservatively attributes the whole reduction to omission. Tee breadcrumbs,
-no-output hints, and incomplete captures never count as formatting savings.
-The history stores command labels like `git status`, not full argv, so secrets
-in flags are not captured by default. No network calls are made.
+conservatively attributes the whole reduction to omission. No-output hints and
+incomplete captures never count as formatting savings.
+Stats and history store executable labels like `git`, never command arguments.
+Previously stored argument-bearing stats labels are collapsed and merged on the
+next write. History entries written by older releases are not rewritten; use
+`smll --stats --reset` to remove them. No network calls are made.
 The `~/.smll` directory is private to the current user (`0700` on POSIX), and
-stats, history, lock, and failure-recovery files use `0600` permissions.
-Wrapper mode records raw stdout+stderr and the complete agent-visible stream.
+stats, history, and lock files use `0600` permissions.
+Wrapper mode accounts for raw stdout+stderr bytes and the complete agent-visible
+stream without retaining command output.
 Best-effort — if the files can't be read or written, smll
 silently skips stats and the wrapped command runs normally. Pipe mode (stdin)
 does not record stats. Set `DO_NOT_TRACK=1` to skip local stats/history writes.
@@ -179,21 +182,9 @@ does not record stats. Set `DO_NOT_TRACK=1` to skip local stats/history writes.
 
 When a wrapped command exits non-zero, the compacted output an agent sees may
 have already collapsed the warnings or stack frames that explain the failure.
-smll persists the *raw* stdout+stderr to `~/.smll/tee/<unique-id>_<cmd>.log`
-and appends a one-line breadcrumb so the agent can fetch the full bytes:
-
-```
-fatal: not a git repository (or any of the parent directories): .git
-
-(smll: full output saved to /Users/you/.smll/tee/1716393724812_git_status.log)
-```
-
-Only failed runs are recorded; successful commands write nothing. The newest
-20 logs are kept; older ones are deleted automatically. Best-effort — any I/O
-failure is swallowed so the wrapped command's exit path is never disturbed.
-Secret-bearing argv values are redacted in the log header, but the command's
-raw output may itself contain secrets. Disable with `SMLL_TEE=0` or
-`DO_NOT_TRACK=1`.
+Rerun the command with `smll --raw <command...>` to bypass compaction. smll
+does not persist raw command output; `--stats --reset --all` also removes tee
+logs created by older releases.
 
 Opt in to streaming compaction for supported follow-mode logs and watch-mode
 diagnostics with `SMLL_STREAM=1`. Supported paths include `docker logs -f`,
@@ -248,9 +239,9 @@ their `t.Errorf` context, `npm WARN deprecated: Use X instead`) even when a
 smaller competitor collapses to a count.
 
 **Small, no deps, no telemetry.** The binary stays under 384 KiB (Linux x86_64
-release). No network calls, no telemetry. The only local state smll writes is
-under `~/.smll/`: cumulative stats, append-only command history, and optional
-tee logs for failed commands.
+release). No network calls, no telemetry. Runtime analytics under `~/.smll/`
+consist of cumulative stats and append-only command history; agent setup also
+stores integration ownership metadata there.
 
 ## Migrating from v0.5
 

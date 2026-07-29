@@ -34,7 +34,6 @@ mkdir -p "$OUT_DIR"
         export XDG_DATA_HOME="/tmp/xdg-data"
         export RTK_TELEMETRY_DISABLED=1
         export DO_NOT_TRACK=1
-        export SMLL_TEE=0
         export NO_COLOR=1
         export TERM=dumb
         export LC_ALL=C

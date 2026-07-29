@@ -5,15 +5,6 @@ pub fn envFlagOn(environ_map: *const std.process.Environ.Map, name: []const u8) 
     return v.len > 0 and v[0] == '1';
 }
 
-/// Tee recovery is on by default; users opt out with `SMLL_TEE=0` or
-/// with the conventional `DO_NOT_TRACK=1`.
-pub fn teeEnabled(environ_map: *const std.process.Environ.Map) bool {
-    if (envFlagOn(environ_map, "DO_NOT_TRACK")) return false;
-    const v = environ_map.get("SMLL_TEE") orelse return true;
-    if (v.len > 0 and v[0] == '0') return false;
-    return true;
-}
-
 pub fn hasArg(argv: []const []const u8, arg: []const u8) bool {
     for (argv) |a| if (std.mem.eql(u8, a, arg)) return true;
     return false;

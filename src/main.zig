@@ -11,7 +11,6 @@ const filter_catalog = @import("filter_catalog.zig");
 const pipeline = @import("pipeline.zig");
 const state_io = @import("state_io.zig");
 const stats = @import("stats.zig");
-const tee = @import("tee.zig");
 const wrapper = @import("wrapper.zig");
 const wrapper_git = @import("wrapper_git.zig");
 const wrapper_util = @import("wrapper_util.zig");
@@ -438,7 +437,7 @@ fn runWrappedAndRecord(
     const allocator = arena.allocator();
 
     const start = std.Io.Clock.Timestamp.now(io, .awake);
-    var result = try wrapper.run(
+    const result = try wrapper.run(
         allocator,
         io,
         environ,
@@ -451,7 +450,13 @@ fn runWrappedAndRecord(
     const should_record = result.record_stats and home.len > 0 and !envFlagOn(environ, "DO_NOT_TRACK");
     const recorded = if (should_record) blk: {
         const history_filter_name = try historyFilterName(allocator, mode, result.filter_name);
-        break :blk finalizeState(allocator, io, home, child_argv, history_filter_name, duration_ms, &result, stdout);
+        const state_lock = state_io.openStateLock(allocator, io, home) catch break :blk false;
+        defer if (state_lock) |file| file.close(io);
+        break :blk stats.recordUnderStateLock(allocator, io, home, child_argv, result.bytes, .{
+            .exit_code = result.exit_code,
+            .filter_name = history_filter_name,
+            .duration_ms = duration_ms,
+        });
     } else false;
 
     if (mode == .explain) {
@@ -475,57 +480,6 @@ fn runWrappedAndRecord(
     }
 
     return result.exit_code;
-}
-
-fn finalizeState(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    home: []const u8,
-    child_argv: []const []const u8,
-    history_filter_name: []const u8,
-    duration_ms: u64,
-    result: *wrapper.Result,
-    stdout: *std.Io.Writer,
-) bool {
-    var tee_path: ?[]const u8 = null;
-    var recorded = false;
-    {
-        const state_lock = state_io.openStateLock(allocator, io, home) catch return false;
-        defer if (state_lock) |file| file.close(io);
-
-        if (result.tee_action != .none) {
-            const raw = wrapper.rawOutput();
-            tee_path = tee.recordUnderStateLock(
-                allocator,
-                io,
-                home,
-                child_argv,
-                result.exit_code,
-                raw.stdout,
-                raw.stderr,
-            );
-            if (tee_path) |path| {
-                if (result.tee_action == .publish_with_breadcrumb) {
-                    const breadcrumb_bytes = tee.breadcrumbBytes(path);
-                    result.bytes.displayed_bytes += breadcrumb_bytes;
-                    result.bytes.diagnostic_bytes += breadcrumb_bytes;
-                }
-            }
-        }
-
-        recorded = stats.recordUnderStateLock(allocator, io, home, child_argv, result.bytes, .{
-            .exit_code = result.exit_code,
-            .filter_name = history_filter_name,
-            .duration_ms = duration_ms,
-        });
-    }
-
-    // Process output remains outside the shared-state lock. The breadcrumb is
-    // emitted only after its matching private log was successfully published.
-    if (tee_path) |path| {
-        if (result.tee_action == .publish_with_breadcrumb) tee.writeBreadcrumb(stdout, path) catch {};
-    }
-    return recorded;
 }
 
 fn historyFilterName(allocator: std.mem.Allocator, mode: RunMode, filter_name: []const u8) ![]const u8 {

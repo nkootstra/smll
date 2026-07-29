@@ -63,9 +63,11 @@ the attack surface. The classes of issue we treat as security bugs:
   configuration files. Failures must leave the original file recoverable
   via the `.bak.smll` backup. Silent partial writes or backup overwrites
   are in scope.
-- **Argv / environment leakage.** Anything written to `~/.smll/stats.json`
-  or `~/.smll/tee/` (when introduced) must not contain command arguments,
-  environment values, URLs with embedded tokens, or similar secrets.
+- **Argv / environment leakage.** New records written to `~/.smll/stats.json`
+  or `~/.smll/history.jsonl` must not contain command arguments, environment
+  values, URLs with embedded tokens, or similar secrets. Raw command output
+  must not be persisted. History records written by releases before v1.9.1 are
+  not rewritten; `smll --stats --reset` removes them.
 - **Tag / formula spoofing.** The release workflow requires annotated,
   signature-verified tags and pins actions to commit SHAs. Bypasses of
   either gate are in scope.

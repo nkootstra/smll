@@ -443,6 +443,42 @@ test "opencode setup validates config before writing plugin files" {
     try std.testing.expect((try setup_io.readFileOptional(allocator, std.testing.io, index_path)) == null);
 }
 
+test "opencode setup preserves escaped JSON and large integers" {
+    const allocator = std.testing.allocator;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const home = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
+    defer allocator.free(home);
+    try tmp.dir.createDirPath(std.testing.io, ".config/opencode");
+    try tmp.dir.writeFile(std.testing.io, .{
+        .sub_path = ".config/opencode/opencode.json",
+        .data = "{\"escaped\\\"key\":\"line\\nsnowman \\u2603\",\"large\":9223372036854775808,\"plugin\":[]}\n",
+    });
+
+    var stdout = std.Io.Writer.Allocating.init(allocator);
+    defer stdout.deinit();
+    var stderr = std.Io.Writer.Allocating.init(allocator);
+    defer stderr.deinit();
+    try std.testing.expectEqual(@as(u8, 0), try setupOpencode(allocator, std.testing.io, home, false, &stdout.writer, &stderr.writer));
+
+    const updated = try tmp.dir.readFileAlloc(
+        std.testing.io,
+        ".config/opencode/opencode.json",
+        allocator,
+        .limited(64 * 1024),
+    );
+    defer allocator.free(updated);
+    var parsed = try setup_json.parse(allocator, updated);
+    defer parsed.deinit();
+
+    const escaped = parsed.value.object.get("escaped\"key") orelse return error.MissingEscapedValue;
+    try std.testing.expectEqualStrings("line\nsnowman \xe2\x98\x83", escaped.string);
+    const large = parsed.value.object.get("large") orelse return error.MissingLargeValue;
+    try std.testing.expectEqualStrings("9223372036854775808", large.number);
+    const plugins = parsed.value.object.get("plugin") orelse return error.MissingPluginValue;
+    try std.testing.expectEqual(@as(usize, 1), plugins.array.items.len);
+}
+
 test "opencode unsetup leaves modified owned plugin files and warns" {
     const allocator = std.testing.allocator;
     var tmp = std.testing.tmpDir(.{});
